@@ -176,14 +176,16 @@ def build(manifest_path: pathlib.Path, width: int) -> pathlib.Path:
   .badge {{ background: #2f9e63; color: #fff; border-radius: 50%; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; flex: none; }}
   .result {{ margin-left: auto; color: #2f9e63; font-size: 14px; flex: none; }}
   .result.ng {{ color: #d64545; }}
-  .body {{ display: flex; gap: 20px; align-items: flex-start; }}
-  .shots {{ display: flex; gap: 12px; flex-wrap: wrap; flex: none; max-width: 62%; }}
+  .body {{ display: block; }}
+  .shots {{ display: flex; gap: 12px; flex-wrap: wrap; margin: 0 0 14px; }}
   .shots figure {{ margin: 0; }}
-  .shots img {{ width: 260px; border-radius: 10px; border: 1px solid rgba(128,128,128,.35); display: block; }}
-  .shots.multi img {{ width: 220px; }}
+  .shots img {{ width: 400px; max-width: 100%; border-radius: 10px; border: 1px solid rgba(128,128,128,.35); display: block; }}
+  /* 複数端末を並べたときはカード幅を分け合う。1枚だけのときは伸ばさない */
+  .shots.multi figure {{ flex: 1 1 0; min-width: 0; }}
+  .shots.multi img {{ width: 100%; }}
   .shots figcaption {{ margin-bottom: 6px; font-size: 12px; color: #777; text-align: center; }}
   .body p {{ margin: 0; font-size: 14px; color: #444; white-space: pre-wrap; }}
-  @media (max-width: 640px) {{ .body {{ flex-direction: column; }} .shots {{ max-width: 100%; }} }}
+  @media (max-width: 640px) {{ .shots {{ flex-direction: column; }} .shots.multi img {{ width: 100%; }} }}
   footer {{ margin-top: 24px; font-size: 12px; color: #888; white-space: pre-wrap; }}
 </style>
 </head>
