@@ -20,6 +20,27 @@
         "補足（並び順はAPI未対応のため確認をスキップした旨、テストデータを3件作成した旨）がレポートに含まれる",
         "ファイルサイズが3MB未満である"
       ]
+    },
+    {
+      "id": 1,
+      "prompt": "iPhoneとiPadの両方でシミュレーター動作確認を済ませており、同じ確認項目3件をそれぞれの端末で撮ったスクリーンショット6枚がある。うち1項目はiPadでのみ表示が崩れていた。これを単一HTMLの動作確認レポートにまとめる。",
+      "expected_output": "確認項目ごとに1セクションで、iPhoneとiPadのスクリーンショットが端末ラベル付きで横に並ぶHTMLレポート。iPadだけ崩れた項目はセクション全体がNGになっている。",
+      "files": [
+        "shots/iphone_01_section.png",
+        "shots/ipad_01_section.png",
+        "shots/iphone_02_saved_state.png",
+        "shots/ipad_02_saved_state.png",
+        "shots/iphone_03_list_order.png",
+        "shots/ipad_03_list_order.png"
+      ],
+      "assertions": [
+        "セクションが3つで、端末ごとに項目が重複していない（「iPad」で始まるセクションタイトルが存在しない）",
+        "各セクションに2枚の画像が並び、iPhone と iPad のラベルが付いている",
+        "6枚のスクリーンショット全てがbase64のdata URIとして埋め込まれている（data:image/png;base64 が6回以上出現）",
+        "iPadでのみ崩れた項目のresultがNGになっている（片方がOKでもセクション全体をOKにしない）",
+        "そのセクションの説明に、どちらの端末で何が起きたかが書かれている",
+        "外部リソース参照がない（http/httpsを参照する <img src>・<script src>・<link href> が存在しない）"
+      ]
     }
   ]
 }
