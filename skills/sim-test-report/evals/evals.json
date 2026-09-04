@@ -1,0 +1,25 @@
+{
+  "skill_name": "sim-test-report",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "iOSシミュレーターでの動作確認が完了しており、スクリーンショット4枚（各画面の説明付き）と確認内容の情報（Issue番号・ブランチ・環境・変更概要・補足）がある。これを単一HTMLの動作確認レポートにまとめる。",
+      "expected_output": "画像がbase64で埋め込まれた自己完結の単一HTMLレポート。確認項目ごとにスクショ・説明・OK/NGが並び、ヘッダにIssue/ブランチ/環境/実施日、フッタに補足がある。",
+      "files": [
+        "shots/01_list_favorite_button.png",
+        "shots/02_favorite_filled.png",
+        "shots/03_favorite_tab.png",
+        "shots/04_logged_out_disabled.png"
+      ],
+      "assertions": [
+        "単一のHTMLファイルが出力ディレクトリに生成されている",
+        "4枚のスクリーンショット全てがbase64のdata URIとして埋め込まれている（data:image/png;base64 が4回以上出現）",
+        "外部リソース参照がない（http/httpsを参照する <img src>・<script src>・<link href> が存在しない）",
+        "4つの確認項目すべてに対応する記述がある（一覧のボタン表示・登録後の星の塗りつぶし・お気に入りタブへの反映・未ログイン時の非活性）",
+        "メタ情報としてIssue番号(123)・ブランチ名・確認環境(iPhone 16 / iOS 26.0)・実施日が含まれる",
+        "補足（並び順はAPI未対応のため確認をスキップした旨、テストデータを3件作成した旨）がレポートに含まれる",
+        "ファイルサイズが3MB未満である"
+      ]
+    }
+  ]
+}
