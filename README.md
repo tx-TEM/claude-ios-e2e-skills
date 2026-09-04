@@ -11,12 +11,7 @@ Claude Code の個人用スキル・サブエージェント置き場。マシ�
 
 ## セットアップ
 
-```bash
-git clone git@github.com:tx-TEM/claude-skills.git ~/Program/claude-skills
-~/Program/claude-skills/install.sh
-```
-
-`install.sh` は `~/.claude/` から `skills/*/` と `agents/*.md` へシンボリックリンクを張る。何度実行してもよく、リンク先に実体がある場合は動かさずに中断する。`--dry-run` を付けると何が起きるかだけ表示する。反映されるのはセッションを開き直したタイミング。clone元や置き場所は環境変数で上書きできる（`install.sh` 冒頭を参照）。
+clone したディレクトリで `./install.sh` を実行する。`~/.claude/` から `skills/*/` と `agents/*.md` へシンボリックリンクを張る。何度実行してもよく、リンク先に実体がある場合は動かさずに中断する。`--dry-run` を付けると何が起きるかだけ表示する。反映されるのはセッションを開き直したタイミング。
 
 ## 前提
 

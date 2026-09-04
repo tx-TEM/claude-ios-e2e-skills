@@ -6,15 +6,13 @@
 #   ./install.sh              差し替えを実行する
 #   ./install.sh --dry-run    何が起きるかだけ表示する
 #
+# clone したリポジトリの中から実行する。
+#
 # 環境変数で上書きできる。
-#   CLAUDE_SKILLS_DIR    clone先          既定 ~/Program/claude-skills
 #   CLAUDE_CONFIG_DIR    Claudeの設定     既定 ~/.claude
-#   CLAUDE_SKILLS_REPO_URL clone元       既定 SSHが通ればSSH、駄目ならHTTPS
 
 set -euo pipefail
 
-REPO_SSH="git@github.com:tx-TEM/claude-skills.git"
-REPO_HTTPS="https://github.com/tx-TEM/claude-skills.git"
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 
 DRY_RUN=0
@@ -33,45 +31,13 @@ run() {
   fi
 }
 
-# スクリプト自身がリポジトリの中にあるなら、それを使う。単体で置かれた場合だけcloneする
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-if [ -d "$SCRIPT_DIR/skills" ] && [ -d "$SCRIPT_DIR/agents" ]; then
-  REPO_DIR="$SCRIPT_DIR"
-else
-  REPO_DIR="${CLAUDE_SKILLS_DIR:-$HOME/Program/claude-skills}"
+# スクリプトはリポジトリの中に置かれている前提
+REPO_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if [ ! -d "$REPO_DIR/skills" ] || [ ! -d "$REPO_DIR/agents" ]; then
+  echo "$REPO_DIR に skills/ と agents/ が無い。cloneしたリポジトリの中から実行する。" >&2
+  exit 1
 fi
-
-# SSH鍵をGitHubに登録済みの端末はSSH、そうでなければHTTPSでcloneする。
-# HTTPSはprivateリポジトリなので資格情報が要る。gh をインストール済みなら
-# `gh auth setup-git` を一度流しておけば通る
-pick_repo_url() {
-  if [ -n "${CLAUDE_SKILLS_REPO_URL:-}" ]; then
-    echo "$CLAUDE_SKILLS_REPO_URL"
-    return
-  fi
-  if GIT_TERMINAL_PROMPT=0 \
-     GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new" \
-     git ls-remote "$REPO_SSH" >/dev/null 2>&1; then
-    echo "$REPO_SSH"
-  else
-    echo "$REPO_HTTPS"
-  fi
-}
-
-if [ -d "$REPO_DIR/.git" ]; then
-  echo "リポジトリ: $REPO_DIR"
-else
-  REPO_URL="$(pick_repo_url)"
-  echo "clone: $REPO_URL -> $REPO_DIR"
-  run mkdir -p "$(dirname "$REPO_DIR")"
-  if ! GIT_TERMINAL_PROMPT=0 run git clone "$REPO_URL" "$REPO_DIR"; then
-    echo >&2
-    echo "cloneに失敗した。privateリポジトリなので認証が要る。次のどちらかを済ませてから再実行する。" >&2
-    echo "  SSH   : この端末の公開鍵をGitHubに登録する (https://github.com/settings/keys)" >&2
-    echo "  HTTPS : gh auth login してから gh auth setup-git" >&2
-    exit 1
-  fi
-fi
+echo "リポジトリ: $REPO_DIR"
 
 # $1 リンク元  $2 リンク先  $3 表示名
 link() {
