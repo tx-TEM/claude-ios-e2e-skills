@@ -51,8 +51,10 @@ import time
 
 DEFAULT_WIDTH = 750
 PNG_PAGE_WIDTH = 900
-# PRコメントで拡大しても文字が読めるようRetina相当で描画する
-PNG_SCALE = 2
+# PRコメントで拡大しても文字が読めるよう、等倍より大きく描画する。
+# 上限を超えたら順に落とす。GitHubの画像添付は10MBまでで、超えると貼れない
+PNG_SCALES = (1.5, 1.25, 1)
+PNG_MAX_BYTES = 10 * 1024 * 1024
 CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 CHROME_TIMEOUT = 180
 
@@ -243,16 +245,22 @@ def render_png(html_path: pathlib.Path) -> pathlib.Path | None:
         return None
     height = measure_page_height(html_path)
     png_path = html_path.with_suffix(".png")
-    png_path.unlink(missing_ok=True)
-    run_chrome(
-        ["--headless=new", "--disable-gpu", "--hide-scrollbars",
-         f"--force-device-scale-factor={PNG_SCALE}", f"--window-size={PNG_PAGE_WIDTH},{height}",
-         f"--screenshot={png_path}", f"file://{html_path}"],
-        done=stable_file(png_path),
-    )
-    if not png_path.exists():
-        print("PNGを書き出せませんでした。", file=sys.stderr)
-        return None
+    for scale in PNG_SCALES:
+        png_path.unlink(missing_ok=True)
+        run_chrome(
+            ["--headless=new", "--disable-gpu", "--hide-scrollbars",
+             f"--force-device-scale-factor={scale}", f"--window-size={PNG_PAGE_WIDTH},{height}",
+             f"--screenshot={png_path}", f"file://{html_path}"],
+            done=stable_file(png_path),
+        )
+        if not png_path.exists():
+            print("PNGを書き出せませんでした。", file=sys.stderr)
+            return None
+        if png_path.stat().st_size <= PNG_MAX_BYTES:
+            return png_path
+        print(f"PNGが{PNG_MAX_BYTES // 1024 // 1024}MBを超えたため倍率を下げて再描画します"
+              f"（scale {scale}）。", file=sys.stderr)
+    print("最小倍率でも上限を超えました。PRコメントには貼れない可能性があります。", file=sys.stderr)
     return png_path
 
 
