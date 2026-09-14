@@ -1,7 +1,7 @@
 ---
 name: sim-driver
 description: iOSシミュレーターを操作して動作確認の証跡スクリーンショットを撮る。テストケースと出力先を渡すと導線をたどってPNGを保存し、項番・ファイル名・観測した事実を返す。sim-test-reportスキルの手順1から呼ばれる。判定やレポート生成はしない。
-model: opus
+model: sonnet
 tools: mcp__Claude_Code_iOS_Simulator__control, Bash
 ---
 
