@@ -1,0 +1,7 @@
+{
+  "maestro": {
+    "enabled": true,
+    "flow_root": ".cache/maestro/${app_repo}",
+    "apps": {}
+  }
+}

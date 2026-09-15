@@ -1,3 +1,9 @@
 .DS_Store
 __pycache__/
 *.pyc
+
+# Maestro のフローキャッシュ（端末ローカル。アプリのソースから生成する）
+.cache/
+
+# 端末ごとの設定上書き
+skills/*/config.local.json
