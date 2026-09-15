@@ -49,7 +49,7 @@ description: iOSシミュレーターでの動作確認を、テストケース�
 
 聞くときは、対象の導線・このテストで何回通るか・作らない場合どうなるかを添える。
 
-> 項番2・4・6が同じ「商品を見つける」画面を経由します。iPhoneとiPadの両方で撮るので6回通ります。
+> 項番2・4・6が同じ一覧画面を経由します。iPhoneとiPadの両方で撮るので6回通ります。
 > ここまでの遷移を Maestro のフローにすると、2回目以降は数十秒で済み、撮り直しても同じ結果になります。
 > 作成にはアプリのソースを読んでセレクタを確定させる作業が要ります。作りますか。
 > 作らない場合は、これまでどおり sim-driver が毎回画面を見ながら辿ります。
@@ -91,10 +91,10 @@ xcrun simctl list devices booted
 
 - `flow_dirs` — フローを探すディレクトリを**優先順**に並べる。上から見て最初に存在したものを使う
 - 置き換わる変数は3つ
-  - `${app_repo_path}` — 対象アプリのリポジトリの絶対パス（例: `/Users/me/Program/Zaim-iOS`）
-  - `${app_repo}` — そのディレクトリ名（例: `Zaim-iOS`）
+  - `${app_repo_path}` — 対象アプリのリポジトリの絶対パス（例: `/Users/me/Program/MyApp-iOS`）
+  - `${app_repo}` — そのディレクトリ名（例: `MyApp-iOS`）
   - `${skill_dir}` — このスキルのディレクトリ
-- `apps` — アプリ個別の上書き。`{"Zaim-iOS": {"flow_dirs": ["~/somewhere/flows"]}}` のように書く
+- `apps` — アプリ個別の上書き。`{"MyApp-iOS": {"flow_dirs": ["~/somewhere/flows"]}}` のように書く
 - `enabled` — `false` にすると Maestro を使わせず、sim-driver に全部任せる
 
 `~` は展開する。相対パスはこのリポジトリのルートから解決する。

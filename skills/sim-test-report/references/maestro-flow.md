@@ -58,9 +58,9 @@ YAMLを一気に書く。** 実行は確認のためで、試行錯誤の手段�
 ```yaml
 - runFlow: common/launch.yaml
 - runFlow:
-    file: common/goto_product_find.yaml
+    file: common/goto_search_result.yaml
     env:
-      KEYWORD: "納豆"
+      KEYWORD: "<検索語>"
 ```
 
 **`launchApp` を含めるかどうかで用途が変わる。** 含むフローはアプリを再起動して最初の画面に戻す。
@@ -71,10 +71,10 @@ sim-driver が途中から遷移だけさせたいときに使えないので、
 UIが変わったときに、どこを見直せばいいか分からなくなる。ファイル名と行番号を書く。
 
 ```yaml
-# タブの id は RootTabViewController.swift:218 の
-# "tabbar-button-" + item.imageName 規則から。imageName は RootTabViewModel.swift:42
+# タブの id は MainTabViewController.swift:84 の
+# "tab-" + item.name 規則から。name は MainTabViewModel.swift:20
 - tapOn:
-    id: "tabbar-button-tabbar_input_off"
+    id: "tab-search"
 ```
 
 ## 落とし穴
@@ -95,18 +95,18 @@ UIが変わったときに、どこを見直せばいいか分からなくなる
 
 ```yaml
 - tapOn:
-    text: "履歴を確認"
+    text: "<ダイアログのボタン>"
     waitToSettleTimeoutMs: 0
 ```
 
 **テキストセレクタは部分一致する。**
-`食料品` は `食料品品` にも当たる。画面内の別要素に当たって想定外の画面へ飛ぶこともある
-（タブ名のつもりで書いた文字列が、本文中のリンクに当たって Web ビューが開いた実例がある）。
+`設定` は `設定変更` にも当たる。画面内の別要素に当たって想定外の画面へ飛ぶこともある
+（タブ名のつもりで書いた文字列が、本文中のリンクに当たって Web ビューが開くことがある）。
 完全一致は `^...$`、識別子があるなら `id:` を優先する。
 
 **大量のデータを持つ一覧画面では Maestro は動かない。**
 アクセシビリティの階層を読んで操作するため、階層が大きいとスナップショットの取得自体に失敗する。
-実測では記録9,868件の履歴画面で `maestro hierarchy` が120秒でタイムアウトし
+数千件規模の一覧画面で `maestro hierarchy` が120秒でタイムアウトし
 `Device became unreachable during viewHierarchy` になった。
 Maestro 側では回避できないので、この画面を通る確認はフローにせず sim-driver に任せる。
 
