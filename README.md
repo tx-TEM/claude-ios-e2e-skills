@@ -19,6 +19,7 @@ clone したディレクトリで `./install.sh` を実行する。`~/.claude/` 
 - iOSシミュレーターMCP（`mcp__Claude_Code_iOS_Simulator__control`）
 - `python3` — レポート生成スクリプト
 - Google Chrome — 1枚PNGの描画に使う。無い場合はHTMLのみ生成される
+- Maestro — シミュレーター操作に使う。`install.sh` が mobile-dev-inc のタップから入れる（素の `brew install maestro` は別物が入るので注意）
 
 ## レポート単体で生成する
 
