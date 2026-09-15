@@ -1,10 +1,11 @@
 {
   "maestro": {
     "enabled": true,
-    "flow_dirs": [
+    "shared_dirs": [
       "${app_repo_path}/maestro",
       "${skill_dir}/.cache/${app_repo}"
     ],
+    "cases_dir": "${skill_dir}/.cache/${app_repo}/cases",
     "apps": {}
   }
 }

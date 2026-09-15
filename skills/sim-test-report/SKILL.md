@@ -74,38 +74,32 @@ xcrun simctl list devices booted
 
 アプリによっては、画面遷移などの定型操作を Maestro のフロー（YAML）として用意してある。sim-driver はそれで目的の画面まで移動し、そこから先の細かい操作だけを自分で行う。深い階層への遷移ほど往復が多く座標の誤りも起きやすいので、定型の導線は任せる価値が大きい。
 
-置き場所は `skills/sim-test-report/config.json` で決める。
+置き場所は `skills/sim-test-report/config.json` で決める。**共有する部品と、確認ごとのフローで置き場所が違う。**
 
 ```json
 {
   "maestro": {
     "enabled": true,
-    "flow_dirs": [
+    "shared_dirs": [
       "${app_repo_path}/maestro",
       "${skill_dir}/.cache/${app_repo}"
     ],
+    "cases_dir": "${skill_dir}/.cache/${app_repo}/cases",
     "apps": {}
   }
 }
 ```
 
-- `flow_dirs` — フローを探すディレクトリを**優先順**に並べる。上から見て最初に存在したものを使う
-- 置き換わる変数は3つ
-  - `${app_repo_path}` — 対象アプリのリポジトリの絶対パス（例: `/Users/me/Program/MyApp-iOS`）
-  - `${app_repo}` — そのディレクトリ名（例: `MyApp-iOS`）
-  - `${skill_dir}` — このスキルのディレクトリ
-- `apps` — アプリ個別の上書き。`{"MyApp-iOS": {"flow_dirs": ["~/somewhere/flows"]}}` のように書く
+- `shared_dirs` — **共有する部品**（`common/` と `README.md`）を探す場所。上から見て最初に存在したものを使う。既定ではアプリのリポジトリの `maestro/` を先に見る。汎用の導線はアプリの実装に紐づくので、セレクタの出どころと同じリポジトリで版管理し、UIを変えた人が直せる状態にしておく
+- `cases_dir` — **確認ごとのフロー**を置く場所。常に端末ローカル。確認のたびに増えて肥大化するうえ、その場限りのものなので共有しない
+- `apps` — アプリ個別の上書き。`{"MyApp-iOS": {"shared_dirs": ["~/somewhere/flows"]}}` のように書く
 - `enabled` — `false` にすると Maestro を使わせず、sim-driver に全部任せる
 
-`~` は展開する。相対パスはこのリポジトリのルートから解決する。
-
-既定では**アプリのリポジトリの `maestro/` を先に見る。** フローはアプリの実装に紐づくので、本来はアプリ側に置いてチームで共有するのが筋。無い場合だけ、このスキル配下の `.cache/<アプリのリポジトリ名>/` を使う（gitignore 済みの端末ローカルな退避先で、他の端末には運ばれない）。
-
-**新しくフローを作るときも同じ順で決める。** アプリのリポジトリに `maestro/` があればそこへ、無ければキャッシュへ置く。
+置き換わる変数は3つ。`${app_repo_path}`（対象アプリのリポジトリの絶対パス）、`${app_repo}`（そのディレクトリ名）、`${skill_dir}`（このスキルのディレクトリ）。`~` は展開し、相対パスはこのリポジトリのルートから解決する。
 
 同じディレクトリに `config.local.json` があれば、その内容を上書きとして重ねる（端末ごとの差異を入れる場所。gitignore 済み）。
 
-解決した**絶対パス**を sim-driver に渡す。`enabled` が `false` のとき、解決先が存在しないとき、そのアプリのフローが無いときは渡さない。渡さなければ sim-driver は全て自分で操作する。
+**解決した絶対パスを2つとも sim-driver に渡す。** `enabled` が `false` のとき、`shared_dirs` がどれも存在しないときは渡さない。渡さなければ sim-driver は全て自分で操作する。
 
 フローが無いアプリでも撮影はできる。用意するかどうかは、同じ導線を何度も撮るかで決める。
 
@@ -115,7 +109,7 @@ xcrun simctl list devices booted
 - **対象デバイスのUDID**（`xcrun simctl list devices booted` で確認したもの）と、ファイル名に使う端末名（`iphone` / `ipad` など）
 - 証跡の出力先ディレクトリ。`~/Desktop/sim-test-report-<テーマのslug>/shots/`（例: `sim-test-report-favorite-from-list`）。呼ぶ前に `mkdir -p` で作っておく。リポジトリ内には作らない
 - 前提条件（アカウント、必要なデータ、事前設定）
-- **Maestro のフローのディレクトリ**（上で解決した絶対パス。無ければ渡さない）
+- **共有フローのディレクトリ**と**ケースフローのディレクトリ**（上で解決した絶対パス。無ければ渡さない）
 
 複数端末を見る場合は端末ごとに呼ぶ。1回のサブエージェントで2台を行き来させると、座標系の切り替わりで誤操作が増える。
 
