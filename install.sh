@@ -3,7 +3,7 @@
 # ~/.claude/ から、このリポジトリのスキルとサブエージェントへシンボリックリンクを張る。
 # 何度実行してもよい。リンク先に実体がある場合は、動かさずその場で中断する。
 #
-#   ./install.sh              差し替えを実行する
+#   ./install.sh              差し替えとMaestroの導入を実行する
 #   ./install.sh --dry-run    何が起きるかだけ表示する
 #
 # clone したリポジトリの中から実行する。
@@ -79,6 +79,33 @@ for f in "$REPO_DIR"/agents/*.md; do
   [ -f "$f" ] || continue
   link "$f" "$CLAUDE_DIR/agents/$(basename "$f")" "$(basename "$f")"
 done
+
+# シミュレーター操作に使う Maestro を入れる。
+#
+# 注意点が2つある。
+#  - brew が依存として openjdk を最新へ上げる。Javaのバージョンを固定している
+#    プロジェクトがある端末では先に確認する
+#  - 匿名アナリティクスが既定で有効。MAESTRO_CLI_NO_ANALYTICS に任意の値を入れると切れる。
+#    このスクリプトでは触らない。~/.zshenv 側に置く
+#
+# 素の `brew install maestro` は別物（runmaestro.ai の macOS アプリ）が入る。
+# 必ず mobile-dev-inc のタップを指定する。
+install_maestro() {
+  if command -v maestro >/dev/null 2>&1; then
+    echo "    導入済み: maestro"
+    return
+  fi
+  if ! command -v brew >/dev/null 2>&1; then
+    echo "    brew が無いため飛ばした。https://docs.maestro.dev/maestro-cli/how-to-install-maestro-cli を参照" >&2
+    return
+  fi
+  run brew tap mobile-dev-inc/tap
+  run brew trust --formula mobile-dev-inc/tap/maestro
+  run brew install mobile-dev-inc/tap/maestro
+}
+
+echo "Maestro:"
+install_maestro
 
 echo
 echo "セッションを開き直すと反映される。"
