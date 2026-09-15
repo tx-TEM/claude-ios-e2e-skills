@@ -80,15 +80,28 @@ xcrun simctl list devices booted
 {
   "maestro": {
     "enabled": true,
-    "flow_root": ".cache/maestro/${app_repo}",
+    "flow_dirs": [
+      "${app_repo_path}/maestro",
+      "${skill_dir}/.cache/${app_repo}"
+    ],
     "apps": {}
   }
 }
 ```
 
-- `flow_root` — フローを探すディレクトリ。相対パスはこのリポジトリのルートから解決する。`${app_repo}` は対象アプリのリポジトリのディレクトリ名（例: `Zaim-iOS`）に置き換わる。`~` は展開する
-- `apps` — アプリ個別の上書き。`{"Zaim-iOS": {"flow_root": "~/Program/Zaim/Zaim-iOS/maestro"}}` と書くと、そのアプリだけ別の場所を見る
+- `flow_dirs` — フローを探すディレクトリを**優先順**に並べる。上から見て最初に存在したものを使う
+- 置き換わる変数は3つ
+  - `${app_repo_path}` — 対象アプリのリポジトリの絶対パス（例: `/Users/me/Program/Zaim-iOS`）
+  - `${app_repo}` — そのディレクトリ名（例: `Zaim-iOS`）
+  - `${skill_dir}` — このスキルのディレクトリ
+- `apps` — アプリ個別の上書き。`{"Zaim-iOS": {"flow_dirs": ["~/somewhere/flows"]}}` のように書く
 - `enabled` — `false` にすると Maestro を使わせず、sim-driver に全部任せる
+
+`~` は展開する。相対パスはこのリポジトリのルートから解決する。
+
+既定では**アプリのリポジトリの `maestro/` を先に見る。** フローはアプリの実装に紐づくので、本来はアプリ側に置いてチームで共有するのが筋。無い場合だけ、このスキル配下の `.cache/<アプリのリポジトリ名>/` を使う（gitignore 済みの端末ローカルな退避先で、他の端末には運ばれない）。
+
+**新しくフローを作るときも同じ順で決める。** アプリのリポジトリに `maestro/` があればそこへ、無ければキャッシュへ置く。
 
 同じディレクトリに `config.local.json` があれば、その内容を上書きとして重ねる（端末ごとの差異を入れる場所。gitignore 済み）。
 

@@ -1,7 +1,10 @@
 {
   "maestro": {
     "enabled": true,
-    "flow_root": ".cache/maestro/${app_repo}",
+    "flow_dirs": [
+      "${app_repo_path}/maestro",
+      "${skill_dir}/.cache/${app_repo}"
+    ],
     "apps": {}
   }
 }
