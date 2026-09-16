@@ -185,7 +185,20 @@ button.accessibilityIdentifier = "<画面>-<役割>"
 
 **同じ文言の要素が複数あると、意図しないほうに当たる。** タブ名のつもりで書いた文字列が本文中の同じ文言に当たって別の画面が開くことがある。`id:` があるならそちらを優先し、無ければ `index:` で絞る。
 
-**大量のデータを持つ一覧画面では Maestro は動かない。** 階層が大きいとスナップショットの取得自体に失敗し、`maestro hierarchy` が数十秒〜120秒でタイムアウトして `Device became unreachable during viewHierarchy` になる。回避できないので、この画面を通る区間はフローにせず sim-driver に任せる。
+**大量のデータを持つ一覧画面では Maestro は動かない。** 階層が大きいとスナップショットの取得自体に失敗する。症状は2つあり、どちらも同じ原因。
+
+```
+Device became unreachable during viewHierarchy
+App crashed or stopped while executing flow     ← クラッシュログは残らない
+```
+
+後者はアプリの不具合に見えるが、`~/Library/Logs/DiagnosticReports` と
+シミュレーターのコンテナ内を見てもクラッシュログが無ければ階層取得の失敗。**リトライしない。**
+
+**制約は画面ではなくデータ量に付く。** 件数が少なければ同じ画面でも通る。そして
+**その画面を経由して到達する画面も踏めない。** 一覧から切り替えるサブページなどが該当する。
+
+1回試すのに数分かかるので、`README.md` の記録を必ず先に読む。
 
 ## 確認のしかた
 
