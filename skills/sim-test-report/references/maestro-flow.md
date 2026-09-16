@@ -18,6 +18,29 @@
 
 `String(localized: .fooBar)` 形式は `.xcstrings` のキーが `fooBar` ではなくキャメルケース変換前の文字列のことがある。日本語側から逆引きすると確実。
 
+**逆引きは必要な文言をまとめて1回で引く。** 1語ずつ引かない。検索そのものは1秒もかからず、かかるのは往復のほう。
+
+```bash
+python3 - <<'PY'
+import json, glob, sys
+targets = {"<文言1>", "<文言2>", "<文言3>"}          # 要るものを全部並べる
+for f in glob.glob("**/*.xcstrings", recursive=True):
+    if any(x in f for x in ("Pods", "worktrees", ".bundle")): continue
+    try: d = json.load(open(f))
+    except Exception: continue
+    for k, v in (d.get("strings") or {}).items():
+        ja = (((v.get("localizations") or {}).get("ja") or {}).get("stringUnit") or {}).get("value")
+        if ja and ja.strip() in targets:
+            print(f"{ja}\t{k}\t{f}")
+PY
+```
+
+出たキーも、使用箇所をまとめて1回で引く。
+
+```bash
+grep -rnE 'tr\("(<キー1>|<キー2>|<キー3>)"\)' --include='*.swift' <ソース>
+```
+
 storyboard の `title` と実機に出る文字列が違うことがある。最後は実行して確かめる。
 
 ## どこに置くか

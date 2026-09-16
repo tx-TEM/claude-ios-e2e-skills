@@ -48,6 +48,17 @@ tools: Bash, Read, Write, Grep, Glob
 
 調べ方は `<このスキルのディレクトリ>/references/maestro-flow.md` にある。**そちらに従う。** ここには書き写さない。
 
+**調べたいことを先に列挙して、まとめて1回で叩く。** 検索そのものは1秒もかからない。かかるのは1回ごとの往復で、1つの grep に1ターン使うとそれだけで時間が溶ける。
+
+```bash
+S=<アプリのソースのパス>
+echo "=== 識別子 ==="   ; grep -rn 'accessibilityIdentifier' --include='*.swift' $S | head -30
+echo "=== 遷移の分岐 ===" ; grep -rn 'didSelectRowAt\|performSegue\|pushViewController' --include='*.swift' $S | head -30
+echo "=== 対象の画面 ===" ; grep -rn '<画面を表すクラス名>' --include='*.swift' $S | head -20
+```
+
+文言の逆引きも、必要なキーをまとめて1回で引く。1語ずつ引かない。
+
 **出どころが書けない行は「確定できず」と明記する。** ソースを読んでも決まらないものを、それらしいセレクタで埋めない。
 
 **確定できない行が多いなら、YAMLを書かずに報告して止まる。** どこが決まらなかったかを返し、呼び出し元の判断を仰ぐ。
@@ -68,7 +79,7 @@ tools: Bash, Read, Write, Grep, Glob
 maestro test --udid <UDID> --test-output-dir <作業用ディレクトリ>/out <flow.yaml>
 ```
 
-**`--test-output-dir` を必ず渡す。** 省くと `~/.maestro/tests/` に溜まり続ける。
+**`--test-output-dir` を必ず渡す。** 省くと `~/.maestro/tests/` に溜まり続ける。作業用ディレクトリが渡されていない場合は `mktemp -d` で自分で作る。**フラグを落とす理由にはしない。**
 
 **緑になるまでを仕事に含める。** 落ちたら出力の `screen-hierarchy/` と `screenshots/` を読む。再操作しない。
 
