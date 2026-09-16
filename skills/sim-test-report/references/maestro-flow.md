@@ -10,7 +10,6 @@
 
 | 欲しいもの | 見る場所 |
 |---|---|
-| 安定した識別子 | `grep -rn 'accessibilityIdentifier' --include='*.swift'` |
 | ボタン・画面の文言 | `Localizable.xcstrings` / `.strings` を `tr("キー")` から逆引き |
 | 画像ボタンの名前 | `UIImage(resource:)` / `UIImage(named:)` のアセット名。階層にはこの名前で出る |
 | 遷移の分岐 | `didSelectRowAt` / `performSegue` / `pushViewController` |
@@ -18,21 +17,32 @@
 
 `String(localized: .fooBar)` 形式は `.xcstrings` のキーが `fooBar` ではなくキャメルケース変換前の文字列のことがある。日本語側から逆引きすると確実。
 
-**逆引きは必要な文言をまとめて1回で引く。** 1語ずつ引かない。検索そのものは1秒もかからず、かかるのは往復のほう。
+**逆引きは、索引を一度ファイルに作ってから引く。** 必要な文言は調査が進むにつれて増えるので、先に全部を列挙することはできない。索引にしておけば、増えても追加のコストがかからない。**索引そのものは読み込まない。ファイルに置いて grep する。**
 
 ```bash
-python3 - <<'PY'
-import json, glob, sys
-targets = {"<文言1>", "<文言2>", "<文言3>"}          # 要るものを全部並べる
-for f in glob.glob("**/*.xcstrings", recursive=True):
-    if any(x in f for x in ("Pods", "worktrees", ".bundle")): continue
-    try: d = json.load(open(f))
-    except Exception: continue
-    for k, v in (d.get("strings") or {}).items():
-        ja = (((v.get("localizations") or {}).get("ja") or {}).get("stringUnit") or {}).get("value")
-        if ja and ja.strip() in targets:
-            print(f"{ja}\t{k}\t{f}")
-PY
+python3 - <ソース> <索引の出力先> <<'EOS'
+import json, glob, sys, os
+root, out = sys.argv[1], sys.argv[2]
+n = 0
+with open(out, "w") as w:
+    for f in glob.glob(os.path.join(root, "**/*.xcstrings"), recursive=True):
+        if any(x in f for x in ("Pods", "worktrees", ".bundle", "DerivedData")): continue
+        try: d = json.load(open(f))
+        except Exception: continue
+        mod = f.split("/Sources/")[-1].split("/")[0] if "/Sources/" in f else os.path.basename(os.path.dirname(f))
+        for k, v in (d.get("strings") or {}).items():
+            ja = (((v.get("localizations") or {}).get("ja") or {}).get("stringUnit") or {}).get("value")
+            if ja and ja.strip():
+                w.write(f"{ja.strip()}\t{k}\t{mod}\n"); n += 1
+print(f"{n} 件")
+EOS
+```
+
+数千件でも1秒かからない。以後はここを引く。
+
+```bash
+grep -P '^(<文言1>|<文言2>)\t' <索引>     # 画面の文言からキーを引く
+grep -P '\t(<キー1>|<キー2>)\t' <索引>   # キーから画面の文言を引く
 ```
 
 出たキーも、使用箇所をまとめて1回で引く。

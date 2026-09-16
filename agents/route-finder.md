@@ -44,18 +44,32 @@ tools: Bash, Read, Grep, Glob
 | 5 | 3 | <値の入力など> | `${<引数名>}` | **引数** | — |
 | 6-8 | — | — | — | **Maestro では踏めない** | — |
 
-**調べたいことを先に列挙して、まとめて1回で叩く。** 検索そのものは1秒もかからない。かかるのは1回ごとの往復で、1つの grep に1ターン使うとそれだけで時間が溶ける。
+**1ファイルずつ読まない。関係するディレクトリをまとめて1回 grep して、鎖ごと取る。**
+
+導線は「画面 → その画面のモデル → セルの種類 → 遷移先」と繋がっていて、次にどこへ飛ぶかは読むまで分からない。1ホップ1往復で辿ると同じファイルに何度も戻ることになり、そこで時間が溶ける。**先に範囲を広く取って、鎖を一度に出す。**
 
 ```bash
-S=<アプリのソースのパス>
-echo "=== 識別子 ==="   ; grep -rn 'accessibilityIdentifier' --include='*.swift' $S | head -30
-echo "=== 遷移の分岐 ===" ; grep -rn 'didSelectRowAt\|performSegue\|pushViewController' --include='*.swift' $S | head -30
-echo "=== 対象の画面 ===" ; grep -rn '<画面を表すクラス名>' --include='*.swift' $S | head -20
+rg -n --no-heading -g '*.swift' \
+  -e 'didSelectRowAt|performSegue|pushViewController|present\(' \
+  -e 'enum .*CellType|^\s*case [a-z]' \
+  <対象の画面のディレクトリ> <対応するモデルのディレクトリ>
 ```
 
-文言の逆引きも、必要なキーをまとめて1回で引く。1語ずつ引かない。
+同じ範囲をファイルごとに読むと十数往復・数万トークンかかる。この形なら1往復で、出てくる鎖は同じ。
 
-**ファイルを丸読みしない。** ViewController は700行前後あり、1本読むと以降の全ターンが重くなる。`grep -n -B2 -A5` か `sed -n '<開始>,<終了>p'` で必要な数行だけ取る。
+**`cat` でファイルを丸読みしない。** ViewController は700行前後ある。中身を見るのは行番号つきの grep か `sed -n '<開始>,<終了>p'` に限る。何があるか分からないファイルは、まずセレクタと遷移だけを抜く。
+
+```bash
+grep -nE 'tr\(|String\(localized|Text\(|Button\(|setTitle|@IBAction|didSelectRowAt|present\(|pushViewController|^\s*(final |public )?(class|struct|enum|extension) ' <ファイル>
+```
+
+これで1〜2割の量になり、出てくる行がそのままセレクタの候補になる。
+
+**文言の逆引きは、索引を一度作ってから引く。** 必要な文言は調査が進むにつれて増えるので、先に全部は列挙できない。索引をファイルに作れば、増えても追加コストがかからない。**索引そのものは読み込まず、grep する。**
+
+**パスは毎回フルパスで書く。** Bash は呼び出しごとに作業ディレクトリが戻るので、変数に入れて短く書くと空振りしてやり直しになる。
+
+**識別子は、あれば使う。** 無ければ文言でいく。探し回らない。
 
 調べ方の詳細は `<このスキルのディレクトリ>/references/maestro-flow.md` にある。**そちらに従う。** ここには書き写さない。
 
