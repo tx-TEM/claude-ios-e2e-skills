@@ -20,7 +20,7 @@ kind で3つのファイルに振り分ける。アクセスの仕方が違う�
 同じ内容が既に最新なら追記しない。ファイルの大きさが実行回数ではなく
 知識の量に比例するようにするため。
 """
-import collections, json, shutil, sys, time
+import collections, json, re, shutil, sys, time
 from datetime import date
 from pathlib import Path
 
@@ -40,6 +40,16 @@ KEYS = {
     "transition": ("kind", "from", "to"),
     "capability": ("kind", "screen", "what"),
 }
+
+# 画面のキーには2種類ある。<モジュール>.<型名> はコードに由来する。
+# それ以外は画面のタイトル文字列で、文言が変わると別のキーになり、
+# 記録が分断される。
+# 実測で、ホームは Tokubai.MainPageV2View、クーポンは「クーポン」だった。
+# クーポン画面には型名のidが1つも無いので、代わりに使える鍵は無い。
+TYPE_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z0-9_.]+$")
+
+def key_kind(screen):
+    return "型名" if TYPE_KEY.match(screen or "") else "表示文字列"
 
 def die(msg):
     sys.exit(f"cache.py: {msg}")
@@ -131,7 +141,10 @@ def cmd_screen(bundle, screen):
     if not recs:
         print(f"{screen} の記録は無い")
         return
-    print(f"# {screen}")
+    kind = key_kind(screen)
+    print(f"# {screen}   （キー: {kind}）")
+    if kind == "表示文字列":
+        print("※ キーが画面のタイトルなので、文言が変わると記録が分かれる")
     for k, head in (("selector", "安定セレクタ"), ("dup", "重複"), ("note", "罠")):
         rows = [r for r in recs if r.get("kind") == k]
         if not rows:
