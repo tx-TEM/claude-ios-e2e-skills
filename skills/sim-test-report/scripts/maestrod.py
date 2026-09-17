@@ -3,6 +3,7 @@
 
   maestrod.py inspect <UDID> <名前> [幅 高さ] [bundle id]   画面を読む
   maestrod.py run     <UDID> '<flow yaml>'      操作する
+  maestrod.py tap     <UDID> <x> <y> <名前> [幅 高さ] [bundle]   タップ→確認→記録
   maestrod.py stop    <UDID>                    そのデバイスのデーモンを止める
 
 なぜデーモンを挟むのか、理由が2つある。
@@ -23,7 +24,7 @@
   run         0.3秒   （maestro test は17.7〜25秒）
   実ジェスチャーを伴う scroll は5〜8秒。これは操作そのものの時間
 """
-import json, os, socket, subprocess, sys, threading, time, queue
+import json, os, re, socket, subprocess, sys, threading, time, queue
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -241,6 +242,73 @@ def show_cache(bundle, udid, text):
         print("\n--- この画面の記録 ---")
         print(body)
 
+def cmd_inspect(udid, name, w, h, bundle):
+    r = call(udid, "inspect_screen", {"device_id": udid})
+    if not r["ok"] or not r["text"].lstrip().startswith('{"ui_schema"'):
+        sys.exit(f"画面を読めなかった: {r['text'][:200]}\n"
+                 "ドライバが壊れている可能性がある。maestrod.py stop してやり直す。")
+    WORK.mkdir(parents=True, exist_ok=True)
+    raw = WORK / f"{name}.json"
+    raw.write_text(r["text"])
+    out = subprocess.run([sys.executable, str(HERE / "elements.py"), str(raw), w, h],
+                         capture_output=True, text=True)
+    (WORK / f"{name}.txt").write_text(out.stdout)
+    # タップ時に「その座標に何があったか」を引くために、端末ごとの
+    # 直近ぶんを固定名で置く。名前は毎回変わるので追えないため。
+    (WORK / f".last_dump_{udid}.txt").write_text(out.stdout)
+    print("\n".join(l for l in out.stdout.splitlines() if "×" not in l))
+    print(f"生: {raw} / 全行: {WORK / (name + '.txt')}", file=sys.stderr)
+    show_cache(bundle, udid, out.stdout)
+    return
+
+def label_at(udid, x, y, tol=40):
+    """直前のダンプで、その座標にいちばん近い要素のラベル。"""
+    f = WORK / f".last_dump_{udid}.txt"
+    if not f.exists():
+        return None
+    best = None
+    for line in f.read_text().splitlines():
+        m = re.match(r"\s*\((-?\d+),(-?\d+)\)\s+\S+\s+(.*)", line)
+        if not m:
+            continue
+        cx, cy, lab = int(m.group(1)), int(m.group(2)), m.group(3).strip()
+        d = abs(cx - x) + abs(cy - y)
+        if d <= tol and (best is None or d < best[0]):
+            best = (d, lab)
+    return best[1] if best else None
+
+def cmd_tap(udid, x, y, name, w, h, bundle):
+    """タップし、変化を確認し、遷移していたら記録する。
+
+    記録をエージェントの判断に任せると残らない。タップの前後は
+    どのみちダンプを取るので、ここで拾えば書き漏らしが起きない。
+    自動で書くのは「画面が変わった」という曖昧さのない事実だけ。
+    タップが効かなかった/効いたが遷移しない、の区別は判断が要るので
+    手で書く。
+    """
+    before = (WORK / f".last_screen_{udid}").read_text().strip() \
+        if (WORK / f".last_screen_{udid}").exists() else None
+    on = label_at(udid, x, y)
+
+    r = call(udid, "run", {"device_id": udid,
+                           "yaml": f"appId: {bundle or 'x'}\n---\n- tapOn:\n    point: {x},{y}\n"})
+    if not (r["ok"] and r["text"].lstrip().startswith('{"success":true')):
+        sys.exit(f"タップできなかった: {r['text'][:200]}")
+
+    cmd_inspect(udid, name, w, h, bundle)
+
+    after = (WORK / f".last_screen_{udid}").read_text().strip() \
+        if (WORK / f".last_screen_{udid}").exists() else None
+    print(f"\nタップ ({x},{y})" + (f" 「{on}」" if on else "") +
+          (f" → {before} のまま" if before == after else f" → {before} から {after} へ"))
+    if bundle and before and after and before != after:
+        rec = {"kind": "transition", "from": before, "to": after,
+               "how": {"by": "tap", "at": [x, y], "on": on}, "ok": True}
+        subprocess.run([sys.executable, str(HERE / "cache.py"), "add", bundle,
+                        json.dumps(rec, ensure_ascii=False)],
+                       capture_output=True, text=True)
+        print(f"遷移を記録した: {before} → {after}")
+
 def main():
     if len(sys.argv) < 2:
         sys.exit(__doc__)
@@ -262,20 +330,12 @@ def main():
         udid, name = sys.argv[2], sys.argv[3]
         w, h = (sys.argv[4], sys.argv[5]) if len(sys.argv) > 5 else ("390", "844")
         bundle = sys.argv[6] if len(sys.argv) > 6 else None
-        r = call(udid, "inspect_screen", {"device_id": udid})
-        if not r["ok"] or not r["text"].lstrip().startswith('{"ui_schema"'):
-            sys.exit(f"画面を読めなかった: {r['text'][:200]}\n"
-                     "ドライバが壊れている可能性がある。maestrod.py stop してやり直す。")
-        WORK.mkdir(parents=True, exist_ok=True)
-        raw = WORK / f"{name}.json"
-        raw.write_text(r["text"])
-        out = subprocess.run([sys.executable, str(HERE / "elements.py"), str(raw), w, h],
-                             capture_output=True, text=True)
-        (WORK / f"{name}.txt").write_text(out.stdout)
-        print("\n".join(l for l in out.stdout.splitlines() if "×" not in l))
-        print(f"生: {raw} / 全行: {WORK / (name + '.txt')}", file=sys.stderr)
-        show_cache(bundle, udid, out.stdout)
-        return
+        return cmd_inspect(udid, name, w, h, bundle)
+    if cmd == "tap":
+        udid, x, y, name = sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), sys.argv[5]
+        w, h = (sys.argv[6], sys.argv[7]) if len(sys.argv) > 7 else ("390", "844")
+        bundle = sys.argv[8] if len(sys.argv) > 8 else None
+        return cmd_tap(udid, x, y, name, w, h, bundle)
     if cmd == "run":
         udid, yaml = sys.argv[2], sys.argv[3]
         r = call(udid, "run", {"device_id": udid, "yaml": yaml})
