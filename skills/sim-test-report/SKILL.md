@@ -54,8 +54,11 @@ xcrun simctl list devices booted
 呼ぶ前に進捗ログを作り、`Monitor` を張る。sim-driver は1項目終えるごとにここへ1行書き、その行がそのまま通知として届く。
 
 ```bash
+python3 <このスキルのディレクトリ>/scripts/cache.py sweep
 touch ~/Desktop/sim-test-report-<slug>/progress.log
 ```
+
+`sweep` は14日より古い作業用ファイルを消し、画面マップを畳む。ダンプの生JSONは1実行で約3MBになるので、呼ばないと溜まり続ける。消えるのは生JSONだけで、抽出結果の `.txt`（1つ2KB）は残るため、過去の実行で何を見ていたかは追える。
 
 ```
 Monitor(command: "tail -f ~/Desktop/sim-test-report-<slug>/progress.log",
