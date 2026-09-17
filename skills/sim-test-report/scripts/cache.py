@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """画面マップのキャッシュ。観測を追記し、引くときに畳む。
 
-  cache.py add    <bundle> '<json1行>'      変化があったときだけ追記する
+  cache.py add    <bundle> '<json1行>' --device <UDID>   変化があったときだけ追記する
   cache.py screen <bundle> <画面識別子>      その画面の selector・重複・罠
   cache.py find   <bundle> <語>...           その操作ができる画面を探す
   cache.py path   <bundle> <起点> <行き先>   経路を出す
@@ -25,6 +25,7 @@ from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent / ".cache"
+WORK = Path(__file__).resolve().parent.parent / ".work"
 WORK = Path(__file__).resolve().parent.parent / ".work"
 
 # add のたびに行数を見て、これを超えたら勝手に畳む。手で呼ばなくても
@@ -81,9 +82,32 @@ def fold(recs):
 def payload(rec):
     return {k: v for k, v in rec.items() if k != "at"}
 
-def cmd_add(bundle, raw):
+def current_screen(udid):
+    """いまその端末が居る画面。inspect が毎回ここに書いている。"""
+    if not udid:
+        return None
+    f = WORK / f".last_screen_{udid}"
+    return f.read_text().strip() if f.exists() else None
+
+def cmd_add(bundle, raw, udid=None):
     rec = json.loads(raw)
     kind = rec.get("kind") or die("kind が無い")
+
+    # 画面名は発明させない。ダンプが出した識別子で埋める。
+    # 自由文字列で受けていたせいで、同じチラシビューアが FlyerViewer と
+    # leaflet_viewer の2つに分かれ、片方の罠が引けなくなった実例がある。
+    cur = current_screen(udid)
+    for field in ("screen", "from"):
+        if field == "screen" and kind not in ("selector", "dup", "note", "capability"):
+            continue
+        if field == "from" and kind != "transition":
+            continue
+        if not rec.get(field):
+            if not cur:
+                die(f"{field} が無い。--device <UDID> を渡すか、先に inspect する")
+            rec[field] = cur
+        elif cur and rec[field] != cur and field == "screen":
+            print(f"注意: screen={rec[field]!r} だが、いまの画面は {cur!r}", file=sys.stderr)
     p = path_for(bundle, kind, rec.get("screen"))
     stored = dict(rec)
     if p.parent.name == "screens":
@@ -257,7 +281,12 @@ def main():
         sys.exit(__doc__)
     cmd, bundle, rest = sys.argv[1], sys.argv[2], sys.argv[3:]
     if cmd == "add":
-        cmd_add(bundle, rest[0])
+        udid = None
+        if "--device" in rest:
+            i = rest.index("--device")
+            udid = rest[i + 1] if len(rest) > i + 1 else None
+            rest = rest[:i] + rest[i + 2:]
+        cmd_add(bundle, rest[0], udid)
     elif cmd == "screen":
         cmd_screen(bundle, rest[0])
     elif cmd == "find":

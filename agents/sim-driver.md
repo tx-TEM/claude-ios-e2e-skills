@@ -147,12 +147,15 @@ python3 $C path   <bundle> <起点> <行き先>  # 経路
 踏んで分かったことを追記する。
 
 ```bash
-python3 $C add <bundle> '{"kind":"selector","screen":"<画面識別子>","sel":"#foo","type":"id","ok":true}'
-python3 $C add <bundle> '{"kind":"dup","screen":"<画面識別子>","sel":"plus","n":4}'
-python3 $C add <bundle> '{"kind":"note","screen":"<画面識別子>","text":"<罠>"}'
-python3 $C add <bundle> '{"kind":"transition","from":"A","to":"B","how":{"by":"tap","sel":".*B.*"},"ok":true}'
-python3 $C add <bundle> '{"kind":"capability","screen":"A","what":"商品をメモに保存する","result":"文言が「保存済み」に変わる","ok":true}'
+python3 $C add <bundle> '{"kind":"selector","sel":"#foo","type":"id","ok":true}'      --device <UDID>
+python3 $C add <bundle> '{"kind":"dup","sel":"plus","n":4,"why":"<実数と違う理由>"}'  --device <UDID>
+python3 $C add <bundle> '{"kind":"note","text":"<罠>"}'                               --device <UDID>
+python3 $C add <bundle> '{"kind":"transition","to":"B","how":{"by":"tap","sel":".*B.*"},"ok":true}' --device <UDID>
+python3 $C add <bundle> '{"kind":"capability","what":"商品をメモに保存する","result":"文言が「保存済み」に変わる","ok":true}' --device <UDID>
 ```
+
+- **`screen` と `from` は書かない。`--device` を渡す。** いまの画面は `inspect` が記録しているので、そこから埋まる
+- **画面の名前を自分で付けない。** 以前これで、同じチラシビューアが `FlyerViewer` と `leaflet_viewer` の2つに分かれ、片方に書いた罠がもう片方から引けなくなった。`screen` を明示すると警告が出る
 
 - **自分が実際に踏んだことだけ書く。** あるはずだと思ったこと、試していない遷移は書かない
 - **外れたことも書く。** `ok:false` が残らないと、次の実行が同じ外れ方を繰り返す。`capability` なら `why` に理由を添える
