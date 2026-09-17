@@ -3,7 +3,7 @@
 
   maestrod.py inspect <UDID> <名前> [幅 高さ] [bundle id]   画面を読む
   maestrod.py run     <UDID> '<flow yaml>'      操作する
-  maestrod.py stop                              デーモンを止める
+  maestrod.py stop    <UDID>                    そのデバイスのデーモンを止める
 
 なぜデーモンを挟むのか、理由が2つある。
 
@@ -28,23 +28,50 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 WORK = HERE.parent / ".work"
-SOCK = WORK / "maestrod.sock"
+# ソケットはデバイスごとに分けるが、**同時に生かすのは1本だけ**。
+#
+# 1つのMCPサーバーが握れるドライバは1台ぶんで、別のデバイスを要求すると
+# Device became unreachable で落ちる。かといって2本同時に立てると、今度は
+# 互いに干渉して「iPhoneを要求したのにiPadの階層が返る」が起きる。実測で
+# 両方を確認した。1本だけなら device_id は正しく効く。
+#
+# 端末ごとに順番に撮る運用（スキルの手順もそう）とは合う。端末を
+# 切り替えるたびに初回の約10秒を払い直す。
+#
+# ソケットは /tmp に置く。AF_UNIX のパス上限は約104バイトで、
+# リポジトリ配下（.work/）にUDID付きで置くと超える。
+def sock_for(udid):
+    return Path(f"/tmp/maestrod-{os.getuid()}-{udid[:8]}.sock")
 IDLE_EXIT = 1800          # これだけ無操作なら自分で終わる。残骸を残さないため
 CONNECT_TIMEOUT = 180
 
 # ---------- デーモン ----------
 
-def drivers():
-    """このマシンで動いている XCUITest ドライバのPID。"""
-    r = subprocess.run(["pgrep", "-f", "test-without-building"],
-                       capture_output=True, text=True)
-    return [int(x) for x in r.stdout.split() if x.strip().isdigit()]
+def drivers(udid=None):
+    """XCUITest ドライバのPID。udid を省くと全部。
 
-def serve():
+    起動時は**全部**落とす。残った別デバイスのドライバがあると、
+    新しいサーバーがそれに接続してしまい、iPadを要求したのに
+    iPhoneの階層が返る。実測で確認した（新規セットアップの時間が
+    かからないのが傍証になる）。同時に1本しか立てない前提なので、
+    巻き添えにする相手はいない。
+    """
+    r = subprocess.run(["ps", "-ww", "-A", "-o", "pid=,command="],
+                       capture_output=True, text=True)
+    out = []
+    for line in r.stdout.splitlines():
+        if "test-without-building" in line and (udid is None or f"id={udid}" in line):
+            pid = line.strip().split(None, 1)[0]
+            if pid.isdigit():
+                out.append(int(pid))
+    return out
+
+def serve(udid):
     WORK.mkdir(parents=True, exist_ok=True)
-    # 前の実行が残したドライバを落としてから始める。
-    # 1台のデバイスに2本繋がると両方が壊れ、以降すべての操作が
-    # "Device became unreachable" で落ちる。実測で確認済み。
+    SOCK = sock_for(udid)
+    # 残っているドライバを全部落としてから始める。
+    # 1台のデバイスに2本繋がると両方が壊れ、別デバイスのが残っていると
+    # そちらに繋がって別の端末の階層が返る。どちらも実測で確認済み。
     for pid in drivers():
         try: os.kill(pid, 15)
         except Exception: pass
@@ -132,7 +159,8 @@ def serve():
 
 # ---------- クライアント ----------
 
-def call(tool, args, autostart=True):
+def call(udid, tool, args, autostart=True):
+    SOCK = sock_for(udid)
     for attempt in (1, 2):
         try:
             s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -149,14 +177,31 @@ def call(tool, args, autostart=True):
         except (FileNotFoundError, ConnectionRefusedError):
             if not autostart or attempt == 2:
                 raise
-            spawn()
+            spawn(udid)
     raise RuntimeError("接続できない")
 
-def spawn():
+def stop_others(udid):
+    """別のデバイスのデーモンを止める。2本同時に立つと階層が混ざる。"""
+    for sock in Path("/tmp").glob(f"maestrod-{os.getuid()}-*.sock"):
+        if sock.name == sock_for(udid).name:
+            continue
+        try:
+            c = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            c.settimeout(10); c.connect(str(sock))
+            c.sendall(b'{"op":"stop"}\n'); c.close()
+            print(f"別デバイスのデーモンを止めた: {sock.name}", file=sys.stderr)
+        except Exception:
+            pass
+        try: sock.unlink()
+        except Exception: pass
+
+def spawn(udid):
     WORK.mkdir(parents=True, exist_ok=True)
+    stop_others(udid)
+    SOCK = sock_for(udid)
     if SOCK.exists():
         SOCK.unlink()
-    subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "__serve__"],
+    subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "__serve__", udid],
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                      start_new_session=True)
     end = time.time() + 60
@@ -166,13 +211,17 @@ def spawn():
         time.sleep(0.2)
     raise RuntimeError("デーモンが立ち上がらない")
 
-def show_cache(bundle, text):
+def show_cache(bundle, udid, text):
     """画面が変わったときだけ、その画面の攻略メモを出す。
 
     引くかどうかをエージェントの判断に任せると、実測で一度も引かれ
     なかった。ダンプは必ず取るので、ここに同梱すれば引き忘れが
     起きない。毎回出すと同じ文面が積み上がるので、画面が変わった
     ときに限る。
+
+    マーカーはデバイスごとに分ける。iPhoneとiPadを並行で走らせると
+    共有マーカーを奪い合い、片方が「変わっていない」と誤判定して
+    記録が出なくなる。
     """
     if not bundle:
         return
@@ -180,7 +229,7 @@ def show_cache(bundle, text):
                    for l in text.splitlines() if l.startswith("画面: ")), None)
     if not screen:
         return
-    marker = WORK / ".last_screen"
+    marker = WORK / f".last_screen_{udid}"
     prev = marker.read_text().strip() if marker.exists() else ""
     if prev == screen:
         return
@@ -197,11 +246,13 @@ def main():
         sys.exit(__doc__)
     cmd = sys.argv[1]
     if cmd == "__serve__":
-        return serve()
+        return serve(sys.argv[2])
     if cmd == "stop":
+        if len(sys.argv) < 3:
+            sys.exit("stop には UDID が要る（他のデバイスを巻き添えにしないため）")
         try:
             s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            s.settimeout(10); s.connect(str(SOCK))
+            s.settimeout(10); s.connect(str(sock_for(sys.argv[2])))
             s.sendall(b'{"op":"stop"}\n'); s.close()
             print("止めた")
         except Exception:
@@ -211,7 +262,7 @@ def main():
         udid, name = sys.argv[2], sys.argv[3]
         w, h = (sys.argv[4], sys.argv[5]) if len(sys.argv) > 5 else ("390", "844")
         bundle = sys.argv[6] if len(sys.argv) > 6 else None
-        r = call("inspect_screen", {"device_id": udid})
+        r = call(udid, "inspect_screen", {"device_id": udid})
         if not r["ok"] or not r["text"].lstrip().startswith('{"ui_schema"'):
             sys.exit(f"画面を読めなかった: {r['text'][:200]}\n"
                      "ドライバが壊れている可能性がある。maestrod.py stop してやり直す。")
@@ -223,11 +274,11 @@ def main():
         (WORK / f"{name}.txt").write_text(out.stdout)
         print("\n".join(l for l in out.stdout.splitlines() if "×" not in l))
         print(f"生: {raw} / 全行: {WORK / (name + '.txt')}", file=sys.stderr)
-        show_cache(bundle, out.stdout)
+        show_cache(bundle, udid, out.stdout)
         return
     if cmd == "run":
         udid, yaml = sys.argv[2], sys.argv[3]
-        r = call("run", {"device_id": udid, "yaml": yaml})
+        r = call(udid, "run", {"device_id": udid, "yaml": yaml})
         # JSON-RPCが成功でも、ツールの本文が失敗を伝えていることがある。
         # 両方見ないと、落ちた操作を成功として報告してしまう。
         body = r["text"]
