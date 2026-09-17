@@ -32,6 +32,16 @@ xcrun simctl list devices booted
 
 画面のポイント寸法を控えておく。`attach` / `launch` の戻り値に出る（iPhone 11 Pro なら 375×812、iPadは機種ごとに異なる）。以降のダンプでこの値を使う。
 
+# 作業用ファイルの置き場
+
+ダンプ、Maestro の出力、使い捨てのフローは次に置く。呼び出し元から渡された出力先には**証跡だけ**を入れ、作業用ファイルを混ぜない。
+
+```bash
+W=~/.claude/skills/sim-test-report/.work && mkdir -p $W
+```
+
+git 管理外なので、前の実行の残りがあってよいし、消しても困らない。
+
 # 画面を見る手段は3つある
 
 | | 時間 | 自分のコンテキストに載る量 | 使いどころ |
@@ -45,8 +55,8 @@ xcrun simctl list devices booted
 # ビュー階層のダンプ
 
 ```bash
-maestro --udid <UDID> hierarchy > /tmp/dump.json
-python3 ~/.claude/skills/sim-test-report/scripts/elements.py /tmp/dump.json <幅> <高さ> | grep -v '×'
+maestro --udid <UDID> hierarchy > $W/dump.json
+python3 ~/.claude/skills/sim-test-report/scripts/elements.py $W/dump.json <幅> <高さ> | grep -v '×'
 ```
 
 **生のJSONを読まない。** 1画面で200〜280KBある。スクリプトを通すと1〜2KB・40〜60行になり、トークンではスクリーンショット1枚の3分の1以下に収まる。
@@ -93,7 +103,7 @@ appId: <bundle id>
 ```
 
 ```bash
-maestro --udid <UDID> test --test-output-dir /tmp/maestro-out goto.yaml
+maestro --udid <UDID> test --test-output-dir $W/maestro $W/goto.yaml
 ```
 
 `scrollUntilVisible` は**内部でループするので自分のターンが1回も発生しない**。`computer` のスワイプでやると「スワイプ → ダンプで着いたか確認 → まだなら再スワイプ」で1周約30秒かかり、しかも何周するかはデータ次第で読めない。
@@ -102,7 +112,7 @@ maestro --udid <UDID> test --test-output-dir /tmp/maestro-out goto.yaml
 - 文言はダンプから取る。**ソースコードから拾わない。** 画面の文言は API 由来のことが多く、ソースのリテラルとは一致しない
 - `scrollUntilVisible` は指定方向にしか進まない。`- launchApp` で開始位置を固定しないと2回目以降落ちる
 - **「見出しまで行って `- scroll` を1回足す」のような段数依存の調整をしない。** 広告枠の段数は可変なので、同じフローが明日落ちる。触りたい要素そのものを `element` に書く
-- `--test-output-dir` を渡さないと `~/.maestro/tests/` に溜まり続ける
+- `--test-output-dir` を渡さないと `~/.maestro/tests/` に溜まり続ける。落ちた時点の階層とスクリーンショットもこの下に残るので、失敗の調査はここを見る
 
 タイムアウトしたら、文言が実際と違うか、その方向に無いかのどちらか。**フローを書き直す前にダンプで実際の文言を確かめる。**
 
@@ -141,7 +151,7 @@ xcrun simctl io <UDID> screenshot <出力先>/<端末名>_<連番>_<slug>.png
 - takeScreenshot: <端末名>_<連番>_<slug>
 ```
 
-`takeScreenshot` にフルパスは渡せない。`--test-output-dir` の下の `<日時>/<フロー名>/takeScreenshot/` に落ちるので、証跡ディレクトリへコピーする。
+`takeScreenshot` にフルパスは渡せない。`$W/maestro/<日時>/<フロー名>/takeScreenshot/` に落ちるので、証跡ディレクトリへコピーする。
 
 # スクリーンショットを読むとき
 
