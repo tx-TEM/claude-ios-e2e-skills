@@ -118,26 +118,57 @@ def cmd_screen(bundle, screen):
                 mark = "" if r.get("ok", True) else "  ← 前回は見つからなかった"
                 print(f"  {r['sel']}  ({r.get('type', '?')}, {r['at']}){mark}")
             elif k == "dup":
-                print(f"  {r['sel']}  {r['n']}個。テキストでは特定できない")
+                extra = f" — {r['why']}" if r.get("why") else "。テキストでは特定できない"
+                print(f"  {r['sel']}  {r['n']}個{extra}")
             else:
                 print(f"  {r['text']}")
 
+def everything(bundle):
+    """全ファイルを1つのリストに均す。画面名は screens/ ならファイル名から補う。"""
+    base = ROOT / bundle
+    out = []
+    for f in sorted((base / "screens").glob("*.jsonl")) if (base / "screens").exists() else []:
+        for r in fold(load(f)).values():
+            out.append(dict(r, screen=f.stem))
+    for name in ("transitions.jsonl", "capabilities.jsonl"):
+        f = base / name
+        if f.exists():
+            out.extend(fold(load(f)).values())
+    return out
+
 def cmd_find(bundle, words):
-    recs = fold(load(path_for(bundle, "capability"))).values()
-    hit = [r for r in recs
-           if all(w in json.dumps(r, ensure_ascii=False) for w in words)]
-    if not hit:
+    """**いずれかの**語を含む行を、一致数の多い順に返す。
+
+    全語AND・capabilitiesのみ、という作りだと、実際の呼ばれ方
+    （語をまとめて投げる）でほぼ必ず空振りし、貯めた知識に到達
+    できなかった。横断・OR・一致数順にする。
+    """
+    scored = []
+    for r in everything(bundle):
+        blob = json.dumps(r, ensure_ascii=False)
+        n = sum(1 for w in words if w in blob)
+        if n:
+            scored.append((n, r))
+    if not scored:
         print("該当なし。探索して記録する")
         return
-    for r in sorted(hit, key=lambda r: not r.get("ok", True)):
-        if r.get("ok", True):
-            print(f"[{r['screen']}] {r['what']}")
-            if r.get("how"):
-                print(f"    手段: {json.dumps(r['how'], ensure_ascii=False)}")
-            if r.get("result"):
-                print(f"    結果: {r['result']}")
+    scored.sort(key=lambda kv: (-kv[0], not kv[1].get("ok", True)))
+    for n, r in scored[:20]:
+        k, sc = r.get("kind"), r.get("screen", "?")
+        ng = "" if r.get("ok", True) else "  ← できない"
+        if k == "capability":
+            print(f"[{sc}] {r['what']}{ng}")
+            if r.get("how"):    print(f"    手段: {json.dumps(r['how'], ensure_ascii=False)}")
+            if r.get("result"): print(f"    結果: {r['result']}")
+            if not r.get("ok", True): print(f"    理由: {r.get('why','記録なし')}")
+        elif k == "transition":
+            print(f"[{r['from']} → {r['to']}] {json.dumps(r.get('how'), ensure_ascii=False)}{ng}")
+        elif k == "selector":
+            print(f"[{sc}] セレクタ {r['sel']} ({r.get('type','?')}){ng}")
+        elif k == "dup":
+            print(f"[{sc}] 重複 {r['sel']} {r['n']}個" + (f" — {r['why']}" if r.get("why") else ""))
         else:
-            print(f"[{r['screen']}] {r['what']}  ← できない: {r.get('why', '理由の記録なし')}")
+            print(f"[{sc}] 罠 {r.get('text','')}")
 
 def cmd_path(bundle, src, dst):
     edges = {}

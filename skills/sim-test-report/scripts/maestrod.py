@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Maestro の MCP サーバーを常駐させ、細いクライアントから叩く。
 
-  maestrod.py inspect <UDID> <名前> [幅 高さ]   画面を読む
+  maestrod.py inspect <UDID> <名前> [幅 高さ] [bundle id]   画面を読む
   maestrod.py run     <UDID> '<flow yaml>'      操作する
   maestrod.py stop                              デーモンを止める
 
@@ -166,6 +166,32 @@ def spawn():
         time.sleep(0.2)
     raise RuntimeError("デーモンが立ち上がらない")
 
+def show_cache(bundle, text):
+    """画面が変わったときだけ、その画面の攻略メモを出す。
+
+    引くかどうかをエージェントの判断に任せると、実測で一度も引かれ
+    なかった。ダンプは必ず取るので、ここに同梱すれば引き忘れが
+    起きない。毎回出すと同じ文面が積み上がるので、画面が変わった
+    ときに限る。
+    """
+    if not bundle:
+        return
+    screen = next((l.split("画面: ", 1)[1].strip()
+                   for l in text.splitlines() if l.startswith("画面: ")), None)
+    if not screen:
+        return
+    marker = WORK / ".last_screen"
+    prev = marker.read_text().strip() if marker.exists() else ""
+    if prev == screen:
+        return
+    marker.write_text(screen)
+    r = subprocess.run([sys.executable, str(HERE / "cache.py"), "screen", bundle, screen],
+                       capture_output=True, text=True)
+    body = r.stdout.strip()
+    if body and "の記録は無い" not in body:
+        print("\n--- この画面の記録 ---")
+        print(body)
+
 def main():
     if len(sys.argv) < 2:
         sys.exit(__doc__)
@@ -184,6 +210,7 @@ def main():
     if cmd == "inspect":
         udid, name = sys.argv[2], sys.argv[3]
         w, h = (sys.argv[4], sys.argv[5]) if len(sys.argv) > 5 else ("390", "844")
+        bundle = sys.argv[6] if len(sys.argv) > 6 else None
         r = call("inspect_screen", {"device_id": udid})
         if not r["ok"] or not r["text"].lstrip().startswith('{"ui_schema"'):
             sys.exit(f"画面を読めなかった: {r['text'][:200]}\n"
@@ -196,6 +223,7 @@ def main():
         (WORK / f"{name}.txt").write_text(out.stdout)
         print("\n".join(l for l in out.stdout.splitlines() if "×" not in l))
         print(f"生: {raw} / 全行: {WORK / (name + '.txt')}", file=sys.stderr)
+        show_cache(bundle, out.stdout)
         return
     if cmd == "run":
         udid, yaml = sys.argv[2], sys.argv[3]

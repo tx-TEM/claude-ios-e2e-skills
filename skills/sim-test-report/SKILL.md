@@ -49,7 +49,7 @@ xcrun simctl list devices booted
 - 証跡の出力先ディレクトリ。`~/Desktop/sim-test-report-<テーマのslug>/shots/`（例: `sim-test-report-favorite-from-list`）。呼ぶ前に `mkdir -p` で作っておく。リポジトリ内には作らない
 - 前提条件（アカウント、必要なデータ、事前設定）
 - **対象アプリの bundle id**（`xcrun simctl listapps <UDID>` で確認できる）。sim-driver がスクロールに使う Maestro のフローに要る
-- **進捗ログのパス**。`~/Desktop/sim-test-report-<slug>/progress.log`（証跡ではないので `shots/` の外に置く）
+- **進捗ログのパス**。`~/Desktop/sim-test-report-<slug>/progress_<端末名>.log`（証跡ではないので `shots/` の外に置く）。**端末ごとに分ける。** 同じファイルに2台が書くと行が混ざる
 
 呼ぶ前に進捗ログを作り、`Monitor` を張る。sim-driver は1項目終えるごとにここへ1行書き、その行がそのまま通知として届く。
 
