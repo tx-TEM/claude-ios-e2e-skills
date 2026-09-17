@@ -44,7 +44,18 @@ def norm(n, compact):
     }
 
 rows = []
-screen = None  # 画面上部の全幅要素（ナビゲーションバー）のid。APIデータでは変わらない
+# ナビゲーションバーのid。これが画面のキーになる。
+#
+# 条件を緩くすると、ナビゲーションバーを持たない画面（地図など）で
+# 別物を掴む。実測では「お店をさがす」で地図の AnnotationContainer が
+# 選ばれていた。アノテーションはデータで変わるので、日によってキーが
+# 変わる。**キーが取れないより悪い。**
+#
+# ナビゲーションバーは全幅・上端（iPhone y0=47 / iPad y0=32）・高さ54pt。
+# 高さの条件が要る。地図画面の AnnotationContainer は [0,0][390,844] で
+# 全幅かつ上端なので、高さを見ないと通ってしまう。
+screen = None
+screen_cands = []
 
 def walk(node, compact):
     global screen
@@ -54,8 +65,9 @@ def walk(node, compact):
     m = B.match(d["bounds"] or "")
     if (t or r) and m:
         x0, y0, x1, y1 = map(int, m.groups())
-        if screen is None and r and x1 - x0 >= W * 0.95 and y0 < H * 0.2:
-            screen = r
+        if (r and x1 - x0 >= W * 0.95 and y0 <= H * 0.08
+                and 30 <= y1 - y0 <= 120):
+            screen_cands.append(r)
         if x1 - x0 > 0 and y1 - y0 > 0:
             st = ""
             if d["selected"]: st += " [選択]"
@@ -73,8 +85,14 @@ if isinstance(d, dict) and "ui_schema" in d and "elements" in d:
 else:
     walk(d[0] if isinstance(d, list) else d, False)
 
+# 複数あれば型名（<モジュール>.<型名>）を優先する。コード由来で安定するため。
+if screen_cands:
+    typed = [c for c in screen_cands if re.match(r"^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z0-9_.]+$", c)]
+    screen = (typed or screen_cands)[0]
 if screen:
     print(f"画面: {screen}")
+else:
+    print("画面: 【不明】ナビゲーションバーが無い。キャッシュは引けない")
 seen = set()
 print(f"{'tap':>12}  {'画面内':<5} テキスト / id")
 for cx, cy, on, t, r, st in sorted(rows, key=lambda v: (v[1], v[0])):
