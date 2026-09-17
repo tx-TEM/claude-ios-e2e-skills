@@ -58,7 +58,7 @@ python3 <このスキルのディレクトリ>/scripts/cache.py sweep
 touch ~/Desktop/sim-test-report-<slug>/progress.log
 ```
 
-`sweep` は14日より古い作業用ファイルを消し、画面マップを畳む。ダンプの生JSONは1実行で約3MBになるので、呼ばないと溜まり続ける。消えるのは生JSONだけで、抽出結果の `.txt`（1つ2KB）は残るため、過去の実行で何を見ていたかは追える。
+`sweep` は14日より古い作業用ファイルを消し、画面マップを畳む。ダンプ1回は約8KBなので急いで消す必要はないが、Maestro の出力や使い捨てのフローが溜まる。消えるのは生JSONだけで、抽出結果の `.txt` は残るため、過去の実行で何を見ていたかは追える。
 
 ```
 Monitor(command: "tail -f ~/Desktop/sim-test-report-<slug>/progress.log",
@@ -70,6 +70,14 @@ Monitor(command: "tail -f ~/Desktop/sim-test-report-<slug>/progress.log",
 `tail -f` は自分では終わらないので、sim-driver の完了通知が来たら monitor も `TaskStop` で畳む。
 
 複数端末を見る場合は端末ごとに呼ぶ。1回のサブエージェントで2台を行き来させると、座標系（画面のポイント寸法）の切り替わりで誤操作が増える。
+
+撮影が終わったら、sim-driver が常駐させた Maestro のデーモンを止める。
+
+```bash
+python3 <このスキルのディレクトリ>/scripts/maestrod.py stop
+```
+
+sim-driver 自身も終了時に止めるが、途中で `TaskStop` した場合は残る。**XCUITest ドライバが residual として残ると、次の実行で1台のデバイスに2本繋がり、全操作が `Device became unreachable` で落ちる。**
 
 返ってくるのは「項番 / ファイル名 / 観測した事実」だけで、OK/NGの判定は含まれない。**判定は自分で証跡PNGを読んで下す。**
 
