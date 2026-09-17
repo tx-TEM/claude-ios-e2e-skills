@@ -17,9 +17,9 @@ clone したディレクトリで `./install.sh` を実行する。`~/.claude/` 
 
 - macOS — 証跡の撮影に `xcrun simctl`、画像の縮小に `sips` を使う
 - iOSシミュレーターMCP（`mcp__Claude_Code_iOS_Simulator__control`）
-- `python3` — レポート生成スクリプト
+- `python3` — レポート生成と、ビュー階層ダンプの抽出に使う
 - Google Chrome — 1枚PNGの描画に使う。無い場合はHTMLのみ生成される
-- Maestro — シミュレーター操作に使う。`install.sh` が mobile-dev-inc のタップから入れる（素の `brew install maestro` は別物が入るので注意）
+- Maestro — ビュー階層のダンプとスクロールに使う。`install.sh` が mobile-dev-inc のタップから入れる（素の `brew install maestro` は別物が入るので注意）
 
 ## レポート単体で生成する
 

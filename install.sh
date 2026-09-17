@@ -80,7 +80,7 @@ for f in "$REPO_DIR"/agents/*.md; do
   link "$f" "$CLAUDE_DIR/agents/$(basename "$f")" "$(basename "$f")"
 done
 
-# シミュレーター操作に使う Maestro を入れる。
+# ビュー階層のダンプとスクロールに使う Maestro を入れる。
 #
 # 注意点が2つある。
 #  - brew が依存として openjdk を最新へ上げる。Javaのバージョンを固定している
