@@ -54,8 +54,14 @@ rows = []
 # ナビゲーションバーは全幅・上端（iPhone y0=47 / iPad y0=32）・高さ54pt。
 # 高さの条件が要る。地図画面の AnnotationContainer は [0,0][390,844] で
 # 全幅かつ上端なので、高さを見ないと通ってしまう。
+# アプリが明示的に付けた画面idがあれば、位置に関係なくそれを使う。
+# 規約は「screen.」始まり。ルートビューに付けても拾えるようにするため。
+# ナビゲーションバーが無い画面（地図など）は、この手段でしかキーを
+# 持てない。
+SCREEN_ID = "screen."
 screen = None
 screen_cands = []
+explicit = []
 
 def walk(node, compact):
     global screen
@@ -65,7 +71,9 @@ def walk(node, compact):
     m = B.match(d["bounds"] or "")
     if (t or r) and m:
         x0, y0, x1, y1 = map(int, m.groups())
-        if (r and x1 - x0 >= W * 0.95 and y0 <= H * 0.08
+        if r.startswith(SCREEN_ID):
+            explicit.append(r)
+        elif (r and x1 - x0 >= W * 0.95 and y0 <= H * 0.08
                 and 30 <= y1 - y0 <= 120):
             screen_cands.append(r)
         if x1 - x0 > 0 and y1 - y0 > 0:
@@ -86,7 +94,9 @@ else:
     walk(d[0] if isinstance(d, list) else d, False)
 
 # 複数あれば型名（<モジュール>.<型名>）を優先する。コード由来で安定するため。
-if screen_cands:
+if explicit:
+    screen = explicit[0]
+elif screen_cands:
     typed = [c for c in screen_cands if re.match(r"^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z0-9_.]+$", c)]
     screen = (typed or screen_cands)[0]
 if screen:
