@@ -55,9 +55,19 @@ git 管理外なので、前の実行の残りがあってよいし、消して�
 # ビュー階層のダンプ
 
 ```bash
-maestro --udid <UDID> hierarchy > $W/dump.json
-python3 ~/.claude/skills/sim-test-report/scripts/elements.py $W/dump.json <幅> <高さ> | grep -v '×'
+~/.claude/skills/sim-test-report/scripts/dump.sh <UDID> <名前> <幅> <高さ>
 ```
+
+画面内の行が標準出力に出る。あわせて `.work/` に2つ残る。
+
+| | |
+| --- | --- |
+| `<名前>.json` | `maestro hierarchy` の生の出力 |
+| `<名前>.txt` | 抽出結果。画面外の行も含む |
+
+**名前は証跡と揃える**（`iphone_03_before_tap`）。同じ項番で複数回取るときは、何をした後かを足す。付けないと上書きされ、**外した項目のダンプが残らない**。
+
+**生と抽出後の両方を残す。** 生が無いと抽出スクリプトを直しても同じ画面で検証し直せない。抽出後が無いと、自分が何を見てその座標を選んだのかを呼び出し元が追えない。
 
 **生のJSONを読まない。** 1画面で200〜280KBある。スクリプトを通すと1〜2KB・40〜60行になり、トークンではスクリーンショット1枚の3分の1以下に収まる。
 
