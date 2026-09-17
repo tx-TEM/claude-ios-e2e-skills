@@ -48,6 +48,22 @@ xcrun simctl list devices booted
 - 証跡の出力先ディレクトリ。`~/Desktop/sim-test-report-<テーマのslug>/shots/`（例: `sim-test-report-favorite-from-list`）。呼ぶ前に `mkdir -p` で作っておく。リポジトリ内には作らない
 - 前提条件（アカウント、必要なデータ、事前設定）
 - **対象アプリの bundle id**（`xcrun simctl listapps <UDID>` で確認できる）。sim-driver がスクロールに使う Maestro のフローに要る
+- **進捗ログのパス**。`~/Desktop/sim-test-report-<slug>/progress.log`（証跡ではないので `shots/` の外に置く）
+
+呼ぶ前に進捗ログを作り、`Monitor` を張る。sim-driver は1項目終えるごとにここへ1行書き、その行がそのまま通知として届く。
+
+```bash
+touch ~/Desktop/sim-test-report-<slug>/progress.log
+```
+
+```
+Monitor(command: "tail -f ~/Desktop/sim-test-report-<slug>/progress.log",
+        description: "sim-driver の進捗", persistent: false, timeout_ms: 1800000)
+```
+
+**待つためではなく、早く止めるために張る。** 3項目目で導線を外しているのが見えた時点で sim-driver を `TaskStop` すれば、最後まで走らせてから全部撮り直すより早い。**サブエージェントの途中経過を見る手段はこれ以外に無い**（出力ファイルは会話トランスクリプトの実体なので、読むとコンテキストが溢れる）。
+
+`tail -f` は自分では終わらないので、sim-driver の完了通知が来たら monitor も `TaskStop` で畳む。
 
 複数端末を見る場合は端末ごとに呼ぶ。1回のサブエージェントで2台を行き来させると、座標系（画面のポイント寸法）の切り替わりで誤操作が増える。
 
