@@ -82,6 +82,30 @@ def drivers(udid=None):
         out.append(int(pid))
     return out
 
+# Maestro は JVM で動く。macOS の /usr/bin/java は Java 未導入だとスタブで、
+# 叩くと「Unable to locate a Java Runtime」で落ちるだけ。Homebrew の openjdk は
+# keg-only で PATH にも出ない。JAVA_HOME が未設定の環境ではここで補う。
+# 補えなければ環境をそのまま返し、maestro 自身のエラーを見せる。
+def java_env():
+    env = dict(os.environ)
+    if env.get("JAVA_HOME"):
+        return env
+    for cmd in (["/usr/libexec/java_home"], ["brew", "--prefix", "openjdk"]):
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        except Exception:
+            continue
+        if r.returncode != 0:
+            continue
+        for home in (Path(r.stdout.strip()) / "libexec/openjdk.jdk/Contents/Home",
+                     Path(r.stdout.strip())):
+            if (home / "bin/java").exists():
+                env["JAVA_HOME"] = str(home)
+                env["PATH"] = f"{home}/bin:" + env.get("PATH", "")
+                return env
+    return env
+
+
 def serve(udid):
     WORK.mkdir(parents=True, exist_ok=True)
     SOCK = sock_for(udid)
@@ -95,7 +119,8 @@ def serve(udid):
         SOCK.unlink()
     proc = subprocess.Popen(["maestro", "mcp", "--no-viewer"],
                             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                            stderr=subprocess.DEVNULL, text=True, bufsize=1)
+                            stderr=subprocess.DEVNULL, text=True, bufsize=1,
+                            env=java_env())
     inbox = queue.Queue()
 
     def reader():
