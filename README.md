@@ -20,6 +20,15 @@ clone したディレクトリで `./install.sh` を実行する。`~/.claude/` 
 - `python3` — レポート生成と、ビュー階層ダンプの抽出に使う
 - Google Chrome — 1枚PNGの描画に使う。無い場合はHTMLのみ生成される
 - Maestro — ビュー階層のダンプとスクロールに使う。`install.sh` が mobile-dev-inc のタップから入れる（素の `brew install maestro` は別物が入るので注意）
+- Java 17以上 — Maestro が使う。依存として openjdk も入るが、**Homebrew の openjdk は keg-only なのでシステムからは見えない。** 他に JDK が無いマシンでは、`install.sh` が成功した直後でも `Unable to locate a Java Runtime` で maestro が起動しない。どちらかで通す
+
+  ```bash
+  # Homebrew の caveats どおり。システム全体から見えるようになる
+  sudo ln -sfn /opt/homebrew/opt/openjdk/libexec/openjdk.jdk /Library/Java/JavaVirtualMachines/openjdk.jdk
+
+  # または自分の環境だけ
+  echo 'export JAVA_HOME=/opt/homebrew/opt/openjdk' >> ~/.zshenv
+  ```
 
 ## レポート単体で生成する
 
