@@ -53,22 +53,33 @@ CONNECT_TIMEOUT = 180
 # ---------- デーモン ----------
 
 def drivers(udid=None):
-    """XCUITest ドライバのPID。udid を省くと全部。
+    """XCUITest ドライバのPID。udid を省くと全デバイスぶん。
 
-    起動時は**全部**落とす。残った別デバイスのドライバがあると、
-    新しいサーバーがそれに接続してしまい、iPadを要求したのに
-    iPhoneの階層が返る。実測で確認した（新規セットアップの時間が
-    かからないのが傍証になる）。同時に1本しか立てない前提なので、
-    巻き添えにする相手はいない。
+    xcodebuild が `test-without-building` 引数で起動されたものだけを返す。
+    コマンドラインの部分一致にすると、その文字列を含むだけの無関係な
+    プロセス（それを grep するシェルなど）まで当たる。**返したPIDは
+    呼び出し側がそのまま落とす**ので、広く取ると巻き添えが出る。
     """
-    r = subprocess.run(["ps", "-ww", "-A", "-o", "pid=,command="],
-                       capture_output=True, text=True)
+    def pid_map(fmt):
+        r = subprocess.run(["ps", "-ww", "-A", "-o", f"pid=,{fmt}="],
+                           capture_output=True, text=True)
+        out = {}
+        for line in r.stdout.splitlines():
+            parts = line.strip().split(None, 1)
+            if len(parts) == 2 and parts[0].isdigit():
+                out[parts[0]] = parts[1]
+        return out
+
+    exe, cmd = pid_map("comm"), pid_map("command")
     out = []
-    for line in r.stdout.splitlines():
-        if "test-without-building" in line and (udid is None or f"id={udid}" in line):
-            pid = line.strip().split(None, 1)[0]
-            if pid.isdigit():
-                out.append(int(pid))
+    for pid, line in cmd.items():
+        if os.path.basename(exe.get(pid, "")) != "xcodebuild":
+            continue
+        if "test-without-building" not in line:
+            continue
+        if udid is not None and f"id={udid}" not in line:
+            continue
+        out.append(int(pid))
     return out
 
 def serve(udid):
