@@ -17,18 +17,10 @@ clone したディレクトリで `./install.sh` を実行する。`~/.claude/` 
 
 - macOS — 証跡の撮影に `xcrun simctl`、画像の縮小に `sips` を使う
 - iOSシミュレーターMCP（`mcp__Claude_Code_iOS_Simulator__control`）
-- `python3` — レポート生成と、ビュー階層ダンプの抽出に使う
+- `python3` — レポート生成と、ビュー階層ダンプの抽出に使う。**Xcode 同梱の 3.9 で動く**ので、スクリプトに 3.10 以降の構文を持ち込まない
 - Google Chrome — 1枚PNGの描画に使う。無い場合はHTMLのみ生成される
 - Maestro — ビュー階層のダンプとスクロールに使う。`install.sh` が mobile-dev-inc のタップから入れる（素の `brew install maestro` は別物が入るので注意）
-- Java 17以上 — Maestro が使う。依存として openjdk も入るが、**Homebrew の openjdk は keg-only なのでシステムからは見えない。** 他に JDK が無いマシンでは、`install.sh` が成功した直後でも `Unable to locate a Java Runtime` で maestro が起動しない。どちらかで通す
-
-  ```bash
-  # Homebrew の caveats どおり。システム全体から見えるようになる
-  sudo ln -sfn /opt/homebrew/opt/openjdk/libexec/openjdk.jdk /Library/Java/JavaVirtualMachines/openjdk.jdk
-
-  # または自分の環境だけ
-  echo 'export JAVA_HOME=/opt/homebrew/opt/openjdk' >> ~/.zshenv
-  ```
+- Java 17以上 — Maestro が使う。`install.sh` が openjdk も入れる。**Homebrew の openjdk は keg-only でシステムからは見えない**が、`maestrod.py` と `dump.sh` が `/usr/libexec/java_home` → `brew --prefix openjdk` の順で探して補うので、通常は手当て不要。どちらでも見つからない場所に JDK がある場合だけ `JAVA_HOME` を自分で設定する（未設定のままだと `Unable to locate a Java Runtime` で maestro が起動しない）
 
 ## レポート単体で生成する
 
