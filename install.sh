@@ -96,16 +96,23 @@ install_maestro() {
     return
   fi
   if ! command -v brew >/dev/null 2>&1; then
-    echo "    brew が無いため飛ばした。https://docs.maestro.dev/maestro-cli/how-to-install-maestro-cli を参照" >&2
-    return
+    echo "    brew が無い。https://docs.maestro.dev/maestro-cli/how-to-install-maestro-cli を参照" >&2
+    return 1
   fi
   run brew tap mobile-dev-inc/tap
   run brew trust --formula mobile-dev-inc/tap/maestro
   run brew install mobile-dev-inc/tap/maestro
 }
 
+# Maestro が入らなければ失敗として終わる。brew があって tap や install が
+# 失敗したときは set -e でここまで来ないので、扱いを揃える。前提に挙げている
+# 以上、入らなかったことを成功として返すと、気づくのは動作確認の最中になる。
 echo "Maestro:"
-install_maestro
+if ! install_maestro; then
+  echo >&2
+  echo "リンクは張れている。Maestro を入れてから ./install.sh をもう一度実行する。" >&2
+  exit 1
+fi
 
 echo
 echo "セッションを開き直すと反映される。"
