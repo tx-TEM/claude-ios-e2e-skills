@@ -16,12 +16,28 @@ import json, re, sys
 W, H = (int(sys.argv[2]), int(sys.argv[3])) if len(sys.argv) > 3 else (390, 844)
 B = re.compile(r"\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]")
 
+def labeled(label, value):
+    """ラベルと値が食い違うなら両方出す。
+
+    入力欄はラベルがプレースホルダーのままで、打った文字は値の側に入る。
+    ラベルだけ出すと、入力が効いたのかが行から読めない。
+    食い違うのは実測で190ノード中5個（入力欄・スクロール位置・ステータスバー）で、
+    どれも状態そのものなので、出して困る行は無い。
+    """
+    label = (label or "").strip()
+    value = (value or "").strip()
+    if not label:
+        return value
+    if not value or value == label:
+        return label
+    return f"{label} = {value}"
+
 def norm(n, compact):
     """どちらの形式も同じ辞書に均す。"""
     if compact:
         return {
             "bounds": n.get("b", ""),
-            "text": (n.get("a11y") or n.get("txt") or ""),
+            "text": labeled(n.get("a11y"), n.get("txt") or n.get("val")),
             "rid": n.get("rid", ""),
             # 既定値は省かれているので、無ければ既定
             "selected": n.get("selected", False) is True,
@@ -35,7 +51,7 @@ def norm(n, compact):
         return str(v).lower() == "true"
     return {
         "bounds": a.get("bounds", ""),
-        "text": (a.get("accessibilityText") or a.get("text") or ""),
+        "text": labeled(a.get("accessibilityText"), a.get("text")),
         "rid": a.get("resource-id", ""),
         "selected": flag("selected", False),
         "enabled": not (str(a.get("enabled", n.get("enabled", "true"))).lower() == "false"),
