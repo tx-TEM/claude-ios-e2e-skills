@@ -29,12 +29,23 @@ WORK="$(cd -- "$SCRIPTS/.." && pwd)/.work"
 mkdir -p "$WORK"
 
 # JVMの警告が毎回3行出るので隠す。本当のエラーだけ見せる。
-if ! maestro --udid "$UDID" hierarchy > "$WORK/$NAME.json" 2> "$WORK/$NAME.err"; then
+if ! maestro --udid "$UDID" hierarchy > "$WORK/$NAME.raw" 2> "$WORK/$NAME.err"; then
   echo "maestro hierarchy が失敗した:" >&2
   grep -v "^WARNING" "$WORK/$NAME.err" >&2 || true
   exit 1
 fi
-rm -f "$WORK/$NAME.err"
+
+# maestro は JSON の前に標準出力へアナリティクスの通知を出す（既定で有効）。
+# そのまま保存すると生ダンプが壊れ、elements.py が JSONDecodeError で落ちる。
+# MAESTRO_CLI_NO_ANALYTICS を切ってある環境では何も落ちないので、
+# 切っていない環境ぶんの保険。別のバナーが増えても効く。
+sed -n '/^[[{]/,$p' "$WORK/$NAME.raw" > "$WORK/$NAME.json"
+if [ ! -s "$WORK/$NAME.json" ]; then
+  echo "maestro hierarchy の出力にJSONが無い。先頭を出す:" >&2
+  head -5 "$WORK/$NAME.raw" >&2
+  exit 1
+fi
+rm -f "$WORK/$NAME.raw" "$WORK/$NAME.err"
 python3 "$SCRIPTS/elements.py" "$WORK/$NAME.json" "$PT_W" "$PT_H" > "$WORK/$NAME.txt"
 
 grep -v '×' "$WORK/$NAME.txt" || true
