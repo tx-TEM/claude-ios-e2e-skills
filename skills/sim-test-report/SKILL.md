@@ -57,7 +57,7 @@ python3 <このスキルのディレクトリ>/scripts/maestrod.py sweep
 touch ~/Desktop/sim-test-report-<slug>/progress_<端末名>.log
 ```
 
-`sweep` は14日より古い作業用ファイルを消す。ダンプ1回は約8KBなので急いで消す必要はないが、Maestro の出力や使い捨てのフローが溜まる。消えるのは生JSONだけで、抽出結果の `.txt` は残るため、過去の実行で何を見ていたかは追える。
+`sweep` は14日より古い作業用ファイルを消す。ダンプ1回は数KBなので急いで消す必要はないが、Maestro の出力や使い捨てのフローが溜まる。消えるのは `.json` / `.yaml` / `.err` で、抽出結果の `.txt` は残るため、過去の実行で何を見ていたかは追える。
 
 ```
 Monitor(command: "tail -f ~/Desktop/sim-test-report-<slug>/progress_<端末名>.log",
