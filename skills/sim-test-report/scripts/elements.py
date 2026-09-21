@@ -102,7 +102,7 @@ elif screen_cands:
 if screen:
     print(f"画面: {screen}")
 else:
-    print("画面: 【不明】ナビゲーションバーが無い。キャッシュは引けない")
+    print("画面: 【不明】ナビゲーションバーが無い。遷移したかの判定には使えない")
 seen = set()
 print(f"{'tap':>12}  {'画面内':<5} テキスト / id")
 for cx, cy, on, t, r, st in sorted(rows, key=lambda v: (v[1], v[0])):
