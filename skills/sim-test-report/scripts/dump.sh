@@ -28,6 +28,27 @@ SCRIPTS="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 WORK="$(cd -- "$SCRIPTS/.." && pwd)/.work"
 mkdir -p "$WORK"
 
+# Maestro は JVM で動く。macOS の /usr/bin/java は Java 未導入だとスタブで、
+# 叩いても「Unable to locate a Java Runtime」が出るだけ。Homebrew の openjdk は
+# keg-only なので PATH にも出ない。JAVA_HOME が未設定ならここで補う。
+# maestrod.py の java_env() と同じ順で探す。補えなければそのまま進め、
+# maestro 自身のエラーを見せる。
+if [ -z "${JAVA_HOME:-}" ]; then
+  _jh="$(/usr/libexec/java_home 2>/dev/null || true)"
+  _bp="$(brew --prefix openjdk 2>/dev/null || true)"
+  for base in "$_jh" "$_bp"; do
+    [ -n "$base" ] || continue
+    for home in "$base/libexec/openjdk.jdk/Contents/Home" "$base"; do
+      if [ -x "$home/bin/java" ]; then
+        export JAVA_HOME="$home"
+        export PATH="$home/bin:$PATH"
+        break 2
+      fi
+    done
+  done
+  unset _jh _bp
+fi
+
 # JVMの警告が毎回3行出るので隠す。本当のエラーだけ見せる。
 if ! maestro --udid "$UDID" hierarchy > "$WORK/$NAME.raw" 2> "$WORK/$NAME.err"; then
   echo "maestro hierarchy が失敗した:" >&2
