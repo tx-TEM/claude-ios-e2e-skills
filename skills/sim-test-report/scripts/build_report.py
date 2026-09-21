@@ -37,6 +37,8 @@
   （headless Chromeを使用。--no-png で抑止、Chrome不在時はスキップ）
 """
 
+from __future__ import annotations
+
 import base64
 import html
 import json
