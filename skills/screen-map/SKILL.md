@@ -296,8 +296,8 @@ python3 $R check                      # 自己テスト（到達可否・切れ�
 
 ```bash
 python3 $R flow --app <bundle id> \
-  --goto browse --do text:browse.searchField --input browse.searchField=漱石 \
-  --goto reader --shot <出力先>/iphone_05_reader \
+  --goto browse --do text:browse.searchField --input browse.searchField=牛乳 \
+  --goto detail --shot <出力先>/iphone_05_detail \
   --goto browse
 ```
 

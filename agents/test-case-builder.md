@@ -42,8 +42,8 @@ git -C $M diff <ベース>...HEAD --name-only | python3 $R which - --map $M
 ```
 
 ```
-browse  — 作品の一覧を絞り込んで探す。作品名か作者かを選べ、作品をタップすると詳細へ行く
-    .../BrowseFeature/Sources/BrowseView.swift
+browse  — アイテムの一覧。キーワードで絞り込め、行をタップすると詳細へ行く
+    .../Features/Item/ItemListView.swift
 
 どの画面にも載っていない（マップでは決められない）
     .../Core/Networking/APIClient.swift
@@ -134,7 +134,7 @@ python3 $R check   --map $M     # 到達できない画面、切れている箇�
 ```bash
 python3 $R flow --app <bundle id> --map $M \
   --goto browse --shot <出力先>/iphone_01_browse_all \
-  --do text:browse.searchField --input browse.searchField=カラマゾフ \
+  --do text:browse.searchField --input browse.searchField=牛乳 \
   --shot <出力先>/iphone_02_debounce \
   --do tap:Search --shot <出力先>/iphone_03_list_filtered \
   --goto detail --shot <出力先>/iphone_04_detail
@@ -181,15 +181,15 @@ python3 $R flow --app <bundle id> --map $M \
 ```
 ## 確認項目
 
-1. さがす画面が初期表示で一覧を出す [browse]
+1. 一覧画面が初期表示で件数つきの一覧を出す [browse]
 2. キーワードを打つと入力が止まってから絞り込みが走る [browse]
 3. 検索キーで絞り込みが確定する [browse]
-4. 作品をタップすると詳細に移る [browse → detail]
+4. 行をタップすると詳細に移る [browse → detail]
 
 ## フロー
 
 ### A（項目1,2,3,4）
-appId: jp.example.AozoraReader
+appId: com.example.MyApp
 ---
 - stopApp
 ...

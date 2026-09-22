@@ -86,8 +86,8 @@ python3 $M run <UDID> '<渡されたフロー>' <名前> <幅> <高さ> \
 
 --- 落ちた地点の画面（iphone_04_detail）
 画面: 【不明】ナビゲーションバーが無い。遷移したかの判定には使えない
-   (201,94)   ○     作品名で絞り込む  #browse.searchField
-   (201,241)  ○     BOITEUX ・ BOITEUSE, 李 箱  #browse.bookRow.53691
+   (201,94)   ○     キーワードで絞り込む  #browse.searchField
+   (201,241)  ○     アイテムA, 2個  #browse.cell.a1b2c3
    ...
 ```
 
