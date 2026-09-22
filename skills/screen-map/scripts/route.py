@@ -16,6 +16,7 @@
     --input <id>=<値>  text 操作で打つ文字。マップは値を持たないので呼ぶ側が渡す
     --app <bundle id>  flow のときだけ必須
     --clear-state      起動時にアプリのデータも消す
+    --timeout <ミリ秒> 画面や要素を待つ上限。既定 10000
     --map <dir>        画面マップの場所。省くとカレントから上へ screen-map/ を探す
 
   位置引数の画面idは先頭の `--goto` と同じ（`path detail` = `path --goto detail`）。
@@ -442,6 +443,18 @@ def q(s):
     return "'" + s.replace("'", "''") + "'"
 
 
+def wait_for(selector, value, timeout):
+    """要素が出るまで待つ。出なければ落ちる。
+
+    `assertVisible` に `timeout` は渡せない（実測で `Unknown Property`）。
+    既定の待ち時間は実測18秒で、通るぶんには足りるが、**本当に出ない要素で
+    1つあたり18秒持っていかれる。** フローが唯一の検証手段になった以上、
+    壊れたフローは早く落ちてほしいので、明示できる形にする。
+    """
+    return ("- extendedWaitUntil:\n    visible:\n      {}: {}\n    timeout: {}"
+            .format(selector, q(value), timeout))
+
+
 def anchor_of(mp, sid, notes):
     a = (mp.screens.get(sid) or {}).get("anchor")
     if not a:
@@ -464,7 +477,7 @@ def step_comment(mp, st):
     return head
 
 
-def emit_flow(mp, steps, inputs, app, clear_state, notes=None):
+def emit_flow(mp, steps, inputs, app, clear_state, notes=None, timeout=10000):
     notes = list(notes or [])
     out = ["appId: " + app, "---"]
     # 起点に戻してから始める。launchApp だけでは前の項目の画面に居座ることがある。
@@ -475,7 +488,7 @@ def emit_flow(mp, steps, inputs, app, clear_state, notes=None):
     start_anchor = anchor_of(mp, mp.start, notes)
     out.append("# 起点: " + mp.start)
     if start_anchor:
-        out.append("- assertVisible:\n    id: " + q(sel_id(start_anchor)))
+        out.append(wait_for("id", sel_id(start_anchor), timeout))
 
     for st in steps:
         if "shot" in st:
@@ -516,9 +529,9 @@ def emit_flow(mp, steps, inputs, app, clear_state, notes=None):
         if st.get("to"):
             dest = anchor_of(mp, st["to"], notes)
             if dest:
-                out.append("- assertVisible:\n    id: " + q(sel_id(dest)))
+                out.append(wait_for("id", sel_id(dest), timeout))
         elif a.get("expect"):
-            out.append("- assertVisible:\n    id: " + q(sel_id(a["expect"])))
+            out.append(wait_for("id", sel_id(a["expect"]), timeout))
         else:
             notes.append("「{}」の結果を確かめる expect がマップに無い".format(label_of(a)))
 
@@ -620,10 +633,13 @@ def main():
     if not argv or argv[0] in ("-h", "--help"):
         sys.exit(__doc__)
     cmd, argv = argv[0], argv[1:]
+    if "--help" in argv or "-h" in argv:
+        sys.exit(__doc__)
 
     # --goto / --do / --shot は並び順がそのまま実行順になるので、1つの列に集める。
     # --input と --app はどこに書いてもよい（並びに意味を持たない）
     segments, inputs, app, clear, mapdir, rest = [], {}, None, False, None, []
+    timeout = 10000
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -635,6 +651,8 @@ def main():
             app = argv[i + 1]; i += 2
         elif a == "--map":
             mapdir = argv[i + 1]; i += 2
+        elif a == "--timeout":
+            timeout = int(argv[i + 1]); i += 2
         elif a == "--clear-state":
             clear = True; i += 1
         elif a.startswith("--"):
@@ -671,10 +689,10 @@ def main():
         sys.exit(2)
 
     if cmd == "path":
-        _, all_notes = emit_flow(mp, steps, inputs, "x", clear, notes)   # 補足だけ取る
+        _, all_notes = emit_flow(mp, steps, inputs, "x", clear, notes, timeout)   # 補足だけ取る
         print(emit_path(mp, steps, inputs, all_notes))
         return
-    flow, _ = emit_flow(mp, steps, inputs, app, clear, notes)
+    flow, _ = emit_flow(mp, steps, inputs, app, clear, notes, timeout)
     sys.stdout.write(flow)   # 補足はフローの中にコメントで入っている
 
 

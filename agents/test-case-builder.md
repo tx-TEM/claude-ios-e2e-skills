@@ -142,7 +142,10 @@ appId: jp.example.AozoraReader
 
 - 履歴画面（未マップ）
 - root.bannerImage は in_tree: false で、promo へ経路が無い
+- browse の `tap Search` に expect が無く、押した結果が機械判定にならない
 ```
+
+- **`route.py` が出した「expect がマップに無い」の補足は、必ずここに載せる。** sim-driver はフロー項目でダンプを取らないので、**`expect` の無い操作は証跡のPNGだけが根拠**になる。足せばそのまま機械判定になる箇所が特定されている状態なので、捨てない
 
 - **フローは全文そのまま返す。** 要約しない。呼び出し元はこれをそのままレビューに出し、sim-driver に渡す
 - 判断に迷った箇所、`check` で見えた限界、マップと実装の食い違いは省かずに書く

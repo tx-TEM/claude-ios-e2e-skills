@@ -2,7 +2,8 @@
 """Maestro の MCP サーバーを常駐させ、細いクライアントから叩く。
 
   maestrod.py inspect <UDID> <名前> [幅 高さ]                   画面を読む
-  maestrod.py run     <UDID> '<flow yaml>'                      操作する
+  maestrod.py run     <UDID> '<flow yaml>' [名前 幅 高さ]       操作する
+                      （落ちたら、落ちた地点の画面を出す）
   maestrod.py tap     <UDID> <x> <y> <名前> [幅 高さ] [bundle]  タップ→確認
   maestrod.py stop    [UDID]                                    止める（省くと全部）
   maestrod.py sweep   [日数]                                    .work の後片付け
@@ -404,13 +405,27 @@ def main():
         return cmd_tap(udid, x, y, name, w, h, bundle)
     if cmd == "run":
         udid, yaml = sys.argv[2], sys.argv[3]
+        name = sys.argv[4] if len(sys.argv) > 4 else "failed"
+        w, h = (sys.argv[5], sys.argv[6]) if len(sys.argv) > 6 else ("390", "844")
         r = call(udid, "run", {"device_id": udid, "yaml": yaml})
         # JSON-RPCが成功でも、ツールの本文が失敗を伝えていることがある。
         # 両方見ないと、落ちた操作を成功として報告してしまう。
         body = r["text"]
         good = r["ok"] and body.lstrip().startswith('{"success":true')
         print(("OK " if good else "失敗 ") + body[:300])
+        sys.stdout.flush()   # 失敗の理由を、後ろに続くダンプより先に出す
         if not good:
+            # **落ちた地点の画面を出す。** Maestro が返すのは「どの行で落ちたか」
+            # だけで、そのとき何が出ていたかは言わない。フローが唯一の検証手段に
+            # なった以上、ここを取り逃すと原因を追う手がかりがゼロになる。
+            # Maestro は失敗した時点で止まるので、画面はその状態のまま残っている。
+            print(f"\n--- 落ちた地点の画面（{name}）", file=sys.stderr)
+            try:
+                cmd_inspect(udid, name, w, h)
+            except SystemExit as e:
+                # ダンプも取れないのは、ドライバごと壊れているとき。
+                # 元の失敗を隠さないよう、状況だけ足して同じ終了コードで終わる。
+                print(f"画面も読めなかった: {e}", file=sys.stderr)
             sys.exit(1)
         return
     sys.exit(__doc__)
