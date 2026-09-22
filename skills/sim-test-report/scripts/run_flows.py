@@ -25,6 +25,10 @@
 レポートに出る。`build_report.py` は `PENDING` を弾くので、そこで止まる。
 初回は元から `PENDING` なので何も起きない。
 
+**実行時に決める値があるフローは2本に割れている。** 前半（`pre_flow`）が目的の
+画面まで運び、後半が値を使う。**前半を走らせてから止まる** — 着いていないと、
+値を決めるために画面を見ることができない。再開のときは前半を飛ばす（もうそこに居る）。
+
 **値はフローに書き戻さない。** マニフェストの `inputs` を走らせる直前に env へ
 入れる。フローに残すと、次の実行で「もう埋まっている」ことになり、データが
 変わっても古い値で走る。
@@ -114,13 +118,27 @@ def main():
         #
         # **止まった時点でアプリはその画面に居る。** 呼ぶ側はそれを見て値を決め、
         # `--from` で再開する。手前を撮り直さないので、鎖は一息のまま。
-        holes = [k for k, v in (sec.get("inputs") or {}).items() if not v]
-        if holes:
+        # 値を使う操作の手前までを先に走らせる。**決めるには着いていないといけない。**
+        # 再開のときは飛ばす（前の実行で走っていて、アプリはもうそこに居る）。
+        if sec.get("pre_flow") and not (resume and name == resume):
+            pre = flow_dir / sec["pre_flow"]
+            if not pre.exists():
+                sys.exit(f"{i:02d} 前半のフローが無い: {pre}")
+            if sh(["run", udid, "@" + str(pre), name + ".pre", str(shots)], quiet=False) != 0:
+                broken = True
+                lost.append(line)
+                with log.open("a", encoding="utf-8") as f:
+                    f.write(f"{line} 撮影できず 前半のフローが失敗\n")
+                print(f"{line} 前半で失敗。次に起動し直すフローまで飛ばす", file=sys.stderr)
+                continue
+
+        undecided = [k for k, v in (sec.get("inputs") or {}).items() if not v]
+        if undecided:
             broken = True
             lost.append(line)
             with log.open("a", encoding="utf-8") as f:
-                f.write(f"{line} 撮影せず 入力が未定（{', '.join(holes)}）\n")
-            print(f"{line} 入力が未定（{', '.join(holes)}）。いまこの画面に居るので、"
+                f.write(f"{line} 撮影せず 入力が未定（{', '.join(undecided)}）\n")
+            print(f"{line} 入力が未定（{', '.join(undecided)}）。いまこの画面に居るので、"
                   f"見て埋めてから --from {name} で再開する", file=sys.stderr)
             continue
 

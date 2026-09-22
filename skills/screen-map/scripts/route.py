@@ -24,7 +24,7 @@
     --input <id>=<値>  text 操作で打つ文字。マップは値を持たないので呼ぶ側が渡す
     --runtime <操作id> **その操作の値を実行時に決める**（`text:browse.searchField`
                        `tap:browse.bookRow.*`）。フローには値を焼き込まず、`env` の
-                       穴として残す。打つ文字にも、どの行を叩くかにも使える。着いた
+                       未定のまま残す。打つ文字にも、どの行を叩くかにも使える。着いた
                        画面を見ないと決まらないときに。**埋まっていないことが走らせる
                        前に分かる** — 焼き込むと、データが変わっても古い値で黙って走る
     --app <bundle id>  flow のときだけ必須
@@ -553,9 +553,9 @@ def emit_flow(mp, steps, inputs, app, clear_state, notes=None, timeout=10000,
     """`launch=False` はアプリを起動し直さない。続きのフローを出すため。"""
     notes = list(notes or [])
     start = start or mp.start
-    # **実行時に決める入力は env の穴として残す。** 値を焼き込むと、
-    # データが変わったときに黙って古い値で走る。穴なら、埋まっていないことが
-    # 走らせる前に分かる。
+    # **実行時に決める値は env に未定のまま置く。** 値を焼き込むと、
+    # データが変わったときに黙って古い値で走る。未定のままなら、埋まっていない
+    # ことが走らせる前に分かる。
     used = [var_name(op_of(st["action"])[1]) for st in steps
             if "shot" not in st and not st.get("restart")
             and is_runtime(*op_of(st["action"]), runtime)]
@@ -680,6 +680,11 @@ def split_at_shots(mp, steps, start, launch_first=True):
     返す4つ目は**そのフローが自分で起動するか。** 1本目と、`--restart` の直後が
     そう。**ここが鎖の切れ目**で、走らせる側は落ちたときにどこまで諦めるかを
     これで決める（次に起動するフローからは、前が落ちていても走る）。
+
+    5つ目は**値を決める操作の手前までを、別に走らせるためのステップ列**
+    （無ければ空）。実行時に決める値があるフローは、走らせる側が画面を見て値を
+    決める。**そのとき目的の画面に着いていないと決めようがない。** 遷移や起動を
+    含んだまま止めると、まだ着いていない。手前で切って先に走らせる。
     """
     out, cur, at = [], [], start or mp.start
     seg_start, launch = at, launch_first
@@ -698,6 +703,20 @@ def split_at_shots(mp, steps, start, launch_first=True):
     if cur:
         out.append((seg_start, cur, None, launch))
     return out
+
+
+def split_before_runtime(mp, seg_start, seg_steps, runtime):
+    """実行時に決める操作の手前で切る。(前半, 前半が着く画面, 後半) を返す。"""
+    for n, st in enumerate(seg_steps):
+        if "shot" in st or st.get("restart"):
+            continue
+        if is_runtime(*op_of(st["action"]), runtime):
+            at = seg_start
+            for prev in seg_steps[:n]:
+                if prev.get("to"):
+                    at = prev["to"]
+            return seg_steps[:n], at, seg_steps[n:]
+    return [], seg_start, seg_steps   # 無し。`main_steps is seg_steps` で判る
 
 
 def emit_path(mp, steps, inputs, notes, start=None):
@@ -1044,19 +1063,30 @@ def main():
         d.mkdir(parents=True, exist_ok=True)
         written = []
         for n, (seg_start, seg_steps, shot_name, lch) in enumerate(segs, 1):
+            # 実行時に決める操作があれば手前で切る。前半を先に流し、着いてから値を決める
+            pre_steps, resume_at, main_steps = split_before_runtime(mp, seg_start, seg_steps, runtime)
+            base = "{:02d}_{}".format(n, shot_name or "tail")
+            # 起動も前半に出す。値を決める前に止めたとき、起動していなければ画面は見えない
+            pre_name = None
+            if pre_steps or (lch and main_steps is not seg_steps):
+                pre, _ = emit_flow(mp, pre_steps, inputs, app, clear, notes, timeout,
+                                   seg_start, launch=lch, runtime=runtime)
+                pre_name = base + ".pre.yaml"
+                (d / pre_name).write_text(pre, encoding="utf-8")
+
             # 自分で起動するのは1本目と --restart の直後。他は居る場所から続ける
-            flow, _ = emit_flow(mp, seg_steps, inputs, app, clear, notes, timeout,
-                                seg_start, launch=lch, runtime=runtime)
-            name = "{:02d}_{}.yaml".format(n, shot_name or "tail")
+            flow, _ = emit_flow(mp, main_steps, inputs, app, clear, notes, timeout,
+                                resume_at, launch=lch and pre_name is None, runtime=runtime)
+            name = base + ".yaml"
             (d / name).write_text(flow, encoding="utf-8")
             screen, checked = shot_context(mp, seg_start, seg_steps)
             shot_path = next((st["shot"] for st in seg_steps if "shot" in st), None)
-            holes = {var_name(op_of(st["action"])[1]): "" for st in seg_steps
+            runtime_inputs = {var_name(op_of(st["action"])[1]): "" for st in seg_steps
                      if "shot" not in st and not st.get("restart")
                      and is_runtime(*op_of(st["action"]), runtime)}
             written.append({"name": shot_name, "screen": screen, "checked": checked,
-                            "flow": name, "shot": shot_path, "launch": lch,
-                            "inputs": holes})
+                            "pre_flow": pre_name, "flow": name, "shot": shot_path,
+                            "launch": lch, "inputs": runtime_inputs})
         # 一覧は必ず書く。`--out-dir` を使う時点で1実行ぶんのフロー一式なので、
         # 出すか出さないかを選ばせる意味が無い（付け忘れる余地になるだけ）。
         (d / "index.json").write_text(

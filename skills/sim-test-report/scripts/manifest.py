@@ -109,6 +109,7 @@ def main():
             "checked": e.get("checked"),       # None なら証跡だけが根拠
             "launch": e.get("launch"),         # true なら、ここでアプリを起動し直す
             "inputs": e.get("inputs") or {},    # 空の値があるうちは走らせられない
+            "pre_flow": e.get("pre_flow"),      # 値を決める操作の手前まで。先に走らせる
             "flow": e.get("flow"),
             "images": [{"src": f"shots/{name}.png"}],
             "dump": f"shots/{name}.txt",
