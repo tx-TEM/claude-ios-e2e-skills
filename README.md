@@ -58,16 +58,22 @@ python3 ~/.claude/skills/screen-map/scripts/route.py flow --app <bundle id> \
   --restart --goto browse --do scroll:down --shot …
 ```
 
-```
-  browse  text browse.searchField "夏目"    ✓ browse.searchField が出ている
-          撮影 iphone_02_debounce_filtered
-  browse  tap Search                      — 機械判定なし。証跡で見る
-  …
-  機械判定 12件 / 証跡でしか見られない 6件
-
-  フロー（10本）: …/.work/flows/general-flow
-    01_iphone_01_browse_initial.yaml ★起動し直す  →  機械判定 browse
-    02_iphone_02_debounce_filtered.yaml          →  機械判定 browse.searchField
+```yaml
+appId: tx-tem.AozoraReaderClient
+---
+- extendedWaitUntil:
+    visible:
+      id: '^browse$'
+    timeout: 10000
+- tapOn:
+    id: '^browse\.searchField$'
+- eraseText
+- inputText: '夏目'
+- extendedWaitUntil:
+    visible:
+      id: '^browse\.searchField$'
+    timeout: 10000
+- takeScreenshot: '<出力先>/shots/iphone_02_debounce_filtered'
 ```
 
 画面マップが無いアプリでは、この手順を飛ばす。マップはあっても経路が組めない項目（未マップの画面、座標が要る操作）は理由つきで返る。どちらも LLM（`sim-driver`）が画面を見ながら探索して撮る。
@@ -84,9 +90,9 @@ python3 ~/.claude/skills/sim-test-report/scripts/manifest.py \
 ```json
 {
   "name": "iphone_02_debounce_filtered",
-  "title": "",
+  "title": "キーワードを打つと入力が止まってから絞り込みが走る",
   "screen": "browse",
-  "expect": "",
+  "expect": "「夏目」を打って 300ms 待つと 6 件に絞り込まれ、先頭行が「温情の裕かな夏目さん」（内田 魯庵）になる",
   "checked": "browse.searchField",
   "launch": false,
   "flow": "02_iphone_02_debounce_filtered.yaml",
@@ -95,14 +101,6 @@ python3 ~/.claude/skills/sim-test-report/scripts/manifest.py \
   "desc": "",
   "result": "未判定"
 }
-```
-
-空いた `title` と `expect` をテストケースで埋める。
-
-```json
-"title":  "キーワードを打つと入力が止まってから絞り込みが走る",
-"expect": "「夏目」を打って 300ms 待つと 6 件に絞り込まれ、先頭行が
-           「温情の裕かな夏目さん」（内田 魯庵）になる。キーボードは開いたまま"
 ```
 
 経路が組めなかった項目も、フローを持たないセクションとして同じファイルに並べる。
