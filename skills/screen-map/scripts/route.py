@@ -852,11 +852,14 @@ def cmd_check(mp):
 
 def main():
     argv = sys.argv[1:]
-    if not argv or argv[0] in ("-h", "--help"):
+    # 使い方を訊かれたのは失敗ではない。標準出力に出して 0 で終わる
+    # （`&&` で繋いだ先が続けられるように）。引数が無いのは失敗なので 1
+    if "--help" in argv or "-h" in argv:
+        print(__doc__)
+        sys.exit(0)
+    if not argv:
         sys.exit(__doc__)
     cmd, argv = argv[0], argv[1:]
-    if "--help" in argv or "-h" in argv:
-        sys.exit(__doc__)
 
     # --goto / --do / --shot は並び順がそのまま実行順になるので、1つの列に集める。
     # --input と --app はどこに書いてもよい（並びに意味を持たない）

@@ -111,9 +111,14 @@ ls <アプリのリポジトリ>/screen-map/config.yaml
 R=~/.claude/skills/screen-map/scripts/route.py
 M=<アプリのリポジトリ>
 
+python3 $R --help               # セグメントと引数の一覧
 python3 $R screens --map $M     # 画面の一覧
 python3 $R check   --map $M     # 到達できない画面、切れている箇所、マップの鮮度
 ```
+
+**`--help` を先に見る。** `--goto` `--do` `--shot` の並び順の意味も、`--input` `--from`
+`--out-dir` の使い分けも、そこに書いてある。**ソースを読みに行かない** — 1000行あり、
+読んでも `--help` 以上のことは分からない。
 
 （`$R` と `$M` は手順1で使ったものと同じ。）
 
