@@ -8,6 +8,7 @@
 | `screen-map` | Skill | iOSアプリの画面マップを画面単位で作る。ソースを読んで画面・遷移・確認箇所を特定し、`accessibilityIdentifier` を実装に振って `screen-map/screens/*.yaml` に落とす。`scripts/route.py` がそのマップから目的の画面までの経路を組み、`sim-test-report` が動作確認のフローとして使う |
 | `test-case-builder` | Agent | 確認項目を立て、画面マップがあれば実行できるフローまで組んで返す。コードの差分と画面マップを参照する。レビューを受けるのも実施も判定もしない。`sim-test-report` から呼ばれる |
 | `sim-driver` | Agent | シミュレーターを操作して証跡スクリーンショットを撮る。判定はせず観測した事実だけ返す。`sim-test-report` から呼ばれる |
+| `evidence-judge` | Agent | 証跡を読んでOK/NGを判定し、レポートまで作る。撮影はしない。`sim-test-report` から呼ばれる |
 
 ## セットアップ
 
@@ -99,7 +100,7 @@ python3 ~/.claude/skills/sim-test-report/scripts/manifest.py \
   "images": [{ "src": "shots/iphone_02_debounce_filtered.png" }],
   "dump": "shots/iphone_02_debounce_filtered.txt",
   "desc": "",
-  "result": "未判定"
+  "result": "PENDING"
 }
 ```
 
@@ -116,9 +117,9 @@ python3 ~/.claude/skills/sim-test-report/scripts/run_flows.py \
   <出力先>/manifest.json ~/.claude/skills/sim-test-report/.work/flows/<slug> <UDID>
 ```
 
-### 5. 判定を書き込む（LLM）
+### 5. 判定を書き込む（LLM / `evidence-judge`）
 
-撮影したスクリーンショットとダンプを見て、結果を記録する。
+撮影したスクリーンショットとダンプを見て、結果を記録する。渡すのは定義ファイルのパスだけで、確認項目も期待も証跡もそこに入っている。
 
 ### 6. レポートを組む（`build_report.py`）
 

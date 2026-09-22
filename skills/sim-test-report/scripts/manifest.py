@@ -25,7 +25,7 @@
 ファイル名）は route.py が既に計算したもので、**手で写すとタイポの余地ができる。**
 `--shot` の名前と manifest の `src` がずれても、走らせるまで誰も気づかない。
 
-`desc` と `result` は手順2で埋める。`result` を `未判定` で置くのは、
+`desc` と `result` は手順2で埋める。`result` を `PENDING` で置くのは、
 build_report.py が result の無いセクションを拒むため（判定していない項目が
 黙って OK で出ないように）。
 
@@ -108,7 +108,7 @@ def main():
             "images": [{"src": f"shots/{name}.png"}],
             "dump": f"shots/{name}.txt",
             "desc": prev.get("desc", ""),
-            "result": prev.get("result", "未判定"),
+            "result": prev.get("result", "PENDING"),
         })
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps({"title": title, "meta": meta, "sections": sections},

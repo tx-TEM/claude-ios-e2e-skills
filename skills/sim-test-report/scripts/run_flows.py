@@ -20,6 +20,11 @@
 打つ以外の仕事が無い。人（モデル）が組み立てると書式が崩れ、打ち間違いの余地が
 残る。進捗ログもここで固定の書式で書く。
 
+**撮った項目の判定は捨てる。** 画像とダンプが入れ替わった以上、前の `desc` は
+別の証跡についての文章になる。残すと、古い説明が新しい画像の隣で `OK` のまま
+レポートに出る。`build_report.py` は `PENDING` を弾くので、そこで止まる。
+初回は元から `PENDING` なので何も起きない。
+
 **落ちたら、次に起動し直すフローまで飛ばす。** 続きのフロー（`launch` が偽）は
 前のフローが終わった画面から始まるので、1本落ちたあとを走らせても意味がない。
 **`launch` が真のフローからは走らせる** — 自分で `stopApp` / `launchApp` するので、
@@ -86,10 +91,15 @@ def main():
             print(f"{line} 失敗。次に起動し直すフローまで飛ばす", file=sys.stderr)
             continue
         sh(["inspect", udid, name, str(shots)])   # 出力は捨てる
+        sec["desc"], sec["result"] = "", "PENDING"   # 証跡が入れ替わったので判定も捨てる
         done += 1
         with log.open("a", encoding="utf-8") as f:
             f.write(f"{line} 撮影済み\n")
         print(line + " 撮影済み")
+
+    if done:
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     print(f"\n{done}件を撮った: {shots}")
     if skipped:
