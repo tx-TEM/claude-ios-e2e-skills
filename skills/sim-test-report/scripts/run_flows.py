@@ -93,6 +93,10 @@ def sh(args, quiet=True):
 
 
 def main():
+    # 標準出力を行ごとに流す。既定のバッファのままだと、即時に出る標準エラーと
+    # 混ざったときに順番が入れ替わり、失敗の行が撮影済みの行より前に出る
+    sys.stdout.reconfigure(line_buffering=True)
+
     argv = sys.argv[1:]
     resume = None
     if "--from" in argv:
