@@ -544,6 +544,13 @@ def emit_flow(mp, steps, inputs, app, clear_state, notes=None, timeout=10000):
 
 
 def emit_path(mp, steps, inputs, notes):
+    """人が読む経路。**どこが機械判定でどこが証跡頼みかを明示する。**
+
+    フローを見せてレビューを受けるとき、いちばん知りたいのは「この確認は
+    何によって裏付けられるのか」。遷移は `anchor`、遷移しない操作は `expect`
+    が assert になるが、**`expect` を持たない操作は何も確かめていない**。
+    そこは証跡のPNGだけが根拠になるので、黙って並べない。
+    """
     at = mp.start
     chain = [at]
     for st in steps:
@@ -553,24 +560,43 @@ def emit_path(mp, steps, inputs, notes):
             at = st["to"]
             chain.append(at)
     out = [" → ".join(chain), ""]
+
     w = max([len(st["screen"]) for st in steps if "shot" not in st] + [len(mp.start), 4])
-    out.append("  {}  起点 (anchor: {})".format(
-        mp.start.ljust(w), (mp.screens.get(mp.start) or {}).get("anchor")))
+    rows, checked, unchecked = [], 0, 0
+
+    start_anchor = (mp.screens.get(mp.start) or {}).get("anchor")
+    rows.append(("  {}  起点".format(mp.start.ljust(w)),
+                 "✓ {} が出ている".format(start_anchor) if start_anchor else "— anchor が無い"))
+    if start_anchor:
+        checked += 1
+    else:
+        unchecked += 1
+
     for st in steps:
         if "shot" in st:
-            out.append("  {}  撮影 {}".format("".ljust(w), st["shot"]))
+            rows.append(("  {}  撮影 {}".format("".ljust(w), st["shot"]), ""))
             continue
         a = st["action"]
         op, target = op_of(a)
-        after = ""
+        extra = ' "{}"'.format(inputs.get(target, "")) if op == "text" else ""
+        left = "  {}  {}{}".format(st["screen"].ljust(w), label_of(a), extra)
         if st.get("to"):
-            after = "→ {}".format(st["to"])
+            dest = (mp.screens.get(st["to"]) or {}).get("anchor")
+            right = "✓ {} に着いたことを確認".format(st["to"]) if dest else "— {} に anchor が無い".format(st["to"])
         elif a.get("expect"):
-            after = "expect {}".format(a["expect"])
-        extra = ""
-        if op == "text":
-            extra = ' "{}"'.format(inputs.get(target, ""))
-        out.append("  {}  {}{}  {}".format(st["screen"].ljust(w), label_of(a), extra, after))
+            right = "✓ {} が出ている".format(a["expect"])
+        else:
+            right = "— 機械判定なし。証跡で見る"
+        checked += right.startswith("✓")
+        unchecked += right.startswith("—")
+        rows.append((left, right))
+
+    pad = max(len(l) for l, _ in rows)
+    for left, right in rows:
+        out.append(left if not right else "{}  {}".format(left.ljust(pad), right))
+
+    out.append("")
+    out.append("  機械判定 {}件 / 証跡でしか見られない {}件".format(checked, unchecked))
     for n in notes:
         out.append("  補足: " + n)
     return "\n".join(out)
