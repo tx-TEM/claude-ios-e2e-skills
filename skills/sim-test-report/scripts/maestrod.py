@@ -344,6 +344,35 @@ def cmd_tap(udid, x, y, name, bundle):
         moved = f" → {before} から {after} へ"
     print(f"\nタップ ({x},{y})" + (f" 「{on}」" if on else "") + moved)
 
+def cmd_run(udid, yaml, name="failed"):
+    """フローを走らせる。落ちたら、落ちた地点の画面まで出す。
+
+    `yaml` が `@` で始まればファイルから読む。組み立てた側が書いたものを、
+    引数に貼り直さずに走らせるため。
+    """
+    if yaml.startswith("@"):
+        yaml = Path(yaml[1:]).expanduser().read_text(encoding="utf-8")
+    r = call(udid, "run", {"device_id": udid, "yaml": yaml})
+    # JSON-RPCが成功でも、ツールの本文が失敗を伝えていることがある。
+    # 両方見ないと、落ちた操作を成功として報告してしまう。
+    body = r["text"]
+    good = r["ok"] and body.lstrip().startswith('{"success":true')
+    print(("OK " if good else "失敗 ") + body[:300])
+    sys.stdout.flush()   # 失敗の理由を、後ろに続くダンプより先に出す
+    if good:
+        return
+    # Maestro が返すのは「どの行で落ちたか」だけで、そのとき何が出ていたかは
+    # 言わない。失敗した時点で止まるので、画面はその状態のまま残っている。
+    print(f"\n--- 落ちた地点の画面（{name}）", file=sys.stderr)
+    try:
+        cmd_inspect(udid, name)
+    except SystemExit as e:
+        # ダンプも取れないのは、ドライバごと壊れているとき。
+        # 元の失敗を隠さないよう、状況だけ足して同じ終了コードで終わる。
+        print(f"画面も読めなかった: {e}", file=sys.stderr)
+    sys.exit(1)
+
+
 def cmd_sweep(days):
     """.work の古いものを消す。`.txt` だけは残す。
 
@@ -402,32 +431,8 @@ def main():
         return cmd_tap(udid, x, y, name, bundle)
     if cmd == "run":
         udid, yaml = sys.argv[2], sys.argv[3]
-        # `@パス` でファイルから読む。組み立てた側が書いたものを、
-        # 引数に貼り直さずに走らせるため。
-        if yaml.startswith("@"):
-            yaml = Path(yaml[1:]).expanduser().read_text(encoding="utf-8")
         name = sys.argv[4] if len(sys.argv) > 4 else "failed"
-        r = call(udid, "run", {"device_id": udid, "yaml": yaml})
-        # JSON-RPCが成功でも、ツールの本文が失敗を伝えていることがある。
-        # 両方見ないと、落ちた操作を成功として報告してしまう。
-        body = r["text"]
-        good = r["ok"] and body.lstrip().startswith('{"success":true')
-        print(("OK " if good else "失敗 ") + body[:300])
-        sys.stdout.flush()   # 失敗の理由を、後ろに続くダンプより先に出す
-        if not good:
-            # **落ちた地点の画面を出す。** Maestro が返すのは「どの行で落ちたか」
-            # だけで、そのとき何が出ていたかは言わない。フローが唯一の検証手段に
-            # なった以上、ここを取り逃すと原因を追う手がかりがゼロになる。
-            # Maestro は失敗した時点で止まるので、画面はその状態のまま残っている。
-            print(f"\n--- 落ちた地点の画面（{name}）", file=sys.stderr)
-            try:
-                cmd_inspect(udid, name)
-            except SystemExit as e:
-                # ダンプも取れないのは、ドライバごと壊れているとき。
-                # 元の失敗を隠さないよう、状況だけ足して同じ終了コードで終わる。
-                print(f"画面も読めなかった: {e}", file=sys.stderr)
-            sys.exit(1)
-        return
+        return cmd_run(udid, yaml, name)
     sys.exit(__doc__)
 
 main()
