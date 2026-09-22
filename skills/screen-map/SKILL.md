@@ -214,10 +214,8 @@ actions:
 
 ```bash
 xcrun simctl list devices booted
-python3 ~/.claude/skills/sim-test-report/scripts/maestrod.py inspect <UDID> <名前> <幅> <高さ>
+python3 ~/.claude/skills/sim-test-report/scripts/maestrod.py inspect <UDID> <名前>
 ```
-
-`<幅> <高さ>` は画面のポイント寸法（iPhone 11 Pro なら 375×812）。機種ごとに違う。
 
 **各画面へは、書いたばかりの `actions` を辿って行く。** これが**マップの最初の実地テスト**になる。辿れなかったら、IDが出ていないか `to` が間違っているかのどちらかなので、そこで直す。
 

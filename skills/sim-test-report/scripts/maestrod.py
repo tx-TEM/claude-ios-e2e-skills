@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Maestro の MCP サーバーを常駐させ、細いクライアントから叩く。
 
-  maestrod.py inspect <UDID> <名前> [幅 高さ]                   画面を読む
-  maestrod.py run     <UDID> <flow yaml|@ファイル> [名前 幅 高さ]  操作する
+  maestrod.py inspect <UDID> <名前>                             画面を読む
+  maestrod.py run     <UDID> <flow yaml|@ファイル> [名前]       操作する
                       （落ちたら、落ちた地点の画面を出す）
-  maestrod.py tap     <UDID> <x> <y> <名前> [幅 高さ] [bundle]  タップ→確認
+  maestrod.py tap     <UDID> <x> <y> <名前> [bundle]            タップ→確認
   maestrod.py stop    [UDID]                                    止める（省くと全部）
   maestrod.py sweep   [日数]                                    .work の後片付け
 
@@ -277,7 +277,7 @@ def screen_of(text):
               for l in text.splitlines() if l.startswith("画面: ")), None)
     return None if (s is None or s.startswith("【不明】")) else s
 
-def cmd_inspect(udid, name, w, h):
+def cmd_inspect(udid, name):
     r = call(udid, "inspect_screen", {"device_id": udid})
     if not r["ok"] or not r["text"].lstrip().startswith('{"ui_schema"'):
         sys.exit(f"画面を読めなかった: {r['text'][:200]}\n"
@@ -285,7 +285,7 @@ def cmd_inspect(udid, name, w, h):
     WORK.mkdir(parents=True, exist_ok=True)
     raw = WORK / f"{name}.json"
     raw.write_text(r["text"])
-    out = subprocess.run([sys.executable, str(HERE / "elements.py"), str(raw), w, h],
+    out = subprocess.run([sys.executable, str(HERE / "elements.py"), str(raw)],
                          capture_output=True, text=True)
     (WORK / f"{name}.txt").write_text(out.stdout)
     # タップ時に「その座標に何があったか」「画面が変わったか」を見るために、
@@ -314,7 +314,7 @@ def label_at(udid, x, y, tol=40):
             best = (d, lab)
     return best[1] if best else None
 
-def cmd_tap(udid, x, y, name, w, h, bundle):
+def cmd_tap(udid, x, y, name, bundle):
     """タップし、画面が変わったかまで見て返す。
 
     タップの前後はどのみちダンプを取るので、前後の画面識別子を
@@ -330,7 +330,7 @@ def cmd_tap(udid, x, y, name, w, h, bundle):
     if not (r["ok"] and r["text"].lstrip().startswith('{"success":true')):
         sys.exit(f"タップできなかった: {r['text'][:200]}")
 
-    cmd_inspect(udid, name, w, h)
+    cmd_inspect(udid, name)
 
     after = (WORK / f".last_screen_{udid}").read_text().strip() \
         if (WORK / f".last_screen_{udid}").exists() else None
@@ -395,14 +395,11 @@ def main():
     if cmd == "sweep":
         return cmd_sweep(int(sys.argv[2]) if len(sys.argv) > 2 else 14)
     if cmd == "inspect":
-        udid, name = sys.argv[2], sys.argv[3]
-        w, h = (sys.argv[4], sys.argv[5]) if len(sys.argv) > 5 else ("390", "844")
-        return cmd_inspect(udid, name, w, h)
+        return cmd_inspect(sys.argv[2], sys.argv[3])
     if cmd == "tap":
         udid, x, y, name = sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), sys.argv[5]
-        w, h = (sys.argv[6], sys.argv[7]) if len(sys.argv) > 7 else ("390", "844")
-        bundle = sys.argv[8] if len(sys.argv) > 8 else None
-        return cmd_tap(udid, x, y, name, w, h, bundle)
+        bundle = sys.argv[6] if len(sys.argv) > 6 else None
+        return cmd_tap(udid, x, y, name, bundle)
     if cmd == "run":
         udid, yaml = sys.argv[2], sys.argv[3]
         # `@パス` でファイルから読む。組み立てた側が書いたものを、
@@ -410,7 +407,6 @@ def main():
         if yaml.startswith("@"):
             yaml = Path(yaml[1:]).expanduser().read_text(encoding="utf-8")
         name = sys.argv[4] if len(sys.argv) > 4 else "failed"
-        w, h = (sys.argv[5], sys.argv[6]) if len(sys.argv) > 6 else ("390", "844")
         r = call(udid, "run", {"device_id": udid, "yaml": yaml})
         # JSON-RPCが成功でも、ツールの本文が失敗を伝えていることがある。
         # 両方見ないと、落ちた操作を成功として報告してしまう。
@@ -425,7 +421,7 @@ def main():
             # Maestro は失敗した時点で止まるので、画面はその状態のまま残っている。
             print(f"\n--- 落ちた地点の画面（{name}）", file=sys.stderr)
             try:
-                cmd_inspect(udid, name, w, h)
+                cmd_inspect(udid, name)
             except SystemExit as e:
                 # ダンプも取れないのは、ドライバごと壊れているとき。
                 # 元の失敗を隠さないよう、状況だけ足して同じ終了コードで終わる。

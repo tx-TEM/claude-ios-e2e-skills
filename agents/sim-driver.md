@@ -30,8 +30,6 @@ xcrun simctl list devices booted
 
 対象のUDIDが一覧に無い場合は、**自分で起動せずその旨を報告して止まる。** どの端末で確認するかは呼び出し元がユーザーと合意している前提で、勝手に別の起動中デバイスで代用すると、全項目が想定と違う端末の証跡になる。
 
-画面のポイント寸法を控えておく。`attach` / `launch` の戻り値に出る（iPhone 11 Pro なら 375×812、iPadは機種ごとに異なる）。以降のダンプでこの値を使う。
-
 # 作業用ファイルの置き場
 
 ダンプ、Maestro の出力、使い捨てのフローは次に置く。呼び出し元から渡された出力先には**証跡だけ**を入れ、作業用ファイルを混ぜない。
@@ -49,13 +47,13 @@ git 管理外。前の実行の残りがあってよく、14日より古いも�
 **渡されるのはファイルのパス。** `@` を付けて渡すと `run` がそこから読む。
 
 ```bash
-python3 $M run <UDID> "@<渡されたフローのパス>" <名前> <幅> <高さ> \
+python3 $M run <UDID> "@<渡されたフローのパス>" <名前> \
   && echo "<項番> 撮影済み <ファイル名>" >> <進捗ログのパス>
 ```
 
 **中身を開いて貼り直さない。** 読む必要も無い。打ち直せば1文字変わる余地ができ、変わったまま通ってしまう。
 
-`<名前>` は落ちたときのダンプに使う名前（証跡と揃える。`iphone_04_detail`）。`<幅> <高さ>` は画面のポイント寸法。**通れば使われない。**
+`<名前>` は落ちたときのダンプに使う名前（証跡と揃える。`iphone_04_detail`）。**通れば使われない。**
 
 **これで1項目ぶんが終わる。** フローには各画面の到達判定（`extendedWaitUntil`）と撮影（`takeScreenshot`）が積んであるので、後ろに足すものが無い。
 
@@ -116,8 +114,8 @@ python3 $M run <UDID> "@<渡されたフローのパス>" <名前> <幅> <高さ
 ```bash
 M=~/.claude/skills/sim-test-report/scripts/maestrod.py
 
-python3 $M inspect <UDID> <名前> <幅> <高さ>                      # 画面を読む
-python3 $M tap     <UDID> <x> <y> <名前> <幅> <高さ> <bundle id>  # タップ→確認
+python3 $M inspect <UDID> <名前>                      # 画面を読む
+python3 $M tap     <UDID> <x> <y> <名前> <bundle id>  # タップ→確認
 python3 $M run     <UDID> '<flow yaml>'                           # スクロールなど
 python3 $M stop    <UDID>                                         # 撮影が終わったら止める
 ```
@@ -141,7 +139,7 @@ python3 $M stop    <UDID>                                         # 撮影が終
 
 **生のJSONを自分で読まない。** 約8KBで、そのまま読むと1回2千トークン超。`inspect` が渡してくるのは抽出後の約1.6KBだけなので、そちらで判断する。
 
-MCP が使えない環境では `dump.sh <UDID> <名前> <幅> <高さ>` が退避路になる（`maestro hierarchy` を都度起動する。1回16.6秒）。`elements.py` は両方の形式を受ける。
+MCP が使えない環境では `dump.sh <UDID> <名前>` が退避路になる（`maestro hierarchy` を都度起動する。1回16.6秒）。`elements.py` は両方の形式を受ける。
 
 ## 落ちたとき
 
@@ -255,7 +253,7 @@ python3 $M run <UDID> 'appId: <bundle id>
 - eraseText
 - inputText: "<キーワード>"
 - pressKey: Enter' \
-  && python3 $M inspect <UDID> <名前> <幅> <高さ> \
+  && python3 $M inspect <UDID> <名前> \
   && xcrun simctl io <UDID> screenshot <出力先>/<端末名>_<連番>_<slug>.png \
   && echo "<項番> 撮影済み <ファイル名> <観測した事実>" >> <進捗ログのパス>
 ```
@@ -282,7 +280,7 @@ python3 $M run <UDID> 'appId: <bundle id>
 - eraseText
 - inputText: "<キーワード>"
 - pressKey: Enter' \
-  && python3 $M inspect <UDID> <名前> <幅> <高さ> \
+  && python3 $M inspect <UDID> <名前> \
   && xcrun simctl io <UDID> screenshot <出力先>/<端末名>_<連番>_<slug>.png \
   && echo "<項番> 撮影済み <ファイル名> <観測した事実>" >> <進捗ログのパス>
 ```

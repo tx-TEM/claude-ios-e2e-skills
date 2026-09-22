@@ -2,7 +2,7 @@
 #
 # ビュー階層のダンプを取り、生JSONと抽出結果の両方を .work/ に残す。
 #
-#   dump.sh <UDID> <名前> [画面幅 画面高]
+#   dump.sh <UDID> <名前>
 #
 # 生成物
 #   .work/<名前>.json   maestro hierarchy の出力そのまま
@@ -21,8 +21,6 @@ set -euo pipefail
 
 UDID="${1:?UDID を渡す}"
 NAME="${2:?名前を渡す（例: iphone_03_before_tap）}"
-PT_W="${3:-390}"
-PT_H="${4:-844}"
 
 SCRIPTS="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 WORK="$(cd -- "$SCRIPTS/.." && pwd)/.work"
@@ -67,7 +65,7 @@ if [ ! -s "$WORK/$NAME.json" ]; then
   exit 1
 fi
 rm -f "$WORK/$NAME.raw" "$WORK/$NAME.err"
-python3 "$SCRIPTS/elements.py" "$WORK/$NAME.json" "$PT_W" "$PT_H" > "$WORK/$NAME.txt"
+python3 "$SCRIPTS/elements.py" "$WORK/$NAME.json" > "$WORK/$NAME.txt"
 
 grep -v '×' "$WORK/$NAME.txt" || true
 echo "生: $WORK/$NAME.json / 全行: $WORK/$NAME.txt" >&2
