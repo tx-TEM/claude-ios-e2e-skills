@@ -36,11 +36,13 @@ xcrun simctl list devices booted
 
 | | |
 |---|---|
-| `dumps/<名前>.json` | `inspect_screen` の生の出力（約9KB） |
-| `dumps/<名前>.txt` | 抽出結果。画面外の行も含む |
-| `flows/` | `route.py` が書いた使い捨てのフロー |
+| `dumps/<実行>/<名前>.json` | `inspect_screen` の生の出力（約9KB） |
+| `dumps/<実行>/<名前>.txt` | 抽出結果。画面外の行も含む |
+| `flows/<実行>/` | `route.py` が書いた使い捨てのフロー |
 | `state/` | 直近のダンプと画面識別子。`tap` が前後比較に読む |
 | `maestro/` | Maestro 自身の出力 |
+
+`<実行>` は証跡の出力先の名前（`sim-test-report-<slug>`）で、`inspect` に渡した保存先から決まる。**平置きにすると実行をまたいで上書きされる** — 証跡の名前は実行ごとに似るので、記録として残す意味が消える。
 
 git 管理外。前の実行の残りがあってよく、14日より古いものは呼び出し元が実行前に掃除する。**生JSONと使い捨てのフローが消えて `dumps/*.txt` と `state/` は残る**ので、過去に何を見て判断したかは後からでも追える。
 

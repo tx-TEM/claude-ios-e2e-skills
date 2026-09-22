@@ -34,8 +34,8 @@ HERE = Path(__file__).resolve().parent
 WORK = HERE.parent / ".work"
 # 用途ごとに分ける。混ぜると、残すもの（判断の記録）と捨ててよいもの（生データ、
 # 使い捨てのフロー）と、いま生きている状態（直近のダンプ）が見分けられない。
-DUMPS = WORK / "dumps"        # <名前>.json（生） / <名前>.txt（抽出後）
-FLOWS = WORK / "flows"        # route.py が書く使い捨てのフロー
+DUMPS = WORK / "dumps"        # <実行>/<名前>.json（生） / <名前>.txt（抽出後）
+FLOWS = WORK / "flows"        # <実行>/ 以下に route.py が書く使い捨てのフロー
 STATE = WORK / "state"        # 直近のダンプと画面。tap が読む
 # ソケットはデバイスごとに分けるが、**同時に生かすのは1本だけ**。
 #
@@ -283,18 +283,32 @@ def screen_of(text):
               for l in text.splitlines() if l.startswith("画面: ")), None)
     return None if (s is None or s.startswith("【不明】")) else s
 
+def run_key(save_to):
+    """実行の区切り。証跡の出力先（`…/sim-test-report-<slug>/shots`）から取る。
+
+    **平置きにすると実行をまたいで上書きされる。** 証跡の名前は実行ごとに
+    似るので（`iphone_01_list`）、記録として残す目的が果たせない。
+    出力先を渡されないとき（探索の下見など）は日付に落とす。
+    """
+    if save_to:
+        d = Path(save_to).expanduser().resolve()
+        return (d.parent.name if d.name == "shots" else d.name) or "misc"
+    return time.strftime("%Y-%m-%d")
+
+
 def cmd_inspect(udid, name, save_to=None):
     r = call(udid, "inspect_screen", {"device_id": udid})
     if not r["ok"] or not r["text"].lstrip().startswith('{"ui_schema"'):
         sys.exit(f"画面を読めなかった: {r['text'][:200]}\n"
                  "ドライバが壊れている可能性がある。maestrod.py stop してやり直す。")
     WORK.mkdir(parents=True, exist_ok=True)
-    DUMPS.mkdir(parents=True, exist_ok=True)
-    raw = DUMPS / f"{name}.json"
+    dumps = DUMPS / run_key(save_to)
+    dumps.mkdir(parents=True, exist_ok=True)
+    raw = dumps / f"{name}.json"
     raw.write_text(r["text"])
     out = subprocess.run([sys.executable, str(HERE / "elements.py"), str(raw)],
                          capture_output=True, text=True)
-    (DUMPS / f"{name}.txt").write_text(out.stdout)
+    (dumps / f"{name}.txt").write_text(out.stdout)
     # 証跡と同じ場所に同じ名前で置くと、判定する側が画像と対で読める。
     if save_to:
         d = Path(save_to).expanduser()
@@ -309,7 +323,7 @@ def cmd_inspect(udid, name, save_to=None):
     (STATE / f"last_dump_{udid}.txt").write_text(out.stdout)
     (STATE / f"last_screen_{udid}").write_text(screen_of(out.stdout) or UNKNOWN)
     print("\n".join(l for l in out.stdout.splitlines() if "×" not in l))
-    print(f"生: {raw} / 全行: {DUMPS / (name + '.txt')}", file=sys.stderr)
+    print(f"生: {raw} / 全行: {dumps / (name + '.txt')}", file=sys.stderr)
 
 def label_at(udid, x, y, tol=40):
     """直前のダンプで、その座標にいちばん近い要素のラベル。"""
@@ -402,7 +416,8 @@ def cmd_sweep(days):
                     freed += sum(f.stat().st_size for f in sub.rglob("*") if f.is_file())
                     shutil.rmtree(sub)
                     n += 1
-    # dumps は生だけ消す。flows は使い捨てなので全部消す
+    # dumps は生だけ消す。flows は使い捨てなので全部消す。
+    # どちらも実行ごとのディレクトリに入っているので、空になれば下で畳まれる
     targets = [(DUMPS, (".json",)), (FLOWS, None)]
     for d, suffixes in targets:
         if not d.exists():
