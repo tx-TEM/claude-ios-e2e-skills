@@ -82,6 +82,16 @@ def main():
     # 一覧のぶん（フローあり）＋ 探索のぶん。探索は末尾に積む
     entries = list(entries) + [{"name": n} for n in explore]
 
+    # route.py はフローの中でしか重複を見られない。--explore と衝突する余地が
+    # 残るのでここでも弾く。同名だと後から撮ったほうが上書きし、
+    # 2つの項目が同じ画像を指したまま通る。
+    seen = {}
+    for e in entries:
+        if e["name"] in seen:
+            sys.exit(f"証跡の名前が重なっている: {e['name']}"
+                     f"（{seen[e['name']]} と {e.get('flow') or '探索'}）")
+        seen[e["name"]] = e.get("flow") or "探索"
+
     sections, carried = [], 0
     for e in entries:
         name = e["name"]
