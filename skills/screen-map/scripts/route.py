@@ -23,6 +23,8 @@
     --out <パス>       フローをそのファイルに書き、標準出力には `path` と同じ
                        読める経路を出す。組めたときだけ書く
     --out-dir <dir>    **`--shot` ごとにフローを分けて**そのディレクトリに書く。
+                       あわせて `index.json`（撮影の名前・画面・機械判定のID・
+                       フローのファイル名）も置く。**呼ぶ側が写さずに済ませるため**
                        1本＝1枚＝1ダンプになるので、証跡と同名でダンプが取れる。
                        2本目以降は `--from` の続き（起動し直さない）
     --clear-state      起動時にアプリのデータも消す
@@ -45,6 +47,7 @@
 `summary` を読む判断より粗いのに、決定的なツールの見た目をまとう。**
 柔らかい判断は柔らかいまま人のレビューに出す（sim-test-report の手順0）。
 """
+import json
 import os
 import re
 import subprocess
@@ -576,6 +579,26 @@ def emit_flow(mp, steps, inputs, app, clear_state, notes=None, timeout=10000,
     return "\n".join(out) + "\n", notes
 
 
+def shot_context(mp, seg_start, seg_steps):
+    """そのフローが終わる画面と、最後に確かめたID。
+
+    索引に出すためのもの。**呼ぶ側が経路を読み直して導出せずに済ませる。**
+    確かめたIDが無い（`expect` を持たない操作で終わった）なら None で、
+    その証跡は機械判定なし＝画像だけが根拠になる。
+    """
+    at, checked = seg_start, (mp.screens.get(seg_start) or {}).get("anchor")
+    for st in seg_steps:
+        if "shot" in st:
+            continue
+        a = st["action"]
+        if st.get("to"):
+            at = st["to"]
+            checked = (mp.screens.get(at) or {}).get("anchor")
+        else:
+            checked = a.get("expect")
+    return at, checked
+
+
 def split_at_shots(mp, steps, start):
     """`--shot` ごとにステップを切り、(そのフローの起点, ステップ列, 撮る名前) で返す。
 
@@ -628,7 +651,8 @@ def emit_path(mp, steps, inputs, notes, start=None):
 
     for st in steps:
         if "shot" in st:
-            rows.append(("  {}  撮影 {}".format("".ljust(w), st["shot"]), ""))
+            # 撮影行は絶対パスで長い。右カラムを持たないので、桁揃えの計算から外す
+            rows.append(("  {}  撮影 {}".format("".ljust(w), os.path.basename(st["shot"])), None))
             continue
         a = st["action"]
         op, target = op_of(a)
@@ -645,7 +669,7 @@ def emit_path(mp, steps, inputs, notes, start=None):
         unchecked += right.startswith("—")
         rows.append((left, right))
 
-    pad = max(len(l) for l, _ in rows)
+    pad = max(len(l) for l, r in rows if r is not None)
     for left, right in rows:
         out.append(left if not right else "{}  {}".format(left.ljust(pad), right))
 
@@ -923,11 +947,21 @@ def main():
                                 seg_start, launch=(n == 1 and not resume))
             name = "{:02d}_{}.yaml".format(n, shot_name or "tail")
             (d / name).write_text(flow, encoding="utf-8")
-            written.append((name, shot_name))
+            screen, checked = shot_context(mp, seg_start, seg_steps)
+            shot_path = next((st["shot"] for st in seg_steps if "shot" in st), None)
+            written.append({"name": shot_name, "screen": screen, "checked": checked,
+                            "flow": name, "shot": shot_path})
+        # 索引は必ず書く。`--out-dir` を使う時点で1実行ぶんのフロー一式なので、
+        # 出すか出さないかを選ばせる意味が無い（付け忘れる余地になるだけ）。
+        (d / "index.json").write_text(
+            json.dumps([w for w in written if w["name"]], ensure_ascii=False, indent=2),
+            encoding="utf-8")
         print(emit_path(mp, steps, inputs, notes, resume))
         print("\n  フロー（{}本）: {}".format(len(written), out_dir))
-        for name, shot in written:
-            print("    {}  →  ダンプ名 {}".format(name, shot or "（撮影なし）"))
+        for w in written:
+            print("    {}  →  ダンプ名 {}  機械判定 {}".format(
+                w["flow"], w["name"] or "（撮影なし）", w["checked"] or "なし"))
+        print("  索引: {}/index.json".format(out_dir))
         return
     if out_path:
         # 組めたときだけ書く。失敗して空ファイルが残ると、それが走る。

@@ -44,6 +44,14 @@ check                          マップ全体の自己テスト（到達可否�
 
 組めなかった場合は理由を返して終了コード 2 で終わる。理由はマップの穴（未マップの画面、`in_tree: false`、`to` の先が無い）か、呼び方の間違い（`text` の値が未指定）のどちらか。
 
+## マニフェストの骨組みを作る
+
+`route.py --out-dir` が置いた `index.json` から、`manifest.json` の骨組みを作る。証跡1枚＝1セクションで、`title` と `expect` だけ空になる。
+
+```bash
+python3 skills/sim-test-report/scripts/manifest.py <索引.json> <出力先> --title "…" --meta "…"
+```
+
 ## レポート単体で生成する
 
 スキルを経由せずスクリプトだけ使うこともできる。マニフェストの形式は `skills/sim-test-report/scripts/build_report.py` 冒頭のdocstringを参照。
