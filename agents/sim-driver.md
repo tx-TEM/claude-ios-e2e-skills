@@ -132,7 +132,7 @@ shots/iphone_02_detail.txt    構造（要素の状態・入力欄の中身・�
 ```bash
 M=~/.claude/skills/sim-test-report/scripts/maestrod.py
 
-python3 $M inspect <UDID> <名前>                      # 画面を読む
+python3 $M inspect <UDID> <名前> [<出力先>/shots]     # 画面を読む
 python3 $M tap     <UDID> <x> <y> <名前> <bundle id>  # タップ→確認
 python3 $M run     <UDID> '<flow yaml>'                           # スクロールなど
 python3 $M stop    <UDID>                                         # 撮影が終わったら止める
@@ -147,6 +147,10 @@ python3 $M stop    <UDID>                                         # 撮影が終
 画面内の行が標準出力に出る。あわせて `.work/dumps/` に生と抽出後の両方が残る。
 
 **名前は証跡と揃える**（`iphone_03_before_tap`）。同じ項番で複数回取るときは、何をした後かを足す。付けないと上書きされ、**外した項目のダンプが残らない**。
+
+**証跡として残す地点では、第3引数に `<出力先>/shots` を渡す。** 証跡と同名で `.txt` が並び、判定する側が画像と対で読める。フロー項目と同じ形になる。**座標を探すための下見には渡さない**（証跡ではないので）。
+
+**撮影は別のコマンドのまま。** `inspect` は**下見と証跡の両方**に使うが、スクリーンショットは**証跡にしか使わない**。用途の広さが違うものを1つにすると、広いほうが「今回は撮るのか撮らないのか」というモードを持つことになる。`&&` で並べれば済む。
 
 **生と抽出後の両方を残す。** 生が無いと抽出スクリプトを直しても同じ画面で検証し直せない。抽出後が無いと、自分が何を見てその座標を選んだのかを呼び出し元が追えない。
 
@@ -266,8 +270,8 @@ python3 $M run <UDID> 'appId: <bundle id>
 - eraseText
 - inputText: "<キーワード>"
 - pressKey: Enter' \
-  && python3 $M inspect <UDID> <名前> \
-  && xcrun simctl io <UDID> screenshot <出力先>/<端末名>_<連番>_<slug>.png \
+  && python3 $M inspect <UDID> <名前> <出力先>/shots \
+  && xcrun simctl io <UDID> screenshot <出力先>/shots/<名前>.png \
   && echo "<項番> 撮影済み <ファイル名> <観測した事実>" >> <進捗ログのパス>
 ```
 
@@ -293,8 +297,8 @@ python3 $M run <UDID> 'appId: <bundle id>
 - eraseText
 - inputText: "<キーワード>"
 - pressKey: Enter' \
-  && python3 $M inspect <UDID> <名前> \
-  && xcrun simctl io <UDID> screenshot <出力先>/<端末名>_<連番>_<slug>.png \
+  && python3 $M inspect <UDID> <名前> <出力先>/shots \
+  && xcrun simctl io <UDID> screenshot <出力先>/shots/<名前>.png \
   && echo "<項番> 撮影済み <ファイル名> <観測した事実>" >> <進捗ログのパス>
 ```
 
