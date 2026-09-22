@@ -33,13 +33,15 @@
 入れる。フローに残すと、次の実行で「もう埋まっている」ことになり、データが
 変わっても古い値で走る。
 
+**未定で終わると、そこを `resume_from` に書く。** 次にもう一度叩けば続きから
+走るので、手前を撮り直さない。走り切ったら消える。`--from` はその上書き。
+
 **`--from` はそこから再開する。** 入力を埋めたあとに使う。**前を撮り直さない** —
 止まった時点でアプリはその画面に居るので、続きのフローはそのまま走る。手前から
 やり直すと、撮れている証跡を捨てて撮り直すことになる。
 
-**入力が埋まっていないセクションは走らせない。** `inputs` に空の値があるものは、
-着いた画面を見ないと打つ文字が決まらない。そこは sim-driver が画面を見て埋めて
-から走らせる。**その鎖の残りも飛ばす。**
+**入力が未定ならそこで終える。** 落ちたときは次の鎖へ進むが、こちらは進めない
+— 先へ走らせると画面が変わり、値を決めるために見ることができなくなる。
 
 **落ちたら、次に起動し直すフローまで飛ばす。** 続きのフロー（`launch` が偽）は
 前のフローが終わった画面から始まるので、1本落ちたあとを走らせても意味がない。
@@ -112,10 +114,12 @@ def main():
     shots.mkdir(parents=True, exist_ok=True)
 
     targets = [(i, s) for i, s in enumerate(manifest["sections"], 1) if s.get("flow")]
+    # 前の実行が未定で終わっていれば、そこから続ける。`--from` はその上書き
+    resume = resume or manifest.get("resume_from")
     if resume:
         names = [s["name"] for _, s in targets]
         if resume not in names:
-            sys.exit(f"--from の証跡 {resume} が見つからない。ある名前: {', '.join(names)}")
+            sys.exit(f"再開先の証跡 {resume} が見つからない。ある名前: {', '.join(names)}")
         targets = targets[names.index(resume):]
     skipped = [s.get("name") for s in manifest["sections"] if not s.get("flow")]
     if not targets:
@@ -157,15 +161,21 @@ def main():
             sys.exit(f"{i:02d} フローが無い: {flow}")
         body = flow.read_text(encoding="utf-8")
         need = required_env(body)
+        # **未定ならそこで終える。** 落ちたときは次の鎖へ進むが、こちらは進めない。
+        # 先へ走らせると画面が変わってしまい、値を決めるために見ることができない。
         undecided = [k for k in need if not (sec.get("inputs") or {}).get(k)]
         if undecided:
-            broken = True
-            lost.append(line)
             with log.open("a", encoding="utf-8") as f:
                 f.write(f"{line} 撮影せず 入力が未定（{', '.join(undecided)}）\n")
-            print(f"{line} 入力が未定（{', '.join(undecided)}）。いまこの画面に居るので、"
-                  f"見て埋めてから --from {name} で再開する", file=sys.stderr)
-            continue
+            manifest["resume_from"] = name
+            manifest_path.write_text(
+                json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            rest = [n for n, _ in targets[targets.index((i, sec)):]]
+            print(f"\n{line} 入力が未定（{', '.join(undecided)}）。")
+            print(f"いまこの画面に居る。見て {', '.join(undecided)} を決めて、"
+                  "もう一度叩けば続きから走る。")
+            print(f"ここから先の {len(rest)}件はまだ撮っていない。")
+            sys.exit(1)
 
         target = "@" + str(flow)
         for k in need:
@@ -189,6 +199,7 @@ def main():
             f.write(f"{line} 撮影済み\n")
         print(line + " 撮影済み")
 
+    manifest.pop("resume_from", None)
     if done:
         manifest_path.write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
