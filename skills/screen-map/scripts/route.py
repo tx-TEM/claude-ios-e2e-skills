@@ -16,6 +16,8 @@
   どこに書いてもよい引数
     --input <id>=<値>  text 操作で打つ文字。マップは値を持たないので呼ぶ側が渡す
     --app <bundle id>  flow のときだけ必須
+    --out <パス>       フローをそのファイルに書き、標準出力には `path` と同じ
+                       読める経路を出す。組めたときだけ書く
     --clear-state      起動時にアプリのデータも消す
     --timeout <ミリ秒> 画面や要素を待つ上限。既定 10000
     --map <dir>        画面マップの場所。省くとカレントから上へ screen-map/ を探す
@@ -783,7 +785,7 @@ def main():
     # --goto / --do / --shot は並び順がそのまま実行順になるので、1つの列に集める。
     # --input と --app はどこに書いてもよい（並びに意味を持たない）
     segments, inputs, app, clear, mapdir, rest = [], {}, None, False, None, []
-    timeout = 10000
+    timeout, out_path = 10000, None
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -793,6 +795,8 @@ def main():
             k, _, v = argv[i + 1].partition("="); inputs[k] = v; i += 2
         elif a == "--app":
             app = argv[i + 1]; i += 2
+        elif a == "--out":
+            out_path = argv[i + 1]; i += 2
         elif a == "--map":
             mapdir = argv[i + 1]; i += 2
         elif a == "--timeout":
@@ -845,6 +849,14 @@ def main():
         print(emit_path(mp, steps, inputs, all_notes))
         return
     flow, _ = emit_flow(mp, steps, inputs, app, clear, notes, timeout)
+    if out_path:
+        # 組めたときだけ書く。失敗して空ファイルが残ると、それが走る。
+        # 標準出力には読める経路を出す。走るファイルと同じ実行から出すため。
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(out_path).write_text(flow, encoding="utf-8")
+        print(emit_path(mp, steps, inputs, notes))
+        print("\n  フロー: " + out_path)
+        return
     sys.stdout.write(flow)   # 補足はフローの中にコメントで入っている
 
 

@@ -288,9 +288,11 @@ R=~/.claude/skills/screen-map/scripts/route.py
 python3 $R screens                    # 画面の一覧（呼び名・できること）
 python3 $R which <パス...>            # 変更したファイルから対象画面を引く
 python3 $R path <セグメント...>       # 人が読む経路
-python3 $R flow <セグメント...> --app <bundle id>   # Maestro のフロー
+python3 $R flow <セグメント...> --app <bundle id> --out <パス>   # Maestro のフロー
 python3 $R check                      # 自己テスト（到達可否・切れている箇所・鮮度）
 ```
+
+`flow --out` は、**走るフローをファイルに書き、標準出力には読める経路を出す**。レビューに見せる文と実際に走るものが1回の実行から出るので食い違わず、フローの中身がモデルの文脈を通らない。
 
 経路は**セグメントを並べて組む**。`--goto <画面id>`（いま居る画面からそこまで計算して繋ぐ）、`--do <操作id>`（その場で操作する）、`--shot <パス>`（撮る）の3つで、**並び順がそのまま実行順**。
 

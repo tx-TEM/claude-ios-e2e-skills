@@ -2,7 +2,7 @@
 """Maestro の MCP サーバーを常駐させ、細いクライアントから叩く。
 
   maestrod.py inspect <UDID> <名前> [幅 高さ]                   画面を読む
-  maestrod.py run     <UDID> '<flow yaml>' [名前 幅 高さ]       操作する
+  maestrod.py run     <UDID> <flow yaml|@ファイル> [名前 幅 高さ]  操作する
                       （落ちたら、落ちた地点の画面を出す）
   maestrod.py tap     <UDID> <x> <y> <名前> [幅 高さ] [bundle]  タップ→確認
   maestrod.py stop    [UDID]                                    止める（省くと全部）
@@ -405,6 +405,10 @@ def main():
         return cmd_tap(udid, x, y, name, w, h, bundle)
     if cmd == "run":
         udid, yaml = sys.argv[2], sys.argv[3]
+        # `@パス` でファイルから読む。組み立てた側が書いたものを、
+        # 引数に貼り直さずに走らせるため。
+        if yaml.startswith("@"):
+            yaml = Path(yaml[1:]).expanduser().read_text(encoding="utf-8")
         name = sys.argv[4] if len(sys.argv) > 4 else "failed"
         w, h = (sys.argv[5], sys.argv[6]) if len(sys.argv) > 6 else ("390", "844")
         r = call(udid, "run", {"device_id": udid, "yaml": yaml})
