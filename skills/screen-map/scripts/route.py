@@ -322,7 +322,7 @@ def build(mp, segments, inputs, start=None):
     前者はマップの穴で screen-map の仕事、後者は呼び方の間違いで、
     値を渡すか行き先を選び直せば済む。
     """
-    steps, problems, notes = [], [], []
+    steps, problems, notes, shot_names = [], [], [], set()
     at = start or mp.start
     stack = [at]
 
@@ -337,6 +337,15 @@ def build(mp, segments, inputs, start=None):
                                  "相対だと Maestro がどこに書くか決まらない"
                                  .format(tag)))
                 break
+            # 名前が証跡・ダンプ・項目を結ぶ唯一の手がかりなので、重複させない。
+            # 同じ名前だと後の1枚が前を上書きし、項目が同じ画像を指したまま通る。
+            name = os.path.basename(os.path.expanduser(value))
+            if name in shot_names:
+                problems.append(("call", "{}: 証跡の名前 {} が重複している。"
+                                 "後から撮ったほうが上書きするので、項目ごとに別の名前にする"
+                                 .format(tag, name)))
+                break
+            shot_names.add(name)
             steps.append({"shot": os.path.expanduser(value)})
             continue
 
