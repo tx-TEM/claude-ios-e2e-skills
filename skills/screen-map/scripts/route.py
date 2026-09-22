@@ -14,6 +14,8 @@
     --shot <パス>      そこまでの直後に撮る。拡張子は Maestro が付ける
 
   どこに書いてもよい引数
+    --from <画面id>    いまその画面に居る前提で、続きのフローを出す。アプリを
+                       起動し直さない。**ダンプを取りたい地点でフローを切る**ため
     --input <id>=<値>  text 操作で打つ文字。マップは値を持たないので呼ぶ側が渡す
     --app <bundle id>  flow のときだけ必須
     --out <パス>       フローをそのファイルに書き、標準出力には `path` と同じ
@@ -290,7 +292,7 @@ def resolve(mp, at, wanted):
     return None
 
 
-def build(mp, segments, inputs):
+def build(mp, segments, inputs, start=None):
     """セグメントを順に繋いで1本にする。
 
     セグメントは `goto`（経路を計算して繋ぐ）/ `do`（その場で操作する）/
@@ -307,13 +309,16 @@ def build(mp, segments, inputs):
     （どこから来たかで戻り先が変わる）。歩いた履歴の方が正しいので、
     そちらを使い、食い違いは補足として出す。
 
+    `start` を渡すとそこから歩き始める。**フローを途中で切って続きを出す
+    ため**で、切った地点でダンプを取っても歩き直しにならない。
+
     理由は ("map", ...) と ("call", ...) に分ける。**直す先が違う。**
     前者はマップの穴で screen-map の仕事、後者は呼び方の間違いで、
     値を渡すか行き先を選び直せば済む。
     """
     steps, problems, notes = [], [], []
-    at = mp.start
-    stack = [mp.start]
+    at = start or mp.start
+    stack = [at]
 
     for n, (what, value) in enumerate(segments, 1):
         tag = "[{}] --{} {}".format(n, what, value)
@@ -481,16 +486,18 @@ def step_comment(mp, st):
     return head
 
 
-def emit_flow(mp, steps, inputs, app, clear_state, notes=None, timeout=10000):
+def emit_flow(mp, steps, inputs, app, clear_state, notes=None, timeout=10000, start=None):
     notes = list(notes or [])
+    start = start or mp.start
     out = ["appId: " + app, "---"]
-    # 起点に戻してから始める。launchApp だけでは前の項目の画面に居座ることがある。
-    # clearState はログイン状態まで消えるので、要ると言われたときだけ。
-    out.append("- stopApp")
-    out.append("- launchApp:\n    clearState: true" if clear_state else "- launchApp")
+    if start == mp.start:
+        # 起点に戻してから始める。launchApp だけでは前の項目の画面に居座ることがある。
+        # clearState はログイン状態まで消えるので、要ると言われたときだけ。
+        out.append("- stopApp")
+        out.append("- launchApp:\n    clearState: true" if clear_state else "- launchApp")
 
-    start_anchor = anchor_of(mp, mp.start, notes)
-    out.append("# 起点: " + mp.start)
+    start_anchor = anchor_of(mp, start, notes)
+    out.append("# 起点: " + start if start == mp.start else "# 続き: " + start + " から")
     if start_anchor:
         out.append(wait_for("id", sel_id(start_anchor), timeout))
 
@@ -545,7 +552,7 @@ def emit_flow(mp, steps, inputs, app, clear_state, notes=None, timeout=10000):
     return "\n".join(out) + "\n", notes
 
 
-def emit_path(mp, steps, inputs, notes):
+def emit_path(mp, steps, inputs, notes, start=None):
     """人が読む経路。**どこが機械判定でどこが証跡頼みかを明示する。**
 
     フローを見せてレビューを受けるとき、いちばん知りたいのは「この確認は
@@ -553,7 +560,7 @@ def emit_path(mp, steps, inputs, notes):
     が assert になるが、**`expect` を持たない操作は何も確かめていない**。
     そこは証跡のPNGだけが根拠になるので、黙って並べない。
     """
-    at = mp.start
+    at = start or mp.start
     chain = [at]
     for st in steps:
         if "shot" in st:
@@ -563,11 +570,11 @@ def emit_path(mp, steps, inputs, notes):
             chain.append(at)
     out = [" → ".join(chain), ""]
 
-    w = max([len(st["screen"]) for st in steps if "shot" not in st] + [len(mp.start), 4])
+    w = max([len(st["screen"]) for st in steps if "shot" not in st] + [len(at), 4])
     rows, checked, unchecked = [], 0, 0
 
-    start_anchor = (mp.screens.get(mp.start) or {}).get("anchor")
-    rows.append(("  {}  起点".format(mp.start.ljust(w)),
+    start_anchor = (mp.screens.get(chain[0]) or {}).get("anchor")
+    rows.append(("  {}  {}".format(chain[0].ljust(w), "起点" if chain[0] == mp.start else "続き"),
                  "✓ {} が出ている".format(start_anchor) if start_anchor else "— anchor が無い"))
     if start_anchor:
         checked += 1
@@ -785,7 +792,7 @@ def main():
     # --goto / --do / --shot は並び順がそのまま実行順になるので、1つの列に集める。
     # --input と --app はどこに書いてもよい（並びに意味を持たない）
     segments, inputs, app, clear, mapdir, rest = [], {}, None, False, None, []
-    timeout, out_path = 10000, None
+    timeout, out_path, resume = 10000, None, None
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -799,6 +806,8 @@ def main():
             out_path = argv[i + 1]; i += 2
         elif a == "--map":
             mapdir = argv[i + 1]; i += 2
+        elif a == "--from":
+            resume = argv[i + 1]; i += 2
         elif a == "--timeout":
             timeout = int(argv[i + 1]); i += 2
         elif a == "--clear-state":
@@ -833,8 +842,12 @@ def main():
                  "画面の一覧は `route.py screens`。")
     if cmd == "flow" and not app:
         sys.exit("--app <bundle id> が要る（xcrun simctl listapps <UDID> で調べる）")
+    if resume and resume not in mp.screens:
+        sys.exit("--from の画面 {} がマップに無い".format(resume))
+    if resume and clear:
+        sys.exit("--from と --clear-state は併用できない（続きなのにデータを消すことになる）")
 
-    steps, problems, notes = build(mp, segments, inputs)
+    steps, problems, notes = build(mp, segments, inputs, resume)
     if problems:
         print("経路を組めなかった:", file=sys.stderr)
         for _, msg in problems:
@@ -845,16 +858,16 @@ def main():
         sys.exit(2)
 
     if cmd == "path":
-        _, all_notes = emit_flow(mp, steps, inputs, "x", clear, notes, timeout)   # 補足だけ取る
-        print(emit_path(mp, steps, inputs, all_notes))
+        _, all_notes = emit_flow(mp, steps, inputs, "x", clear, notes, timeout, resume)  # 補足だけ取る
+        print(emit_path(mp, steps, inputs, all_notes, resume))
         return
-    flow, _ = emit_flow(mp, steps, inputs, app, clear, notes, timeout)
+    flow, _ = emit_flow(mp, steps, inputs, app, clear, notes, timeout, resume)
     if out_path:
         # 組めたときだけ書く。失敗して空ファイルが残ると、それが走る。
         # 標準出力には読める経路を出す。走るファイルと同じ実行から出すため。
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
         Path(out_path).write_text(flow, encoding="utf-8")
-        print(emit_path(mp, steps, inputs, notes))
+        print(emit_path(mp, steps, inputs, notes, resume))
         print("\n  フロー: " + out_path)
         return
     sys.stdout.write(flow)   # 補足はフローの中にコメントで入っている
