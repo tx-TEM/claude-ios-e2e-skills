@@ -22,6 +22,11 @@
     --from <画面id>    いまその画面に居る前提で、続きのフローを出す。アプリを
                        起動し直さない。**ダンプを取りたい地点でフローを切る**ため
     --input <id>=<値>  text 操作で打つ文字。マップは値を持たないので呼ぶ側が渡す
+    --runtime <操作id> **その操作の値を実行時に決める**（`text:browse.searchField`
+                       `tap:browse.bookRow.*`）。フローには値を焼き込まず、`env` の
+                       穴として残す。打つ文字にも、どの行を叩くかにも使える。着いた
+                       画面を見ないと決まらないときに。**埋まっていないことが走らせる
+                       前に分かる** — 焼き込むと、データが変わっても古い値で黙って走る
     --app <bundle id>  flow のときだけ必須
     --out <パス>       フローをそのファイルに書き、標準出力には `path` と同じ
                        読める経路を出す。組めたときだけ書く
@@ -304,7 +309,7 @@ def resolve(mp, at, wanted):
     return None
 
 
-def build(mp, segments, inputs, start=None):
+def build(mp, segments, inputs, start=None, runtime=()):
     """セグメントを順に繋いで1本にする。
 
     セグメントは `goto`（経路を計算して繋ぐ）/ `do`（その場で操作する）/
@@ -463,7 +468,7 @@ def build(mp, segments, inputs, start=None):
         if "shot" in st or st.get("restart"):
             continue
         op, target = op_of(st["action"])
-        if op == "text" and target not in inputs:
+        if op == "text" and target not in inputs and not is_runtime(op, target, runtime):
             problems.append(("call", "text {} に打つ文字が渡されていない（--input {}=<値>）。"
                              "マップは値を持たない。何を打つかはテストケースが決める"
                              .format(target, target)))
@@ -471,6 +476,21 @@ def build(mp, segments, inputs, start=None):
 
 
 # ---------- 出す ----------
+
+def is_runtime(op, target, runtime):
+    """その操作の値を実行時に決めるか。`--runtime <種類>:<id>` と突き合わせる。"""
+    return "{}:{}".format(op, target) in runtime
+
+
+def var_name(target):
+    """操作のidから env の変数名を作る。`browse.searchField` → `BROWSE_SEARCHFIELD`。
+    末尾のパターン記号（`browse.bookRow.*`）は落とす。
+
+    **呼ぶ側に名前を決めさせない。** idから決まるので、フローと索引と
+    マニフェストで同じ名前になり、突き合わせに手が要らない。
+    """
+    return re.sub(r"[^A-Za-z0-9]", "_", target.rstrip(".*")).upper()
+
 
 def sel_id(value):
     """マップの id を Maestro のセレクタにする。
@@ -529,11 +549,22 @@ def step_comment(mp, st):
 
 
 def emit_flow(mp, steps, inputs, app, clear_state, notes=None, timeout=10000,
-              start=None, launch=True):
+              start=None, launch=True, runtime=()):
     """`launch=False` はアプリを起動し直さない。続きのフローを出すため。"""
     notes = list(notes or [])
     start = start or mp.start
-    out = ["appId: " + app, "---"]
+    # **実行時に決める入力は env の穴として残す。** 値を焼き込むと、
+    # データが変わったときに黙って古い値で走る。穴なら、埋まっていないことが
+    # 走らせる前に分かる。
+    used = [var_name(op_of(st["action"])[1]) for st in steps
+            if "shot" not in st and not st.get("restart")
+            and is_runtime(*op_of(st["action"]), runtime)]
+    out = ["appId: " + app]
+    if used:
+        out.append("env:")
+        for v in dict.fromkeys(used):
+            out.append("  {}: ''".format(v))
+    out.append("---")
 
     def relaunch(at):
         # 起点に戻してから始める。launchApp だけでは前の項目の画面に居座ることがある。
@@ -568,7 +599,11 @@ def emit_flow(mp, steps, inputs, app, clear_state, notes=None, timeout=10000,
 
         if op == "tap":
             key = "text" if a.get("by") == "label" else "id"
-            val = sel_text(target) if key == "text" else sel_id(target)
+            if is_runtime(op, target, runtime):
+                # パターンの `*` を変数に置き換える。どれを叩くかは走らせるときに決まる
+                val = "^" + re.escape(target.rstrip(".*")) + r"\." + "${" + var_name(target) + "}$"
+            else:
+                val = sel_text(target) if key == "text" else sel_id(target)
             line = "- tapOn:\n    {}: {}".format(key, q(val))
             if "index" in sel:
                 line += "\n    index: {}".format(sel["index"])
@@ -580,7 +615,10 @@ def emit_flow(mp, steps, inputs, app, clear_state, notes=None, timeout=10000,
         elif op == "text":
             out.append("- tapOn:\n    id: " + q(sel_id(target)))
             out.append("- eraseText")       # 前の項目の文字が残ったまま打たない
-            out.append("- inputText: " + q(str(inputs.get(target, ""))))
+            if is_runtime(op, target, runtime):
+                out.append("- inputText: ${" + var_name(target) + "}")
+            else:
+                out.append("- inputText: " + q(str(inputs.get(target, ""))))
         elif op == "scroll":
             if target == "down":
                 out.append("- scroll")
@@ -919,6 +957,7 @@ def main():
     # --goto / --do / --shot は並び順がそのまま実行順になるので、1つの列に集める。
     # --input と --app はどこに書いてもよい（並びに意味を持たない）
     segments, inputs, app, clear, mapdir, rest = [], {}, None, False, None, []
+    runtime = []
     timeout, out_path, out_dir, resume = 10000, None, None, None
     i = 0
     while i < len(argv):
@@ -927,6 +966,8 @@ def main():
             segments.append((a[2:], argv[i + 1])); i += 2
         elif a == "--restart":
             segments.append(("restart", "")); i += 1
+        elif a == "--runtime":
+            runtime.append(argv[i + 1]); i += 2
         elif a == "--input":
             k, _, v = argv[i + 1].partition("="); inputs[k] = v; i += 2
         elif a == "--app":
@@ -978,7 +1019,7 @@ def main():
     if resume and clear:
         sys.exit("--from と --clear-state は併用できない（続きなのにデータを消すことになる）")
 
-    steps, problems, notes = build(mp, segments, inputs, resume)
+    steps, problems, notes = build(mp, segments, inputs, resume, runtime)
     if problems:
         print("経路を組めなかった:", file=sys.stderr)
         for _, msg in problems:
@@ -990,10 +1031,11 @@ def main():
 
     if cmd == "path":
         _, all_notes = emit_flow(mp, steps, inputs, "x", clear, notes, timeout,
-                                 resume, launch=not resume)   # 補足だけ取る
+                                 resume, launch=not resume, runtime=runtime)   # 補足だけ取る
         print(emit_path(mp, steps, inputs, all_notes, resume))
         return
-    flow, _ = emit_flow(mp, steps, inputs, app, clear, notes, timeout, resume, launch=not resume)
+    flow, _ = emit_flow(mp, steps, inputs, app, clear, notes, timeout, resume,
+                        launch=not resume, runtime=runtime)
     if out_dir:
         # **`--shot` ごとに1本ずつ。** 走らせる側は順に run して inspect するだけで、
         # 証跡と同名のダンプが揃う。
@@ -1004,13 +1046,17 @@ def main():
         for n, (seg_start, seg_steps, shot_name, lch) in enumerate(segs, 1):
             # 自分で起動するのは1本目と --restart の直後。他は居る場所から続ける
             flow, _ = emit_flow(mp, seg_steps, inputs, app, clear, notes, timeout,
-                                seg_start, launch=lch)
+                                seg_start, launch=lch, runtime=runtime)
             name = "{:02d}_{}.yaml".format(n, shot_name or "tail")
             (d / name).write_text(flow, encoding="utf-8")
             screen, checked = shot_context(mp, seg_start, seg_steps)
             shot_path = next((st["shot"] for st in seg_steps if "shot" in st), None)
+            holes = {var_name(op_of(st["action"])[1]): "" for st in seg_steps
+                     if "shot" not in st and not st.get("restart")
+                     and is_runtime(*op_of(st["action"]), runtime)}
             written.append({"name": shot_name, "screen": screen, "checked": checked,
-                            "flow": name, "shot": shot_path, "launch": lch})
+                            "flow": name, "shot": shot_path, "launch": lch,
+                            "inputs": holes})
         # 一覧は必ず書く。`--out-dir` を使う時点で1実行ぶんのフロー一式なので、
         # 出すか出さないかを選ばせる意味が無い（付け忘れる余地になるだけ）。
         (d / "index.json").write_text(

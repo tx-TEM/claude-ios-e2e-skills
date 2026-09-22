@@ -17,6 +17,10 @@
 起動し直ることを知らないと証跡を読み違える**（前の項目の状態が続いているのか、
 まっさらなのか）。
 
+**`inputs` は実行時に決める値。** `route.py --runtime` を使った項目に付く。打つ文字
+にも、どの行を叩くかにも付く。値が空のうちはフローを走らせられない（`run_flows.py`
+がそこで止まる）。着いた画面を見ないと決まらないものなので、埋めるのは撮影する側。
+
 `--explore` は**経路が組めなかった項目**。一覧に無いので、名前だけ渡して
 セクションを足す。`flow` を持たないので `run_flows.py` は飛ばし、sim-driver が
 探索で撮る。**末尾に並ぶ** — 機械判定の付かない項目がまとまる。
@@ -104,6 +108,7 @@ def main():
             "expect": prev.get("expect", ""),  # 渡したデータで何が起きるか。同上
             "checked": e.get("checked"),       # None なら証跡だけが根拠
             "launch": e.get("launch"),         # true なら、ここでアプリを起動し直す
+            "inputs": e.get("inputs") or {},    # 空の値があるうちは走らせられない
             "flow": e.get("flow"),
             "images": [{"src": f"shots/{name}.png"}],
             "dump": f"shots/{name}.txt",

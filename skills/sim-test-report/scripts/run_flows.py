@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """マニフェストに載っているフローを順に走らせ、証跡と同名のダンプを撮る。
 
-  run_flows.py <manifest.json> <フローのディレクトリ> <UDID>
+  run_flows.py <manifest.json> <フローのディレクトリ> <UDID> [--from <証跡の名前>]
 
 `flow` を持つセクションだけを対象にする。持たないセクション（経路が組めず探索で
 撮るもの）は飛ばすので、**そちらは sim-driver に任せる。**
@@ -25,6 +25,18 @@
 レポートに出る。`build_report.py` は `PENDING` を弾くので、そこで止まる。
 初回は元から `PENDING` なので何も起きない。
 
+**値はフローに書き戻さない。** マニフェストの `inputs` を走らせる直前に env へ
+入れる。フローに残すと、次の実行で「もう埋まっている」ことになり、データが
+変わっても古い値で走る。
+
+**`--from` はそこから再開する。** 入力を埋めたあとに使う。**前を撮り直さない** —
+止まった時点でアプリはその画面に居るので、続きのフローはそのまま走る。手前から
+やり直すと、撮れている証跡を捨てて撮り直すことになる。
+
+**入力が埋まっていないセクションは走らせない。** `inputs` に空の値があるものは、
+着いた画面を見ないと打つ文字が決まらない。そこは sim-driver が画面を見て埋めて
+から走らせる。**その鎖の残りも飛ばす。**
+
 **落ちたら、次に起動し直すフローまで飛ばす。** 続きのフロー（`launch` が偽）は
 前のフローが終わった画面から始まるので、1本落ちたあとを走らせても意味がない。
 **`launch` が真のフローからは走らせる** — 自分で `stopApp` / `launchApp` するので、
@@ -32,12 +44,18 @@
 走らせ直すときの手がかりが増える。落ちた地点の画面は maestrod.py run が出す。
 """
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 MAESTROD = HERE / "maestrod.py"
+
+
+def yaml_quote(v):
+    """env の値をシングルクォートで包む。正規表現の `\\` を素通しするため。"""
+    return "'" + str(v).replace("'", "''") + "'"
 
 
 def sh(args, quiet=True):
@@ -55,15 +73,26 @@ def sh(args, quiet=True):
 
 
 def main():
-    if len(sys.argv) < 4:
+    argv = sys.argv[1:]
+    resume = None
+    if "--from" in argv:
+        i = argv.index("--from")
+        resume = argv[i + 1]
+        argv = argv[:i] + argv[i + 2:]
+    if len(argv) < 3:
         sys.exit(__doc__)
-    manifest_path, flow_dir, udid = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+    manifest_path, flow_dir, udid = Path(argv[0]), Path(argv[1]), argv[2]
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     out = manifest_path.parent
     shots, log = out / "shots", out / "progress.log"
     shots.mkdir(parents=True, exist_ok=True)
 
     targets = [(i, s) for i, s in enumerate(manifest["sections"], 1) if s.get("flow")]
+    if resume:
+        names = [s["name"] for _, s in targets]
+        if resume not in names:
+            sys.exit(f"--from の証跡 {resume} が見つからない。ある名前: {', '.join(names)}")
+        targets = targets[names.index(resume):]
     skipped = [s.get("name") for s in manifest["sections"] if not s.get("flow")]
     if not targets:
         sys.exit("flow を持つセクションが無い。全部探索なので sim-driver に渡す。")
@@ -79,11 +108,41 @@ def main():
             with log.open("a", encoding="utf-8") as f:
                 f.write(f"{line} 撮影できず 続きなので、前のフローの失敗で飛ばした\n")
             continue
+        # 埋まっていない入力があるセクションは走らせない。着いた画面を見ないと
+        # 値が決まらない。**その鎖の残りも飛ばす**（続きのフローは、この
+        # セクションが終わった画面から始まるため）。
+        #
+        # **止まった時点でアプリはその画面に居る。** 呼ぶ側はそれを見て値を決め、
+        # `--from` で再開する。手前を撮り直さないので、鎖は一息のまま。
+        holes = [k for k, v in (sec.get("inputs") or {}).items() if not v]
+        if holes:
+            broken = True
+            lost.append(line)
+            with log.open("a", encoding="utf-8") as f:
+                f.write(f"{line} 撮影せず 入力が未定（{', '.join(holes)}）\n")
+            print(f"{line} 入力が未定（{', '.join(holes)}）。いまこの画面に居るので、"
+                  f"見て埋めてから --from {name} で再開する", file=sys.stderr)
+            continue
+
         flow = flow_dir / sec["flow"]
         if not flow.exists():
             sys.exit(f"{i:02d} フローが無い: {flow}")
+
+        # **マニフェストの値をフローの env に入れてから走らせる。** フローは
+        # 書き換えない — 埋めた値が残ると、次の実行で「もう埋まっている」ことに
+        # なり、データが変わっても古い値で走る。渡すのはテキストなので、
+        # maestrod はそのまま受け取る。
+        target = "@" + str(flow)
+        if sec.get("inputs"):
+            body = flow.read_text(encoding="utf-8")
+            for k, v in sec["inputs"].items():
+                body = re.sub(r"^(\s*{}:\s*)''$".format(re.escape(k)),
+                              lambda m, v=v: m.group(1) + yaml_quote(v),
+                              body, count=1, flags=re.M)
+            target = body
+
         # 落ちたら、その run をもう一度は走らせない。1回目の出力をそのまま見せる
-        if sh(["run", udid, "@" + str(flow), name, str(shots)], quiet=False) != 0:
+        if sh(["run", udid, target, name, str(shots)], quiet=False) != 0:
             broken = True
             lost.append(line)
             with log.open("a", encoding="utf-8") as f:
