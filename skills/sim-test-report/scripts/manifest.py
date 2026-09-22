@@ -1,18 +1,27 @@
 #!/usr/bin/env python3
-"""route.py の索引から manifest.json の骨組みを作る。
+"""route.py が出したフローの一覧から manifest.json の骨組みを作る。
 
-  manifest.py <索引.json> <出力先ディレクトリ> [--title <題>] [--meta <行>]...
-              [--explore <証跡の名前>]...
+  manifest.py <フローのディレクトリ> <出力先ディレクトリ>
+              [--title <題>] [--meta <行>]... [--explore <証跡の名前>]...
 
 `route.py --out-dir` が置いた `index.json` を読み、証跡1枚＝1セクションの manifest を書く。
-**索引から導ける欄だけ埋め、判断が要る欄（`title` / `expect`）は空で残す。**
+**一覧から導ける欄だけ埋め、判断が要る欄（`title` / `expect`）は空で残す。**
 呼ぶ側（test-case-builder の項目）がそこを書く。
 
-`--explore` は**経路が組めなかった項目**。索引に無いので、名前だけ渡して
+`route.py flow --out-dir` は1回の実行ぶんのフロー一式を書くので、**マニフェストも1つ。**
+ディレクトリを渡せばその中の `index.json` を読む。
+
+**`launch` をそのまま持ってくる。** そのフローが自分でアプリを起動するかどうかで、
+**鎖の切れ目**を表す（1本目と `--restart` の直後が `true`）。`run_flows.py` は
+落ちたときにどこまで諦めるかをこれで決め、レビューと判定は**そこでアプリが
+起動し直ることを知らないと証跡を読み違える**（前の項目の状態が続いているのか、
+まっさらなのか）。
+
+`--explore` は**経路が組めなかった項目**。一覧に無いので、名前だけ渡して
 セクションを足す。`flow` を持たないので `run_flows.py` は飛ばし、sim-driver が
 探索で撮る。**末尾に並ぶ** — 機械判定の付かない項目がまとまる。
 
-なぜスクリプトなのか。索引の中身（証跡の名前、画面、機械判定のID、フローの
+なぜスクリプトなのか。一覧の中身（証跡の名前、画面、機械判定のID、フローの
 ファイル名）は route.py が既に計算したもので、**手で写すとタイポの余地ができる。**
 `--shot` の名前と manifest の `src` がずれても、走らせるまで誰も気づかない。
 
@@ -27,6 +36,16 @@ build_report.py が result の無いセクションを拒むため（判定し�
 import json
 import sys
 from pathlib import Path
+
+
+def read_index(src):
+    """`route.py --out-dir` の index.json を読む。ディレクトリでも中を見る。"""
+    src = Path(src)
+    if src.is_dir():
+        src = src / "index.json"
+    if not src.is_file():
+        sys.exit(f"フローの一覧が無い: {src}")
+    return json.loads(src.read_text(encoding="utf-8"))
 
 
 def main():
@@ -46,7 +65,7 @@ def main():
         else:
             sys.exit("知らない引数: " + argv[i])
 
-    entries = json.loads(Path(index_path).read_text(encoding="utf-8"))
+    entries = read_index(index_path)
     out = Path(out_dir) / "manifest.json"
 
     # 人が書いた欄は、作り直しても消さない
@@ -60,7 +79,7 @@ def main():
         except Exception:
             pass
 
-    # 索引のぶん（フローあり）＋ 探索のぶん。探索は末尾に積む
+    # 一覧のぶん（フローあり）＋ 探索のぶん。探索は末尾に積む
     entries = list(entries) + [{"name": n} for n in explore]
 
     sections, carried = [], 0
@@ -70,10 +89,11 @@ def main():
         carried += 1 if (prev.get("title") or prev.get("expect")) else 0
         sections.append({
             "name": name,                      # 引き継ぎと突き合わせのキー
-            "title": prev.get("title", ""),    # 確認項目。索引からは導けない
+            "title": prev.get("title", ""),    # 確認項目。一覧からは導けない
             "screen": e.get("screen"),
             "expect": prev.get("expect", ""),  # 渡したデータで何が起きるか。同上
             "checked": e.get("checked"),       # None なら証跡だけが根拠
+            "launch": e.get("launch"),         # true なら、ここでアプリを起動し直す
             "flow": e.get("flow"),
             "images": [{"src": f"shots/{name}.png"}],
             "dump": f"shots/{name}.txt",

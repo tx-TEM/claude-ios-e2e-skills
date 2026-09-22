@@ -11,6 +11,9 @@
     --goto <画面id>    いま居る画面からそこまで、経路を計算して繋ぐ
     --do <操作id>      いま居る画面で操作する。`tap:<id>` `scroll:down` の
                        ように種類を頭に付けて指せる（scroll は必須）
+    --restart          ここでアプリを起動し直し、起点に戻る。**前の項目の状態から
+                       次の項目の前提に行けないときに切る。** 落ちたときに
+                       巻き添えになる範囲も、ここで切れる
     --shot <パス>      そこまでの直後に撮る。**絶対パスで渡す**（Maestro は
                        デーモンの作業ディレクトリ基準で書くので、相対だと
                        どこに落ちるか決まらない）。拡張子は Maestro が付ける
@@ -330,7 +333,21 @@ def build(mp, segments, inputs, start=None):
     stack = [at]
 
     for n, (what, value) in enumerate(segments, 1):
-        tag = "[{}] --{} {}".format(n, what, value)
+        tag = "[{}] --{} {}".format(n, what, value).rstrip()
+
+        if what == "restart":
+            # 撮る前に起動し直すと、その操作の結果はどこにも残らない。
+            # フローも撮影の地点でしか切れないので、間の操作は走らないまま消える
+            if steps and "shot" not in steps[-1]:
+                problems.append(("call", "{}: 直前が撮影ではない。起動し直すと"
+                                 "その間の操作の結果はどこにも残らないので、"
+                                 "--shot を置いてから切るか、操作の方を消す".format(tag)))
+                break
+            # 起動し直すので、居る場所も歩いた履歴も捨てて起点に戻る
+            at = mp.start
+            stack = [at]
+            steps.append({"restart": True})
+            continue
 
         if what == "shot":
             # 相対パスは弾く。Maestro はデーモンの作業ディレクトリ基準で書くので、
@@ -443,7 +460,7 @@ def build(mp, segments, inputs, start=None):
 
     # text は値が要る。マップは値を持たない（テストケース側が決める）
     for st in steps:
-        if "shot" in st:
+        if "shot" in st or st.get("restart"):
             continue
         op, target = op_of(st["action"])
         if op == "text" and target not in inputs:
@@ -517,18 +534,30 @@ def emit_flow(mp, steps, inputs, app, clear_state, notes=None, timeout=10000,
     notes = list(notes or [])
     start = start or mp.start
     out = ["appId: " + app, "---"]
-    if launch:
+
+    def relaunch(at):
         # 起点に戻してから始める。launchApp だけでは前の項目の画面に居座ることがある。
         # clearState はログイン状態まで消えるので、要ると言われたときだけ。
         out.append("- stopApp")
         out.append("- launchApp:\n    clearState: true" if clear_state else "- launchApp")
+        out.append("# 起点: " + at)
+        a = anchor_of(mp, at, notes)
+        if a:
+            out.append(wait_for("id", sel_id(a), timeout))
 
-    start_anchor = anchor_of(mp, start, notes)
-    out.append("# 起点: " + start if launch else "# 続き: " + start + " から")
-    if start_anchor:
-        out.append(wait_for("id", sel_id(start_anchor), timeout))
+    if launch:
+        relaunch(start)
+    else:
+        out.append("# 続き: " + start + " から")
+        start_anchor = anchor_of(mp, start, notes)
+        if start_anchor:
+            out.append(wait_for("id", sel_id(start_anchor), timeout))
 
     for st in steps:
+        if st.get("restart"):
+            out.append("# ここで起動し直す（前の状態から次の前提に行けないため）")
+            relaunch(mp.start)
+            continue
         if "shot" in st:
             out.append("- takeScreenshot: " + q(st["shot"]))
             continue
@@ -582,12 +611,16 @@ def emit_flow(mp, steps, inputs, app, clear_state, notes=None, timeout=10000,
 def shot_context(mp, seg_start, seg_steps):
     """そのフローが終わる画面と、最後に確かめたID。
 
-    索引に出すためのもの。**呼ぶ側が経路を読み直して導出せずに済ませる。**
+    `index.json` に出すためのもの。**呼ぶ側が経路を読み直して導出せずに済ませる。**
     確かめたIDが無い（`expect` を持たない操作で終わった）なら None で、
     その証跡は機械判定なし＝画像だけが根拠になる。
     """
     at, checked = seg_start, (mp.screens.get(seg_start) or {}).get("anchor")
     for st in seg_steps:
+        if st.get("restart"):
+            at = mp.start
+            checked = (mp.screens.get(at) or {}).get("anchor")
+            continue
         if "shot" in st:
             continue
         a = st["action"]
@@ -599,24 +632,33 @@ def shot_context(mp, seg_start, seg_steps):
     return at, checked
 
 
-def split_at_shots(mp, steps, start):
+def split_at_shots(mp, steps, start, launch_first=True):
     """`--shot` ごとにステップを切り、(そのフローの起点, ステップ列, 撮る名前) で返す。
 
     **1本＝1枚＝1ダンプにするため。** ダンプはフローの途中では取れないので、
     証跡1枚ごとに構造を残すには、撮る地点でフローを終わらせるしかない。
-    2本目以降は `--from` の続きになるので、歩き直しは起きない。
+    2本目以降は前のフローの続きになるので、歩き直しは起きない。
+
+    返す4つ目は**そのフローが自分で起動するか。** 1本目と、`--restart` の直後が
+    そう。**ここが鎖の切れ目**で、走らせる側は落ちたときにどこまで諦めるかを
+    これで決める（次に起動するフローからは、前が落ちていても走る）。
     """
     out, cur, at = [], [], start or mp.start
-    seg_start = at
+    seg_start, launch = at, launch_first
     for st in steps:
+        if st.get("restart"):
+            # build が直前の撮影を保証しているので、cur は空
+            at = seg_start = mp.start
+            launch = True
+            continue
         cur.append(st)
         if "shot" in st:
-            out.append((seg_start, cur, os.path.basename(str(st["shot"]))))
-            cur, seg_start = [], at
+            out.append((seg_start, cur, os.path.basename(str(st["shot"])), launch))
+            cur, seg_start, launch = [], at, False
         elif st.get("to"):
             at = st["to"]
     if cur:
-        out.append((seg_start, cur, None))
+        out.append((seg_start, cur, None, launch))
     return out
 
 
@@ -631,6 +673,11 @@ def emit_path(mp, steps, inputs, notes, start=None):
     at = start or mp.start
     chain = [at]
     for st in steps:
+        if st.get("restart"):
+            at = mp.start
+            chain.append("（起動し直す）")
+            chain.append(at)
+            continue
         if "shot" in st:
             continue
         if st.get("to"):
@@ -638,7 +685,7 @@ def emit_path(mp, steps, inputs, notes, start=None):
             chain.append(at)
     out = [" → ".join(chain), ""]
 
-    w = max([len(st["screen"]) for st in steps if "shot" not in st] + [len(at), 4])
+    w = max([len(st["screen"]) for st in steps if "screen" in st] + [len(at), 4])
     rows, checked, unchecked = [], 0, 0
 
     start_anchor = (mp.screens.get(chain[0]) or {}).get("anchor")
@@ -650,6 +697,14 @@ def emit_path(mp, steps, inputs, notes, start=None):
         unchecked += 1
 
     for st in steps:
+        if st.get("restart"):
+            a = (mp.screens.get(mp.start) or {}).get("anchor")
+            rows.append(("  {}  アプリを起動し直す".format("".ljust(w)), None))
+            rows.append(("  {}  起点".format(mp.start.ljust(w)),
+                         "✓ {} が出ている".format(a) if a else "— anchor が無い"))
+            checked += 1 if a else 0
+            unchecked += 0 if a else 1
+            continue
         if "shot" in st:
             # 撮影行は絶対パスで長い。右カラムを持たないので、桁揃えの計算から外す
             rows.append(("  {}  撮影 {}".format("".ljust(w), os.path.basename(st["shot"])), None))
@@ -870,6 +925,8 @@ def main():
         a = argv[i]
         if a in ("--goto", "--do", "--shot"):
             segments.append((a[2:], argv[i + 1])); i += 2
+        elif a == "--restart":
+            segments.append(("restart", "")); i += 1
         elif a == "--input":
             k, _, v = argv[i + 1].partition("="); inputs[k] = v; i += 2
         elif a == "--app":
@@ -940,21 +997,21 @@ def main():
     if out_dir:
         # **`--shot` ごとに1本ずつ。** 走らせる側は順に run して inspect するだけで、
         # 証跡と同名のダンプが揃う。
-        segs = split_at_shots(mp, steps, resume)
+        segs = split_at_shots(mp, steps, resume, launch_first=not resume)
         d = Path(out_dir)
         d.mkdir(parents=True, exist_ok=True)
         written = []
-        for n, (seg_start, seg_steps, shot_name) in enumerate(segs, 1):
-            # 起動し直すのは1本目だけ。2本目以降は居る場所から続ける
+        for n, (seg_start, seg_steps, shot_name, lch) in enumerate(segs, 1):
+            # 自分で起動するのは1本目と --restart の直後。他は居る場所から続ける
             flow, _ = emit_flow(mp, seg_steps, inputs, app, clear, notes, timeout,
-                                seg_start, launch=(n == 1 and not resume))
+                                seg_start, launch=lch)
             name = "{:02d}_{}.yaml".format(n, shot_name or "tail")
             (d / name).write_text(flow, encoding="utf-8")
             screen, checked = shot_context(mp, seg_start, seg_steps)
             shot_path = next((st["shot"] for st in seg_steps if "shot" in st), None)
             written.append({"name": shot_name, "screen": screen, "checked": checked,
-                            "flow": name, "shot": shot_path})
-        # 索引は必ず書く。`--out-dir` を使う時点で1実行ぶんのフロー一式なので、
+                            "flow": name, "shot": shot_path, "launch": lch})
+        # 一覧は必ず書く。`--out-dir` を使う時点で1実行ぶんのフロー一式なので、
         # 出すか出さないかを選ばせる意味が無い（付け忘れる余地になるだけ）。
         (d / "index.json").write_text(
             json.dumps([w for w in written if w["name"]], ensure_ascii=False, indent=2),
@@ -962,9 +1019,10 @@ def main():
         print(emit_path(mp, steps, inputs, notes, resume))
         print("\n  フロー（{}本）: {}".format(len(written), out_dir))
         for w in written:
-            print("    {}  →  ダンプ名 {}  機械判定 {}".format(
-                w["flow"], w["name"] or "（撮影なし）", w["checked"] or "なし"))
-        print("  索引: {}/index.json".format(out_dir))
+            print("    {}{}  →  ダンプ名 {}  機械判定 {}".format(
+                w["flow"], " ★起動し直す" if w["launch"] else "",
+                w["name"] or "（撮影なし）", w["checked"] or "なし"))
+        print("  一覧: {}/index.json".format(out_dir))
         return
     if out_path:
         # 組めたときだけ書く。失敗して空ファイルが残ると、それが走る。

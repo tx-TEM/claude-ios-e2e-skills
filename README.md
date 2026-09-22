@@ -49,7 +49,7 @@ check                          マップ全体の自己テスト（到達可否�
 `route.py --out-dir` が置いた `index.json` から、`manifest.json` の骨組みを作る。証跡1枚＝1セクションで、`title` と `expect` だけ空になる。
 
 ```bash
-python3 skills/sim-test-report/scripts/manifest.py <索引.json> <出力先> --title "…" --meta "…"
+python3 skills/sim-test-report/scripts/manifest.py <フローのディレクトリ> <出力先> --title "…" --meta "…"
 ```
 
 ## フローを走らせる
