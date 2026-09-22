@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """ビュー階層から、操作に使える要素だけを1行1要素で出す。
 
-usage: elements.py <dump.json> [画面幅 画面高]
+usage: elements.py <dump.json>
 出力: 画面の識別子 / tap座標 / 画面内か / テキスト / id / 状態
 
 入力は2種類を自動判別する。
@@ -13,7 +13,10 @@ usage: elements.py <dump.json> [画面幅 画面高]
 """
 import json, re, sys
 
-W, H = (int(sys.argv[2]), int(sys.argv[3])) if len(sys.argv) > 3 else (390, 844)
+# 画面の寸法はダンプのルート要素から取る。外すと端の要素が「画面外」として
+# 出力から落ち、落ちたことは行からは分からない。ルートの bounds は必ず画面
+# いっぱいなので、ここから取れば外さない。
+W = H = None
 B = re.compile(r"\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]")
 
 def labeled(label, value):
@@ -103,11 +106,19 @@ def walk(node, compact):
         walk(c, compact)
 
 d = json.load(open(sys.argv[1]))
-if isinstance(d, dict) and "ui_schema" in d and "elements" in d:
-    for e in d["elements"]:
-        walk(e, True)
-else:
-    walk(d[0] if isinstance(d, list) else d, False)
+compact = isinstance(d, dict) and "ui_schema" in d and "elements" in d
+roots = d["elements"] if compact else [d[0] if isinstance(d, list) else d]
+
+for root in roots:
+    m = B.search((root.get("b") if compact else root.get("attributes", {}).get("bounds")) or "")
+    if m:
+        x0, y0, x1, y1 = map(int, m.groups())
+        W, H = max(W or 0, x1), max(H or 0, y1)
+if W is None:
+    sys.exit("画面の寸法が分からない。ルート要素に bounds が無い。")
+
+for root in roots:
+    walk(root, compact)
 
 # 複数あれば型名（<モジュール>.<型名>）を優先する。コード由来で安定するため。
 if explicit:
