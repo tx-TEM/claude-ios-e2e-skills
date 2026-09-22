@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Maestro の MCP サーバーを常駐させ、細いクライアントから叩く。
 
-  maestrod.py inspect <UDID> <名前>                             画面を読む
+  maestrod.py inspect <UDID> <名前> [保存先]                    画面を読む
+                      （保存先を渡すと <保存先>/<名前>.txt にも置く）
   maestrod.py run     <UDID> <flow yaml|@ファイル> [名前]       操作する
                       （落ちたら、落ちた地点の画面を出す）
   maestrod.py tap     <UDID> <x> <y> <名前> [bundle]            タップ→確認
@@ -277,7 +278,7 @@ def screen_of(text):
               for l in text.splitlines() if l.startswith("画面: ")), None)
     return None if (s is None or s.startswith("【不明】")) else s
 
-def cmd_inspect(udid, name):
+def cmd_inspect(udid, name, save_to=None):
     r = call(udid, "inspect_screen", {"device_id": udid})
     if not r["ok"] or not r["text"].lstrip().startswith('{"ui_schema"'):
         sys.exit(f"画面を読めなかった: {r['text'][:200]}\n"
@@ -288,6 +289,11 @@ def cmd_inspect(udid, name):
     out = subprocess.run([sys.executable, str(HERE / "elements.py"), str(raw)],
                          capture_output=True, text=True)
     (WORK / f"{name}.txt").write_text(out.stdout)
+    # 証跡と同じ場所に同じ名前で置くと、判定する側が画像と対で読める。
+    if save_to:
+        d = Path(save_to).expanduser()
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{name}.txt").write_text(out.stdout)
     # タップ時に「その座標に何があったか」「画面が変わったか」を見るために、
     # 端末ごとの直近ぶんを固定名で置く。名前は毎回変わるので追えないため。
     #
@@ -424,7 +430,8 @@ def main():
     if cmd == "sweep":
         return cmd_sweep(int(sys.argv[2]) if len(sys.argv) > 2 else 14)
     if cmd == "inspect":
-        return cmd_inspect(sys.argv[2], sys.argv[3])
+        return cmd_inspect(sys.argv[2], sys.argv[3],
+                           sys.argv[4] if len(sys.argv) > 4 else None)
     if cmd == "tap":
         udid, x, y, name = sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), sys.argv[5]
         bundle = sys.argv[6] if len(sys.argv) > 6 else None

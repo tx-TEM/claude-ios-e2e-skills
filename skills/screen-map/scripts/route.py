@@ -20,6 +20,9 @@
     --app <bundle id>  flow のときだけ必須
     --out <パス>       フローをそのファイルに書き、標準出力には `path` と同じ
                        読める経路を出す。組めたときだけ書く
+    --out-dir <dir>    **`--shot` ごとにフローを分けて**そのディレクトリに書く。
+                       1本＝1枚＝1ダンプになるので、証跡と同名でダンプが取れる。
+                       2本目以降は `--from` の続き（起動し直さない）
     --clear-state      起動時にアプリのデータも消す
     --timeout <ミリ秒> 画面や要素を待つ上限。既定 10000
     --map <dir>        画面マップの場所。省くとカレントから上へ screen-map/ を探す
@@ -40,6 +43,7 @@
 `summary` を読む判断より粗いのに、決定的なツールの見た目をまとう。**
 柔らかい判断は柔らかいまま人のレビューに出す（sim-test-report の手順0）。
 """
+import os
 import re
 import subprocess
 import sys
@@ -486,18 +490,20 @@ def step_comment(mp, st):
     return head
 
 
-def emit_flow(mp, steps, inputs, app, clear_state, notes=None, timeout=10000, start=None):
+def emit_flow(mp, steps, inputs, app, clear_state, notes=None, timeout=10000,
+              start=None, launch=True):
+    """`launch=False` はアプリを起動し直さない。続きのフローを出すため。"""
     notes = list(notes or [])
     start = start or mp.start
     out = ["appId: " + app, "---"]
-    if start == mp.start:
+    if launch:
         # 起点に戻してから始める。launchApp だけでは前の項目の画面に居座ることがある。
         # clearState はログイン状態まで消えるので、要ると言われたときだけ。
         out.append("- stopApp")
         out.append("- launchApp:\n    clearState: true" if clear_state else "- launchApp")
 
     start_anchor = anchor_of(mp, start, notes)
-    out.append("# 起点: " + start if start == mp.start else "# 続き: " + start + " から")
+    out.append("# 起点: " + start if launch else "# 続き: " + start + " から")
     if start_anchor:
         out.append(wait_for("id", sel_id(start_anchor), timeout))
 
@@ -550,6 +556,27 @@ def emit_flow(mp, steps, inputs, app, clear_state, notes=None, timeout=10000, st
         out.append("")
         out.extend("# 補足: " + n for n in notes)
     return "\n".join(out) + "\n", notes
+
+
+def split_at_shots(mp, steps, start):
+    """`--shot` ごとにステップを切り、(そのフローの起点, ステップ列, 撮る名前) で返す。
+
+    **1本＝1枚＝1ダンプにするため。** ダンプはフローの途中では取れないので、
+    証跡1枚ごとに構造を残すには、撮る地点でフローを終わらせるしかない。
+    2本目以降は `--from` の続きになるので、歩き直しは起きない。
+    """
+    out, cur, at = [], [], start or mp.start
+    seg_start = at
+    for st in steps:
+        cur.append(st)
+        if "shot" in st:
+            out.append((seg_start, cur, os.path.basename(str(st["shot"]))))
+            cur, seg_start = [], at
+        elif st.get("to"):
+            at = st["to"]
+    if cur:
+        out.append((seg_start, cur, None))
+    return out
 
 
 def emit_path(mp, steps, inputs, notes, start=None):
@@ -792,7 +819,7 @@ def main():
     # --goto / --do / --shot は並び順がそのまま実行順になるので、1つの列に集める。
     # --input と --app はどこに書いてもよい（並びに意味を持たない）
     segments, inputs, app, clear, mapdir, rest = [], {}, None, False, None, []
-    timeout, out_path, resume = 10000, None, None
+    timeout, out_path, out_dir, resume = 10000, None, None, None
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -804,6 +831,8 @@ def main():
             app = argv[i + 1]; i += 2
         elif a == "--out":
             out_path = argv[i + 1]; i += 2
+        elif a == "--out-dir":
+            out_dir = argv[i + 1]; i += 2
         elif a == "--map":
             mapdir = argv[i + 1]; i += 2
         elif a == "--from":
@@ -858,10 +887,30 @@ def main():
         sys.exit(2)
 
     if cmd == "path":
-        _, all_notes = emit_flow(mp, steps, inputs, "x", clear, notes, timeout, resume)  # 補足だけ取る
+        _, all_notes = emit_flow(mp, steps, inputs, "x", clear, notes, timeout,
+                                 resume, launch=not resume)   # 補足だけ取る
         print(emit_path(mp, steps, inputs, all_notes, resume))
         return
-    flow, _ = emit_flow(mp, steps, inputs, app, clear, notes, timeout, resume)
+    flow, _ = emit_flow(mp, steps, inputs, app, clear, notes, timeout, resume, launch=not resume)
+    if out_dir:
+        # **`--shot` ごとに1本ずつ。** 走らせる側は順に run して inspect するだけで、
+        # 証跡と同名のダンプが揃う。
+        segs = split_at_shots(mp, steps, resume)
+        d = Path(out_dir)
+        d.mkdir(parents=True, exist_ok=True)
+        written = []
+        for n, (seg_start, seg_steps, shot_name) in enumerate(segs, 1):
+            # 起動し直すのは1本目だけ。2本目以降は居る場所から続ける
+            flow, _ = emit_flow(mp, seg_steps, inputs, app, clear, notes, timeout,
+                                seg_start, launch=(n == 1 and not resume))
+            name = "{:02d}_{}.yaml".format(n, shot_name or "tail")
+            (d / name).write_text(flow, encoding="utf-8")
+            written.append((name, shot_name))
+        print(emit_path(mp, steps, inputs, notes, resume))
+        print("\n  フロー（{}本）: {}".format(len(written), out_dir))
+        for name, shot in written:
+            print("    {}  →  ダンプ名 {}".format(name, shot or "（撮影なし）"))
+        return
     if out_path:
         # 組めたときだけ書く。失敗して空ファイルが残ると、それが走る。
         # 標準出力には読める経路を出す。走るファイルと同じ実行から出すため。
