@@ -118,21 +118,9 @@ python3 ~/.claude/skills/sim-test-report/scripts/run_flows.py \
   <出力先>/manifest.json ~/.claude/skills/sim-test-report/.work/flows/<slug> <UDID>
 ```
 
-```
-01 iphone_01_browse_initial 撮影済み
-…
-10件を撮った: <出力先>/shots
-```
-
 ### 5. 判定を書き込む（LLM）
 
 撮影したスクリーンショットとダンプを見て、結果を記録する。
-
-```json
-"desc":   "入力が止まると絞り込みが走り、一覧が 6 件になった。先頭が
-           「温情の裕かな夏目さん」（内田 魯庵）。キーボードは開いたまま。",
-"result": "OK"
-```
 
 ### 6. レポートを組む（`build_report.py`）
 
