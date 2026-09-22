@@ -4,6 +4,7 @@
   route.py screens                     画面の一覧（id / 呼び名 / できること）
   route.py path  <セグメント...>       人が読む経路。テストケースのレビューに貼る
   route.py flow  <セグメント...>       Maestro のフロー。maestrod.py run に渡す
+  route.py which <パス...>             変更したファイルから対象画面を引く（`-` で標準入力）
   route.py check                       マップ全体の自己テスト
 
   セグメント（**並び順がそのまま実行順**）
@@ -36,6 +37,7 @@
 柔らかい判断は柔らかいまま人のレビューに出す（sim-test-report の手順0）。
 """
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -587,6 +589,105 @@ def cmd_screens(mp):
         print("    {}".format(s.get("summary") or "(summary 無し)"))
 
 
+def last_commit(repo, paths):
+    """そのパス群を最後に触ったコミットの時刻（epoch秒）。無ければ None。
+
+    複数渡すと**いちばん新しいもの**が返る（git log -1 の仕様）。ファイルごとに
+    呼ばずに済む。
+    """
+    if not paths:
+        return None
+    try:
+        r = subprocess.run(["git", "-C", str(repo), "log", "-1", "--format=%ct", "--"] + list(paths),
+                           capture_output=True, text=True)
+    except OSError:
+        return None
+    out = r.stdout.strip()
+    return int(out) if r.returncode == 0 and out.isdigit() else None
+
+
+def staleness(mp):
+    """マップが実装に追いついていないかを、gitのコミット日時で見る。
+
+    **判定はファイルシステムの mtime ではなく git のコミット日時で行う。**
+    mtime は clone や checkout で全ファイルが同じ時刻になるので、リポジトリでは
+    意味を持たない。
+
+    `screens/<id>.yaml` より新しく `files` が触られていたら、その画面の
+    `actions` と `result` は実装とずれている可能性がある。**ずれていても
+    フローは通る**（到達判定は anchor しか見ない）ので、古い `result` を
+    信じて期待値を立てると、違う期待で撮った証跡がそのまま通ってしまう。
+
+    **リファクタやコメントの修正でも「新しい」と出る。** 警告であって
+    不整合ではない。読む側が `files` を確かめる合図として使う。
+    """
+    repo = mp.root.parent
+    if not (repo / ".git").exists():
+        return None
+    out = []
+    for sid in sorted(mp.screens):
+        files = (mp.screens[sid] or {}).get("files") or []
+        y = last_commit(repo, [str(mp.root / "screens" / (sid + ".yaml"))])
+        f = last_commit(repo, [str(repo / str(x)) for x in files])
+        if y is None or f is None or not files:
+            continue
+        if f > y:
+            out.append((sid, y, f))
+    return out
+
+
+def cmd_which(mp, paths):
+    """変更したファイルが、どの画面のものかを引く。
+
+    **コードを開かずに対象画面を決めるための入り口。** 画面が決まれば
+    `actions` と `result` に期待動作が書いてあるので、そこから確認項目を
+    立てられる。マップを作った目的の半分はこれ。
+
+    **当たらなかったファイルを出すのが、もう半分の仕事。** `files` は
+    網羅ではない（共有コンポーネントは載せない決まりだし、新しく足した
+    画面はまだマップに無い）。当たらなかったことを「無関係」と読むと
+    確認が漏れるので、**そこはコードを読む必要がある**と名指しする。
+    """
+    owner = {}
+    for sid in sorted(mp.screens):
+        for f in (mp.screens[sid] or {}).get("files") or []:
+            owner.setdefault(str(f), []).append(sid)
+    # 完全一致で引けなければファイル名で引く。リポジトリ相対かどうかの
+    # 食い違いで黙って0件になる方が怖い
+    by_base = {}
+    for f, sids in owner.items():
+        by_base.setdefault(f.rsplit("/", 1)[-1], []).append((f, sids))
+
+    hit, miss = {}, []
+    for path in paths:
+        sids = owner.get(path)
+        how = ""
+        if sids is None:
+            cands = by_base.get(path.rsplit("/", 1)[-1] or path)
+            if cands and len(cands) == 1:
+                sids, how = cands[0][1], "（ファイル名で一致）"
+        if sids:
+            for sid in sids:
+                hit.setdefault(sid, []).append(path + how)
+        else:
+            miss.append(path)
+
+    for sid in sorted(hit):
+        print("{}  — {}".format(sid, (mp.screens[sid] or {}).get("summary") or ""))
+        for f in hit[sid]:
+            print("    " + f)
+    if not hit:
+        print("どの画面にも当たらなかった")
+    if miss:
+        print("\nどの画面にも載っていない（マップでは決められない）")
+        for f in miss:
+            print("    " + f)
+        print("\n共有コンポーネント、モデル、API層は `files` に載せない決まりなので、"
+              "ここに出る。\nまだマップに無い画面のファイルもここに出る。"
+              "**当たらなかったことを「無関係」と読まない。**")
+    return 0
+
+
 def cmd_check(mp):
     bad = []
     if mp.start not in mp.screens:
@@ -614,6 +715,23 @@ def cmd_check(mp):
                 breaks.append("{}: 「{}」は in_tree: false（座標が要る）".format(sid, label_of(a)))
             if a.get("by") == "label":
                 breaks.append("{}: 「{}」はラベル指定（ローカライズで壊れる）".format(sid, label_of(a)))
+
+    stale = staleness(mp)
+    if stale is None:
+        print("\nマップの鮮度: git が無いので測れない")
+    else:
+        print("\nマップの鮮度（git のコミット日時。mtime は clone で揃うので使わない）:")
+        import time as _t
+        for sid, y, f in stale:
+            print("  {}: 実装のほうが新しい（files {} > マップ {}）"
+                  .format(sid, _t.strftime("%m/%d %H:%M", _t.localtime(f)),
+                          _t.strftime("%m/%d %H:%M", _t.localtime(y))))
+        if not stale:
+            print("  全画面、マップが実装に追いついている")
+        else:
+            print("  **この画面の result は実装とずれている可能性がある。**"
+                  "期待値を立てる前に files を読む。\n"
+                  "  リファクタやコメントの修正でもここに出るので、不整合ではなく警告。")
 
     print("\n経路が切れる／弱い箇所:")
     for b in breaks:
@@ -664,6 +782,14 @@ def main():
 
     if cmd == "screens":
         return cmd_screens(mp)
+    if cmd == "which":
+        if not rest:
+            sys.exit("ファイルのパスが要る（`git diff --name-only ...` の出力、"
+                     "または `-` で標準入力）")
+        paths = rest
+        if rest == ["-"]:
+            paths = [l.strip() for l in sys.stdin.read().splitlines() if l.strip()]
+        sys.exit(cmd_which(mp, paths))
     if cmd == "check":
         sys.exit(cmd_check(mp))
     if cmd not in ("path", "flow"):
