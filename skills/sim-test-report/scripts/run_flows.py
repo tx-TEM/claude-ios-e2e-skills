@@ -57,6 +57,22 @@ HERE = Path(__file__).resolve().parent
 MAESTROD = HERE / "maestrod.py"
 
 
+def required_env(body):
+    """フローが要求している env の名前。`---` より前の env: ブロックから拾う。"""
+    head = body.split("\n---", 1)[0].splitlines()
+    out, inside = [], False
+    for line in head:
+        if re.match(r"^env:\s*$", line):
+            inside = True
+            continue
+        if inside:
+            m = re.match(r"^\s+([A-Za-z_][A-Za-z0-9_]*):", line)
+            if not m:
+                break
+            out.append(m.group(1))
+    return out
+
+
 def yaml_quote(v):
     """env の値をシングルクォートで包む。正規表現の `\\` を素通しするため。"""
     return "'" + str(v).replace("'", "''") + "'"
@@ -132,7 +148,12 @@ def main():
                 print(f"{line} 前半で失敗。次に起動し直すフローまで飛ばす", file=sys.stderr)
                 continue
 
-        undecided = [k for k, v in (sec.get("inputs") or {}).items() if not v]
+        flow = flow_dir / sec["flow"]
+        if not flow.exists():
+            sys.exit(f"{i:02d} フローが無い: {flow}")
+        body = flow.read_text(encoding="utf-8")
+        need = required_env(body)
+        undecided = [k for k in need if not (sec.get("inputs") or {}).get(k)]
         if undecided:
             broken = True
             lost.append(line)
@@ -142,21 +163,11 @@ def main():
                   f"見て埋めてから --from {name} で再開する", file=sys.stderr)
             continue
 
-        flow = flow_dir / sec["flow"]
-        if not flow.exists():
-            sys.exit(f"{i:02d} フローが無い: {flow}")
-
-        # **マニフェストの値をフローの env に入れてから走らせる。** フローは
-        # 書き換えない — 埋めた値が残ると、次の実行で「もう埋まっている」ことに
-        # なり、データが変わっても古い値で走る。渡すのはテキストなので、
-        # maestrod はそのまま受け取る。
         target = "@" + str(flow)
-        if sec.get("inputs"):
-            body = flow.read_text(encoding="utf-8")
-            for k, v in sec["inputs"].items():
-                body = re.sub(r"^(\s*{}:\s*)''$".format(re.escape(k)),
-                              lambda m, v=v: m.group(1) + yaml_quote(v),
-                              body, count=1, flags=re.M)
+        for k in need:
+            body = re.sub(r"^(\s*{}:\s*).*$".format(re.escape(k)),
+                          lambda m, v=sec["inputs"][k]: m.group(1) + yaml_quote(v),
+                          body, count=1, flags=re.M)
             target = body
 
         # 落ちたら、その run をもう一度は走らせない。1回目の出力をそのまま見せる
