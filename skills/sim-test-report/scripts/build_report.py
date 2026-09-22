@@ -30,7 +30,7 @@
 - images の要素は {"src": ..., "label": ...} か、ラベル不要なら文字列だけでもよい
 - 画像が1枚なら "image": "shots/01_foo.png" と書いてもよい（images 1件と等価）
 - 複数端末を撮った項目は、全ての端末で確認できたときだけ result を "OK" にする
-- **result は省略できず、`未判定` のままでも止まる。** title が空のときも止まる（骨組みのまま生成しようとしている）
+- **result は省略できず、`PENDING` や `RETAKE` のままでも止まる。** title が空のときも止まる（骨組みのまま生成しようとしている）
 - sections には他の欄を持たせてよい。**知らない欄は無視する** — このマニフェストは
   手順0で作って工程ごとに埋めていくので、expect / screen / checked / flow / dump が載っている
 - src はマニフェストからの相対パスまたは絶対パス
@@ -146,10 +146,10 @@ def build(manifest_path: pathlib.Path, width: int) -> pathlib.Path:
         # **既定を OK にしない。** このマニフェストは工程ごとに埋めていくので、
         # 判定を書き忘れた項目が黙って OK で出ると、確かめていないものを
         # 確かめたことにしてしまう。画像を読む前に見る。
-        if section.get("result") in (None, "", "未判定"):
+        if section.get("result") in (None, "", "PENDING", "RETAKE"):
             raise SystemExit(f'sections[{i}] "{section.get("title", "")}" の result が'
-                             f' {section.get("result")!r}。判定していない項目を'
-                             'レポートに出せない。')
+                             f' {section.get("result")!r}。判定していない項目と'
+                             '撮り直しが要る項目を、レポートに出せない。')
         if not (section.get("title") or "").strip():
             raise SystemExit(f'sections[{i}] に title が無い。'
                              'マニフェストの骨組みのまま生成しようとしている。')
