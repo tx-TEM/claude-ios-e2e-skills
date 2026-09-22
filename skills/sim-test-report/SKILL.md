@@ -85,7 +85,7 @@ description: iOSシミュレーターでの動作確認を、テストケース�
 python3 $R flow --app <bundle id> --map <アプリのリポジトリ> \
   --goto browse --shot <出力先>/shots/iphone_01_list \
   --goto detail --shot <出力先>/shots/iphone_02_detail \
-  --out-dir ~/.claude/skills/sim-test-report/.work/flow_A/
+  --out-dir ~/.claude/skills/sim-test-report/.work/flows/A/
 ```
 
 **`--out-dir` は `--shot` ごとにフローを分けて書く。** 1本＝1枚＝1ダンプになり、**証跡と同名のダンプ**（`iphone_01_list.png` と `iphone_01_list.txt`）が揃う。判定のとき、画像で見て同名のダンプで裏を取れる。
@@ -181,7 +181,7 @@ python3 <このスキルのディレクトリ>/scripts/maestrod.py sweep
 touch ~/Desktop/sim-test-report-<slug>/progress_<端末名>.log
 ```
 
-`sweep` は14日より古い作業用ファイルを消す。ダンプ1回は数KBなので急いで消す必要はないが、Maestro の出力や使い捨てのフローが溜まる。消えるのは `.json` / `.yaml` / `.err` で、抽出結果の `.txt` は残るため、過去の実行で何を見ていたかは追える。
+`sweep` は14日より古い作業用ファイルを消す。`.work/` は用途ごとに分かれていて、**消えるのは `dumps/*.json`（生）と `flows/`（使い捨てのフロー）と Maestro の出力**。`dumps/*.txt`（抽出結果）と `state/`（直近のダンプ。`tap` が読む生きた状態）は残るので、過去の実行で何を見ていたかは追える。
 
 ```
 Monitor(command: "tail -f ~/Desktop/sim-test-report-<slug>/progress_<端末名>.log",

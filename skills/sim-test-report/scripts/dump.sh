@@ -5,8 +5,8 @@
 #   dump.sh <UDID> <名前>
 #
 # 生成物
-#   .work/<名前>.json   maestro hierarchy の出力そのまま
-#   .work/<名前>.txt    elements.py の出力（画面外の行も含む）
+#   .work/dumps/<名前>.json   maestro hierarchy の出力そのまま
+#   .work/dumps/<名前>.txt    elements.py の出力（画面外の行も含む）
 #
 # 標準出力には画面内の行だけを出す。
 #
@@ -23,7 +23,7 @@ UDID="${1:?UDID を渡す}"
 NAME="${2:?名前を渡す（例: iphone_03_before_tap）}"
 
 SCRIPTS="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-WORK="$(cd -- "$SCRIPTS/.." && pwd)/.work"
+WORK="$(cd -- "$SCRIPTS/.." && pwd)/.work/dumps"
 mkdir -p "$WORK"
 
 # Maestro は JVM で動く。macOS の /usr/bin/java は Java 未導入だとスタブで、

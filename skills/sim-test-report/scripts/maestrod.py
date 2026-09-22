@@ -32,6 +32,11 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 WORK = HERE.parent / ".work"
+# 用途ごとに分ける。混ぜると、残すもの（判断の記録）と捨ててよいもの（生データ、
+# 使い捨てのフロー）と、いま生きている状態（直近のダンプ）が見分けられない。
+DUMPS = WORK / "dumps"        # <名前>.json（生） / <名前>.txt（抽出後）
+FLOWS = WORK / "flows"        # route.py が書く使い捨てのフロー
+STATE = WORK / "state"        # 直近のダンプと画面。tap が読む
 # ソケットはデバイスごとに分けるが、**同時に生かすのは1本だけ**。
 #
 # 1つのMCPサーバーが握れるドライバは1台ぶんで、別のデバイスを要求すると
@@ -284,11 +289,12 @@ def cmd_inspect(udid, name, save_to=None):
         sys.exit(f"画面を読めなかった: {r['text'][:200]}\n"
                  "ドライバが壊れている可能性がある。maestrod.py stop してやり直す。")
     WORK.mkdir(parents=True, exist_ok=True)
-    raw = WORK / f"{name}.json"
+    DUMPS.mkdir(parents=True, exist_ok=True)
+    raw = DUMPS / f"{name}.json"
     raw.write_text(r["text"])
     out = subprocess.run([sys.executable, str(HERE / "elements.py"), str(raw)],
                          capture_output=True, text=True)
-    (WORK / f"{name}.txt").write_text(out.stdout)
+    (DUMPS / f"{name}.txt").write_text(out.stdout)
     # 証跡と同じ場所に同じ名前で置くと、判定する側が画像と対で読める。
     if save_to:
         d = Path(save_to).expanduser()
@@ -299,14 +305,15 @@ def cmd_inspect(udid, name, save_to=None):
     #
     # マーカーはデバイスごとに分ける。iPhoneとiPadを並行で走らせると
     # 共有マーカーを奪い合い、片方が「変わっていない」と誤判定する。
-    (WORK / f".last_dump_{udid}.txt").write_text(out.stdout)
-    (WORK / f".last_screen_{udid}").write_text(screen_of(out.stdout) or UNKNOWN)
+    STATE.mkdir(parents=True, exist_ok=True)
+    (STATE / f"last_dump_{udid}.txt").write_text(out.stdout)
+    (STATE / f"last_screen_{udid}").write_text(screen_of(out.stdout) or UNKNOWN)
     print("\n".join(l for l in out.stdout.splitlines() if "×" not in l))
-    print(f"生: {raw} / 全行: {WORK / (name + '.txt')}", file=sys.stderr)
+    print(f"生: {raw} / 全行: {DUMPS / (name + '.txt')}", file=sys.stderr)
 
 def label_at(udid, x, y, tol=40):
     """直前のダンプで、その座標にいちばん近い要素のラベル。"""
-    f = WORK / f".last_dump_{udid}.txt"
+    f = STATE / f"last_dump_{udid}.txt"
     if not f.exists():
         return None
     best = None
@@ -327,8 +334,8 @@ def cmd_tap(udid, x, y, name, bundle):
     突き合わせる手間はここで吸収できる。「効いたが遷移しない」と
     「そもそも効いていない」の区別は判断が要るので、そこはしない。
     """
-    before = (WORK / f".last_screen_{udid}").read_text().strip() \
-        if (WORK / f".last_screen_{udid}").exists() else None
+    before = (STATE / f"last_screen_{udid}").read_text().strip() \
+        if (STATE / f"last_screen_{udid}").exists() else None
     on = label_at(udid, x, y)
 
     r = call(udid, "run", {"device_id": udid,
@@ -338,8 +345,8 @@ def cmd_tap(udid, x, y, name, bundle):
 
     cmd_inspect(udid, name)
 
-    after = (WORK / f".last_screen_{udid}").read_text().strip() \
-        if (WORK / f".last_screen_{udid}").exists() else None
+    after = (STATE / f"last_screen_{udid}").read_text().strip() \
+        if (STATE / f"last_screen_{udid}").exists() else None
     # 識別子が取れない画面を挟むと、前後が同じに見えても同じ画面とは限らない。
     # 「変わっていない」と言い切らず、判定できないことをそのまま出す。
     if UNKNOWN in (before, after) or before is None:
@@ -380,27 +387,37 @@ def cmd_run(udid, yaml, name="failed"):
 
 
 def cmd_sweep(days):
-    """.work の古いものを消す。`.txt` だけは残す。
+    """.work の古いものを消す。`dumps/*.txt` だけは残す。
 
-    生JSONは1実行で約3MBになるが、判定が済めば用済み。`.txt` は2KBしか
-    なく、過去の実行で何を見て判断したかの記録になるので残す。
+    生JSONは1実行で約9KBあるが、判定が済めば用済み。抽出後の `.txt` は
+    4KBしかなく、過去の実行で何を見て判断したかの記録になるので残す。
+    `state/` は毎回上書きされる生きた状態なので触らない。
     """
     cut = time.time() - days * 86400
     n = freed = 0
-    md = WORK / "maestro"
-    if md.exists():
-        for d in md.iterdir():
-            if d.is_dir() and d.stat().st_mtime < cut:
-                freed += sum(f.stat().st_size for f in d.rglob("*") if f.is_file())
-                shutil.rmtree(d)
-                n += 1
-    if WORK.exists():
-        for f in WORK.iterdir():
-            if f.is_file() and f.suffix in (".json", ".yaml", ".err") and f.stat().st_mtime < cut:
+    for d in (WORK / "maestro",):        # Maestro 自身の出力。実行ごとのディレクトリ
+        if d.exists():
+            for sub in d.iterdir():
+                if sub.is_dir() and sub.stat().st_mtime < cut:
+                    freed += sum(f.stat().st_size for f in sub.rglob("*") if f.is_file())
+                    shutil.rmtree(sub)
+                    n += 1
+    # dumps は生だけ消す。flows は使い捨てなので全部消す
+    targets = [(DUMPS, (".json",)), (FLOWS, None)]
+    for d, suffixes in targets:
+        if not d.exists():
+            continue
+        for f in d.rglob("*"):
+            if f.is_file() and (suffixes is None or f.suffix in suffixes) \
+                    and f.stat().st_mtime < cut:
                 freed += f.stat().st_size
                 f.unlink()
                 n += 1
-    print(f".work: {days}日より古い {n}件 / {freed // 1024}KB を消した（.txt は残す）")
+        for sub in sorted(d.rglob("*"), reverse=True):   # 空になったディレクトリを畳む
+            if sub.is_dir() and not any(sub.iterdir()):
+                sub.rmdir()
+    print(f".work: {days}日より古い {n}件 / {freed // 1024}KB を消した"
+          f"（dumps/*.txt と state/ は残す）")
 
 def cmd_stop(udid=None):
     """デーモンを止め、残ったドライバも落とす。UDID を省くと全部。
