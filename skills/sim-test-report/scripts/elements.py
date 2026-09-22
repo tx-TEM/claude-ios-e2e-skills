@@ -137,5 +137,10 @@ for cx, cy, on, t, r, st in sorted(rows, key=lambda v: (v[1], v[0])):
     if key in seen:
         continue
     seen.add(key)
-    label = f"{t}  #{r}" if (t and r) else (t or f"#{r}")
-    print(f"{f'({cx},{cy})':>12}  {'○' if on else '×  ':<5} {label[:60]}{st}")
+    # **id は切らない。** 切れた断片が別のidとして読めてしまい、
+    # 読む側は切れたことに気づけない（実際、長い行のidが途中で切れ、
+    # その断片が実在する別レコードのidと一致して誤読された）。
+    # テキストは切るが、切ったことが分かるように印を残す。
+    text = t if len(t) <= 60 else t[:59] + "…"
+    label = f"{text}  #{r}" if (t and r) else (text or f"#{r}")
+    print(f"{f'({cx},{cy})':>12}  {'○' if on else '×  ':<5} {label}{st}")
