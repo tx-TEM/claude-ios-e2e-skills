@@ -11,7 +11,9 @@
     --goto <画面id>    いま居る画面からそこまで、経路を計算して繋ぐ
     --do <操作id>      いま居る画面で操作する。`tap:<id>` `scroll:down` の
                        ように種類を頭に付けて指せる（scroll は必須）
-    --shot <パス>      そこまでの直後に撮る。拡張子は Maestro が付ける
+    --shot <パス>      そこまでの直後に撮る。**絶対パスで渡す**（Maestro は
+                       デーモンの作業ディレクトリ基準で書くので、相対だと
+                       どこに落ちるか決まらない）。拡張子は Maestro が付ける
 
   どこに書いてもよい引数
     --from <画面id>    いまその画面に居る前提で、続きのフローを出す。アプリを
@@ -328,7 +330,14 @@ def build(mp, segments, inputs, start=None):
         tag = "[{}] --{} {}".format(n, what, value)
 
         if what == "shot":
-            steps.append({"shot": value})
+            # 相対パスは弾く。Maestro はデーモンの作業ディレクトリ基準で書くので、
+            # どこに落ちたか分からないまま「撮れた」になる。
+            if not os.path.isabs(os.path.expanduser(value)):
+                problems.append(("call", "{}: --shot は絶対パスで渡す。"
+                                 "相対だと Maestro がどこに書くか決まらない"
+                                 .format(tag)))
+                break
+            steps.append({"shot": os.path.expanduser(value)})
             continue
 
         if what == "do":
