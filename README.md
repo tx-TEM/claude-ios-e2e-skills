@@ -52,6 +52,14 @@ check                          マップ全体の自己テスト（到達可否�
 python3 skills/sim-test-report/scripts/manifest.py <索引.json> <出力先> --title "…" --meta "…"
 ```
 
+## フローを走らせる
+
+マニフェストに載っているフローを順に走らせ、証跡と同名のダンプを撮る。`flow` を持たないセクション（探索で撮るもの）は飛ばす。
+
+```bash
+python3 skills/sim-test-report/scripts/run_flows.py <manifest.json> <フローのディレクトリ> <UDID>
+```
+
 ## レポート単体で生成する
 
 スキルを経由せずスクリプトだけ使うこともできる。マニフェストの形式は `skills/sim-test-report/scripts/build_report.py` 冒頭のdocstringを参照。

@@ -3,7 +3,7 @@
 
   maestrod.py inspect <UDID> <名前> [保存先]                    画面を読む
                       （保存先を渡すと <保存先>/<名前>.txt にも置く）
-  maestrod.py run     <UDID> <flow yaml|@ファイル> [名前]       操作する
+  maestrod.py run     <UDID> <flow yaml|@ファイル> [名前 保存先]  操作する
                       （落ちたら、落ちた地点の画面を出す）
   maestrod.py tap     <UDID> <x> <y> <名前> [bundle]            タップ→確認
   maestrod.py stop    [UDID]                                    止める（省くと全部）
@@ -371,7 +371,7 @@ def cmd_tap(udid, x, y, name, bundle):
         moved = f" → {before} から {after} へ"
     print(f"\nタップ ({x},{y})" + (f" 「{on}」" if on else "") + moved)
 
-def cmd_run(udid, yaml, name="failed"):
+def cmd_run(udid, yaml, name="failed", save_to=None):
     """フローを走らせる。落ちたら、落ちた地点の画面まで出す。
 
     `yaml` が `@` で始まればファイルから読む。組み立てた側が書いたものを、
@@ -392,7 +392,7 @@ def cmd_run(udid, yaml, name="failed"):
     # 言わない。失敗した時点で止まるので、画面はその状態のまま残っている。
     print(f"\n--- 落ちた地点の画面（{name}）", file=sys.stderr)
     try:
-        cmd_inspect(udid, name)
+        cmd_inspect(udid, name, save_to)
     except SystemExit as e:
         # ダンプも取れないのは、ドライバごと壊れているとき。
         # 元の失敗を隠さないよう、状況だけ足して同じ終了コードで終わる。
@@ -471,7 +471,8 @@ def main():
     if cmd == "run":
         udid, yaml = sys.argv[2], sys.argv[3]
         name = sys.argv[4] if len(sys.argv) > 4 else "failed"
-        return cmd_run(udid, yaml, name)
+        save_to = sys.argv[5] if len(sys.argv) > 5 else None
+        return cmd_run(udid, yaml, name, save_to)
     sys.exit(__doc__)
 
 main()
