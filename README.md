@@ -8,6 +8,7 @@ Claude Code の個人用スキル・サブエージェント置き場。マシ�
 | --- | --- | --- |
 | `sim-test-report` | Skill | iOSシミュレーターでの動作確認を、テストケースのレビュー → 実施 → 証跡レポートまで通して進める。成果物は画像をbase64で埋め込んだ単一HTMLと、PRコメント貼り付け用の1枚PNG |
 | `screen-map` | Skill | iOSアプリの画面マップを画面単位で作る。ソースを読んで画面・遷移・確認箇所を特定し、`accessibilityIdentifier` を実装に振って `screen-map/screens/*.yaml` に落とす。`scripts/route.py` がそのマップから目的の画面までの経路を組み、`sim-test-report` が動作確認のフローとして使う |
+| `test-case-builder` | Agent | 変更から確認項目を立て、画面マップがあれば実行できるフローまで組んで返す。レビューを受けるのも実施も判定もしない。`sim-test-report` の手順0から呼ばれる |
 | `sim-driver` | Agent | シミュレーターを操作して証跡スクリーンショットを撮る。判定はせず観測した事実だけ返す。`sim-test-report` の手順1から呼ばれる |
 
 ## セットアップ
