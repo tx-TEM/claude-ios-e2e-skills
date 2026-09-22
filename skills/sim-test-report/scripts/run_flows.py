@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """マニフェストに載っているフローを順に走らせ、証跡と同名のダンプを撮る。
 
-  run_flows.py <manifest.json> <フローのディレクトリ> <UDID>
+  run_flows.py <manifest.json> <フローのディレクトリ> <UDID> [--from <証跡の名前>]
 
 `flow` を持つセクションだけを対象にする。持たないセクション（経路が組めず探索で
 撮るもの）は飛ばすので、**そちらは sim-driver に任せる。**
@@ -25,6 +25,24 @@
 レポートに出る。`build_report.py` は `PENDING` を弾くので、そこで止まる。
 初回は元から `PENDING` なので何も起きない。
 
+**実行時に決める値があるフローは2本に割れている。** 前半（`pre_flow`）が目的の
+画面まで運び、後半が値を使う。**前半を走らせてから止まる** — 着いていないと、
+値を決めるために画面を見ることができない。再開のときは前半を飛ばす（もうそこに居る）。
+
+**値はフローに書き戻さない。** マニフェストの `inputs` を走らせる直前に env へ
+入れる。フローに残すと、次の実行で「もう埋まっている」ことになり、データが
+変わっても古い値で走る。
+
+**未定で終わると、そこを `resume_from` に書く。** 次にもう一度叩けば続きから
+走るので、手前を撮り直さない。走り切ったら消える。`--from` はその上書き。
+
+**`--from` はそこから再開する。** 入力を埋めたあとに使う。**前を撮り直さない** —
+止まった時点でアプリはその画面に居るので、続きのフローはそのまま走る。手前から
+やり直すと、撮れている証跡を捨てて撮り直すことになる。
+
+**入力が未定ならそこで終える。** 落ちたときは次の鎖へ進むが、こちらは進めない
+— 先へ走らせると画面が変わり、値を決めるために見ることができなくなる。
+
 **落ちたら、次に起動し直すフローまで飛ばす。** 続きのフロー（`launch` が偽）は
 前のフローが終わった画面から始まるので、1本落ちたあとを走らせても意味がない。
 **`launch` が真のフローからは走らせる** — 自分で `stopApp` / `launchApp` するので、
@@ -32,12 +50,34 @@
 走らせ直すときの手がかりが増える。落ちた地点の画面は maestrod.py run が出す。
 """
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 MAESTROD = HERE / "maestrod.py"
+
+
+def required_env(body):
+    """フローが要求している env の名前。`---` より前の env: ブロックから拾う。"""
+    head = body.split("\n---", 1)[0].splitlines()
+    out, inside = [], False
+    for line in head:
+        if re.match(r"^env:\s*$", line):
+            inside = True
+            continue
+        if inside:
+            m = re.match(r"^\s+([A-Za-z_][A-Za-z0-9_]*):", line)
+            if not m:
+                break
+            out.append(m.group(1))
+    return out
+
+
+def yaml_quote(v):
+    """env の値をシングルクォートで包む。正規表現の `\\` を素通しするため。"""
+    return "'" + str(v).replace("'", "''") + "'"
 
 
 def sh(args, quiet=True):
@@ -55,15 +95,32 @@ def sh(args, quiet=True):
 
 
 def main():
-    if len(sys.argv) < 4:
+    # 標準出力を行ごとに流す。既定のバッファのままだと、即時に出る標準エラーと
+    # 混ざったときに順番が入れ替わり、失敗の行が撮影済みの行より前に出る
+    sys.stdout.reconfigure(line_buffering=True)
+
+    argv = sys.argv[1:]
+    resume = None
+    if "--from" in argv:
+        i = argv.index("--from")
+        resume = argv[i + 1]
+        argv = argv[:i] + argv[i + 2:]
+    if len(argv) < 3:
         sys.exit(__doc__)
-    manifest_path, flow_dir, udid = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+    manifest_path, flow_dir, udid = Path(argv[0]), Path(argv[1]), argv[2]
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     out = manifest_path.parent
     shots, log = out / "shots", out / "progress.log"
     shots.mkdir(parents=True, exist_ok=True)
 
     targets = [(i, s) for i, s in enumerate(manifest["sections"], 1) if s.get("flow")]
+    # 前の実行が未定で終わっていれば、そこから続ける。`--from` はその上書き
+    resume = resume or manifest.get("resume_from")
+    if resume:
+        names = [s["name"] for _, s in targets]
+        if resume not in names:
+            sys.exit(f"再開先の証跡 {resume} が見つからない。ある名前: {', '.join(names)}")
+        targets = targets[names.index(resume):]
     skipped = [s.get("name") for s in manifest["sections"] if not s.get("flow")]
     if not targets:
         sys.exit("flow を持つセクションが無い。全部探索なので sim-driver に渡す。")
@@ -79,11 +136,56 @@ def main():
             with log.open("a", encoding="utf-8") as f:
                 f.write(f"{line} 撮影できず 続きなので、前のフローの失敗で飛ばした\n")
             continue
+        # 埋まっていない入力があるセクションは走らせない。着いた画面を見ないと
+        # 値が決まらない。**その鎖の残りも飛ばす**（続きのフローは、この
+        # セクションが終わった画面から始まるため）。
+        #
+        # **止まった時点でアプリはその画面に居る。** 呼ぶ側はそれを見て値を決め、
+        # `--from` で再開する。手前を撮り直さないので、鎖は一息のまま。
+        # 値を使う操作の手前までを先に走らせる。**決めるには着いていないといけない。**
+        # 再開のときは飛ばす（前の実行で走っていて、アプリはもうそこに居る）。
+        if sec.get("pre_flow") and not (resume and name == resume):
+            pre = flow_dir / sec["pre_flow"]
+            if not pre.exists():
+                sys.exit(f"{i:02d} 前半のフローが無い: {pre}")
+            if sh(["run", udid, "@" + str(pre), name + ".pre", str(shots)], quiet=False) != 0:
+                broken = True
+                lost.append(line)
+                with log.open("a", encoding="utf-8") as f:
+                    f.write(f"{line} 撮影できず 前半のフローが失敗\n")
+                print(f"{line} 前半で失敗。次に起動し直すフローまで飛ばす", file=sys.stderr)
+                continue
+
         flow = flow_dir / sec["flow"]
         if not flow.exists():
             sys.exit(f"{i:02d} フローが無い: {flow}")
+        body = flow.read_text(encoding="utf-8")
+        need = required_env(body)
+        # **未定ならそこで終える。** 落ちたときは次の鎖へ進むが、こちらは進めない。
+        # 先へ走らせると画面が変わってしまい、値を決めるために見ることができない。
+        undecided = [k for k in need if not (sec.get("inputs") or {}).get(k)]
+        if undecided:
+            with log.open("a", encoding="utf-8") as f:
+                f.write(f"{line} 撮影せず 入力が未定（{', '.join(undecided)}）\n")
+            manifest["resume_from"] = name
+            manifest_path.write_text(
+                json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            rest = [n for n, _ in targets[targets.index((i, sec)):]]
+            print(f"\n{line} 入力が未定（{', '.join(undecided)}）。")
+            print(f"いまこの画面に居る。見て {', '.join(undecided)} を決めて、"
+                  "もう一度叩けば続きから走る。")
+            print(f"ここから先の {len(rest)}件はまだ撮っていない。")
+            sys.exit(1)
+
+        target = "@" + str(flow)
+        for k in need:
+            body = re.sub(r"^(\s*{}:\s*).*$".format(re.escape(k)),
+                          lambda m, v=sec["inputs"][k]: m.group(1) + yaml_quote(v),
+                          body, count=1, flags=re.M)
+            target = body
+
         # 落ちたら、その run をもう一度は走らせない。1回目の出力をそのまま見せる
-        if sh(["run", udid, "@" + str(flow), name, str(shots)], quiet=False) != 0:
+        if sh(["run", udid, target, name, str(shots)], quiet=False) != 0:
             broken = True
             lost.append(line)
             with log.open("a", encoding="utf-8") as f:
@@ -97,6 +199,7 @@ def main():
             f.write(f"{line} 撮影済み\n")
         print(line + " 撮影済み")
 
+    manifest.pop("resume_from", None)
     if done:
         manifest_path.write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
