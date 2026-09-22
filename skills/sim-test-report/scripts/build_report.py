@@ -30,6 +30,9 @@
 - images の要素は {"src": ..., "label": ...} か、ラベル不要なら文字列だけでもよい
 - 画像が1枚なら "image": "shots/01_foo.png" と書いてもよい（images 1件と等価）
 - 複数端末を撮った項目は、全ての端末で確認できたときだけ result を "OK" にする
+- **result は省略できず、`未判定` のままでも止まる。** title が空のときも止まる（骨組みのまま生成しようとしている）
+- sections には他の欄を持たせてよい。**知らない欄は無視する** — このマニフェストは
+  手順0で作って工程ごとに埋めていくので、expect / screen / checked / flow / dump が載っている
 - src はマニフェストからの相対パスまたは絶対パス
 - 画像は sips があれば --width（デフォルト750px）に縮小してから埋め込む
 - output 省略時は manifest と同じディレクトリに verification_report.html を出力
@@ -140,13 +143,23 @@ def build(manifest_path: pathlib.Path, width: int) -> pathlib.Path:
 
     cards = ""
     for i, section in enumerate(manifest["sections"], start=1):
+        # **既定を OK にしない。** このマニフェストは工程ごとに埋めていくので、
+        # 判定を書き忘れた項目が黙って OK で出ると、確かめていないものを
+        # 確かめたことにしてしまう。画像を読む前に見る。
+        if section.get("result") in (None, "", "未判定"):
+            raise SystemExit(f'sections[{i}] "{section.get("title", "")}" の result が'
+                             f' {section.get("result")!r}。判定していない項目を'
+                             'レポートに出せない。')
+        if not (section.get("title") or "").strip():
+            raise SystemExit(f'sections[{i}] に title が無い。'
+                             'マニフェストの骨組みのまま生成しようとしている。')
         shots = ""
         for path, label in section_images(section, base_dir):
             caption = f'<figcaption>{html.escape(label)}</figcaption>' if label else ""
             shots += (f'<figure>{caption}<img src="data:image/png;base64,'
                       f'{load_image_b64(path, width)}" alt="{html.escape(label) or f"screenshot {i}"}" /></figure>')
         multi = " multi" if len(section_images(section, base_dir)) > 1 else ""
-        result = section.get("result", "OK")
+        result = section["result"]
         result_class = "result" if result == "OK" else "result ng"
         mark = "✓" if result == "OK" else "✗"
         cards += f'''
@@ -154,7 +167,7 @@ def build(manifest_path: pathlib.Path, width: int) -> pathlib.Path:
       <h2><span class="badge">{i}</span>{html.escape(section["title"])}<span class="{result_class}">{mark} {html.escape(result)}</span></h2>
       <div class="body">
         <div class="shots{multi}">{shots}</div>
-        <p>{html.escape(section["desc"])}</p>
+        <p>{html.escape(section.get("desc") or "")}</p>
       </div>
     </section>'''
 

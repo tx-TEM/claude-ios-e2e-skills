@@ -36,11 +36,13 @@ xcrun simctl list devices booted
 
 | | |
 |---|---|
-| `dumps/<名前>.json` | `inspect_screen` の生の出力（約9KB） |
-| `dumps/<名前>.txt` | 抽出結果。画面外の行も含む |
-| `flows/` | `route.py` が書いた使い捨てのフロー |
+| `dumps/<実行>/<名前>.json` | `inspect_screen` の生の出力（約9KB） |
+| `dumps/<実行>/<名前>.txt` | 抽出結果。画面外の行も含む |
+| `flows/<実行>/` | `route.py` が書いた使い捨てのフロー |
 | `state/` | 直近のダンプと画面識別子。`tap` が前後比較に読む |
 | `maestro/` | Maestro 自身の出力 |
+
+`<実行>` は証跡の出力先の名前（`sim-test-report-<slug>`）で、`inspect` に渡した保存先から決まる。**平置きにすると実行をまたいで上書きされる** — 証跡の名前は実行ごとに似るので、記録として残す意味が消える。
 
 git 管理外。前の実行の残りがあってよく、14日より古いものは呼び出し元が実行前に掃除する。**生JSONと使い捨てのフローが消えて `dumps/*.txt` と `state/` は残る**ので、過去に何を見て判断したかは後からでも追える。
 
@@ -130,7 +132,7 @@ shots/iphone_02_detail.txt    構造（要素の状態・入力欄の中身・�
 ```bash
 M=~/.claude/skills/sim-test-report/scripts/maestrod.py
 
-python3 $M inspect <UDID> <名前>                      # 画面を読む
+python3 $M inspect <UDID> <名前> [<出力先>/shots]     # 画面を読む
 python3 $M tap     <UDID> <x> <y> <名前> <bundle id>  # タップ→確認
 python3 $M run     <UDID> '<flow yaml>'                           # スクロールなど
 python3 $M stop    <UDID>                                         # 撮影が終わったら止める
@@ -145,6 +147,10 @@ python3 $M stop    <UDID>                                         # 撮影が終
 画面内の行が標準出力に出る。あわせて `.work/dumps/` に生と抽出後の両方が残る。
 
 **名前は証跡と揃える**（`iphone_03_before_tap`）。同じ項番で複数回取るときは、何をした後かを足す。付けないと上書きされ、**外した項目のダンプが残らない**。
+
+**証跡として残す地点では、第3引数に `<出力先>/shots` を渡す。** 証跡と同名で `.txt` が並び、判定する側が画像と対で読める。フロー項目と同じ形になる。**座標を探すための下見には渡さない**（証跡ではないので）。
+
+**撮影は別のコマンドのまま。** `inspect` は**下見と証跡の両方**に使うが、スクリーンショットは**証跡にしか使わない**。用途の広さが違うものを1つにすると、広いほうが「今回は撮るのか撮らないのか」というモードを持つことになる。`&&` で並べれば済む。
 
 **生と抽出後の両方を残す。** 生が無いと抽出スクリプトを直しても同じ画面で検証し直せない。抽出後が無いと、自分が何を見てその座標を選んだのかを呼び出し元が追えない。
 
@@ -264,8 +270,8 @@ python3 $M run <UDID> 'appId: <bundle id>
 - eraseText
 - inputText: "<キーワード>"
 - pressKey: Enter' \
-  && python3 $M inspect <UDID> <名前> \
-  && xcrun simctl io <UDID> screenshot <出力先>/<端末名>_<連番>_<slug>.png \
+  && python3 $M inspect <UDID> <名前> <出力先>/shots \
+  && xcrun simctl io <UDID> screenshot <出力先>/shots/<名前>.png \
   && echo "<項番> 撮影済み <ファイル名> <観測した事実>" >> <進捗ログのパス>
 ```
 
@@ -291,8 +297,8 @@ python3 $M run <UDID> 'appId: <bundle id>
 - eraseText
 - inputText: "<キーワード>"
 - pressKey: Enter' \
-  && python3 $M inspect <UDID> <名前> \
-  && xcrun simctl io <UDID> screenshot <出力先>/<端末名>_<連番>_<slug>.png \
+  && python3 $M inspect <UDID> <名前> <出力先>/shots \
+  && xcrun simctl io <UDID> screenshot <出力先>/shots/<名前>.png \
   && echo "<項番> 撮影済み <ファイル名> <観測した事実>" >> <進捗ログのパス>
 ```
 
@@ -372,11 +378,13 @@ python3 $M run <UDID> 'appId: <bundle id>
 echo "--- <端末名> 開始 $(date '+%H:%M')" >> <進捗ログのパス>
 ```
 
-以降は1項目1行。**項番は2桁ゼロ埋めで固定する。** 経路が添えてあった項目は事実を書かないので、ファイル名まででよい。
+以降は1項目1行。**項番は2桁ゼロ埋めで固定する。**
 
 ```bash
-echo "03 撮影済み iphone_03_saved.png" >> <進捗ログのパス>                        # 経路あり
-echo "03 撮影済み iphone_03_saved.png ボタンが「保存済み」に変わった" >> <ログ>   # 探索
+echo "03 撮影済み iphone_03_saved.png ボタンが「保存済み」に変わった" >> <進捗ログのパス>
+```
+
+**フローは証跡1枚につき1本なので、1本走らせたら1行。** 項番とフローと証跡が1対1に対応している。
 
 撮り直すと同じログに続けて書かれる。区切り行が無いと前回の行と混ざり、どちらが最新か分からなくなる。書式が揺れるのも同じ理由で避ける。
 
