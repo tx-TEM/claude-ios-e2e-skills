@@ -38,16 +38,15 @@ clone したディレクトリで `./install.sh` を実行する。`~/.claude/` 
 {
   "app": "tx-tem.AozoraReaderClient",
   "shots_dir": "<出力先>/shots",
-  "runtime": ["text:browse.searchField"],
   "items": [
-    {"shot": "iphone_01_browse_initial", "screen": "browse",
+    {"shot": "iphone_01_browse_initial", "from": "browse",
      "title": "さがす画面の初期表示で作品一覧が出る",
      "expect": "絞り込み無しの一覧が出て、作品の行が複数並んでいる"},
-    {"shot": "iphone_02_debounce_filtered", "screen": "browse",
+    {"shot": "iphone_02_debounce_filtered", "from": "browse",
      "title": "キーワード入力でデバウンス絞り込みが走る",
-     "do": ["text:browse.searchField"],
+     "do": [{"op": "text:browse.searchField", "runtime": true}],
      "expect": "入力欄に出ている語を、一覧に残っている行がすべて作品名に含む"},
-    {"shot": "iphone_03_scroll", "screen": "browse", "fresh": true,
+    {"shot": "iphone_03_scroll", "from": "browse", "fresh": true,
      "title": "一覧をスクロールすると次のページが読み込まれる",
      "do": ["scroll:down"],
      "expect": "…"}
@@ -56,11 +55,11 @@ clone したディレクトリで `./install.sh` を実行する。`~/.claude/` 
 }
 ```
 
-期待は値ではなく、証跡の中で確かめられる関係で書く。打つ文字のようにデータに依る値は `runtime` で未定のまま残し、撮影時に画面を見て埋める。
+期待は値ではなく、証跡の中で確かめられる関係で書く。打つ文字のようにデータに依る値は、`do` に `"runtime": true` を添えて未定のまま残し、撮影時に画面を見て埋める。
 
 ### 2. 経路を計算して Maestro のフローを書く（`route.py`）
 
-plan の各項目について、前の項目が終わった画面から `screen` までの経路を画面マップから計算し、`do` の操作と撮影を繋いでMaestro のフローとして書き出す。
+plan の各項目について、前の項目が終わった画面から `from` までの経路を画面マップから計算し、`do` の操作と撮影を繋いでMaestro のフローとして書き出す。
 
 ```bash
 python3 ~/.claude/skills/screen-map/scripts/route.py flow \
@@ -99,6 +98,7 @@ python3 ~/.claude/skills/sim-test-report/scripts/manifest.py \
 {
   "name": "iphone_02_debounce_filtered",
   "title": "キーワード入力でデバウンス絞り込みが走る",
+  "from": "browse",
   "screen": "browse",
   "expect": "入力欄に出ている語を、一覧に残っている行がすべて作品名に含む",
   "checked": "browse.searchField",

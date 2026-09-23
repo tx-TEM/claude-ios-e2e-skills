@@ -108,11 +108,11 @@ python3 $R check --map $M    # 「実装のほうが新しい」と出た画面�
 | | 例 | どうするか |
 |---|---|---|
 | **データに依らない** | 一致しない語、空文字、固定の業務値、位置で選べる行 | そのまま書く |
-| **データに依る** | 実在する値で絞る、条件に合う行を選ぶ、作ったものを探す | **plan の `runtime`。例外なし** |
+| **データに依る** | 実在する値で絞る、条件に合う行を選ぶ、作ったものを探す | **`do` の操作に `"runtime": true`。例外なし** |
 
 ```bash
-"runtime": ["text:browse.searchField",   // 打つ文字を実行時に決める
-            "tap:browse.bookRow.*"]      // どの行を叩くかを実行時に決める
+"do": [{"op": "text:browse.searchField", "runtime": true}]   // 打つ文字を実行時に決める
+"do": [{"op": "tap:browse.bookRow.*", "runtime": true}]      // どの行を叩くかを実行時に決める
 ```
 
 フローには値が焼き込まれず、`env` に未定のまま残る。
@@ -169,7 +169,7 @@ python3 $R screens --map $M     # 画面の一覧
 python3 $R check   --map $M     # 到達できない画面、切れている箇所、マップの鮮度
 ```
 
-**`--help` を先に見る。** plan の形も、`screen` `do` の意味も、`runtime` `inputs` の使い分けも、
+**`--help` を先に見る。** plan の形も、`from` `do` の意味も、`runtime` `input` の使い分けも、
 そこに書いてある。**ソースを読みに行かない** — 1000行あり、
 読んでも `--help` 以上のことは分からない。
 
@@ -199,26 +199,25 @@ python3 $R check   --map $M     # 到達できない画面、切れている箇�
 {
   "app": "<bundle id>",
   "shots_dir": "/Users/…/Desktop/sim-test-report-<slug>/shots",
-  "runtime": ["text:browse.searchField", "tap:browse.bookRow.*"],
   "items": [
-    {"shot": "iphone_01_list_all", "screen": "browse",
+    {"shot": "iphone_01_list_all", "from": "browse",
      "title": "一覧画面が初期表示で一覧を出す",
      "expect": "さがす画面が出て、行が複数並んでいる"},
-    {"shot": "iphone_02_debounce", "screen": "browse",
-     "do": ["text:browse.searchField"],
+    {"shot": "iphone_02_debounce", "from": "browse",
+     "do": [{"op": "text:browse.searchField", "runtime": true}],
      "title": "キーワードを打つと入力が止まってから絞り込みが走る",
      "expect": "入力欄に出ている語を、一覧に残っている行がすべて品名に含む"},
-    {"shot": "iphone_03_detail", "screen": "browse", "fresh": true,
+    {"shot": "iphone_03_detail", "from": "browse", "fresh": true,
      "do": ["tap:browse.bookRow.*"],
      "title": "行をタップすると詳細に移る",
      "expect": "詳細が開き、品名がタップした行と一致する"},
-    {"shot": "iphone_04_back", "screen": "detail",
+    {"shot": "iphone_04_back", "from": "detail",
      "do": ["tap:BackButton"],
      "title": "詳細から戻ると一覧に戻る",
      "expect": "さがす画面が出て、一覧が表示されている"}
   ],
   "explore": [
-    {"shot": "iphone_04_history", "screen": "history",
+    {"shot": "iphone_04_history", "from": "history",
      "title": "…", "expect": "…",
      "reason": "画面 history がマップに無い"}
   ]
@@ -229,13 +228,14 @@ python3 $R check   --map $M     # 到達できない画面、切れている箇�
 python3 $R flow --plan <plan.json> --map $M --out-dir <plan.json と同じディレクトリ>
 ```
 
-- **1項目＝ `screen` で `do` を順に叩いて1枚。** 項目が持つのは**どこで何を確かめるか**だけで、**そこまでの経路は書かない。** 前の項目が終わった画面から `screen` までは route.py が計算して繋ぐ（すでに居れば何もしない）
-- **`screen` は操作を始める画面。** 撮る画面ではない。「行をタップすると詳細に移る」なら `screen` は `browse` で、`do` が `tap:browse.bookRow.*`
-- **`do` は確かめる操作だけ。** `title` が言っている操作と同じものを書く。遷移する操作もここに書く（行き先はマップの `to` で追う）。**確かめたい操作を経路計算に任せない** — 「戻るボタンで戻る」を確かめたいのに `screen` を戻り先にすると、どの操作で戻ったかが route.py の選択になる
+- **1項目＝ `from` から `do` を順に叩いて1枚。** 項目が持つのは**どこから何を確かめるか**だけで、**そこまでの経路は書かない。** 前の項目が終わった画面から `from` までは route.py が計算して繋ぐ（すでに居れば何もしない）
+- **`from` は操作を始める画面。** 撮る画面ではない。「行をタップすると詳細に移る」なら `from` は `browse` で、`do` が `tap:browse.bookRow.*`
+- **`do` は確かめる操作だけ。** `title` が言っている操作と同じものを書く。遷移する操作もここに書く（行き先はマップの `to` で追う）。**確かめたい操作を経路計算に任せない** — 「戻るボタンで戻る」を確かめたいのに `from` を戻り先にすると、どの操作で戻ったかが route.py の選択になる
 - **着いた状態を見るだけの項目は `do` を空にする**（「一覧が出る」など）
 - **`shot` は証跡の名前。** パスではない（`shots_dir` と組み合わせて route.py が絶対パスにする）。項目・証跡・ダンプを結ぶ唯一の手がかりなので、**項目ごとに別の名前にする**
-- **`runtime` / `inputs` は plan の頭に書く。** どの項目の操作にも効く（`screen` までの経路の途中で叩く行にも）
-- **`title` / `expect` / `screen` は route.py は読まない。** マニフェストに入る。書き方は手順1のとおり
+- **入れる値の決め方は `do` の操作に添える。** `{"op": 操作id, "runtime": true}`（撮影時に決める）か `{"op": 操作id, "input": 値}`（データに依らない値だけ。一致しない語など）。値の要らない操作は操作idの文字列のまま
+- **`from` までの経路の途中で叩く操作は位置で選ばれる。** どの行を開くかを気にするなら、それは確かめる操作なので `do` に書く（`from` を一覧にして、行のタップを `runtime` 付きで並べる）
+- **`title` / `expect` は route.py は読まない。** マニフェストに入る。書き方は手順1のとおり
 - **`items` の並びがそのまま連番とレポートの順になる。** 見せたい順に並べる
 - **経路が組めなかった項目は `explore` に移す。** `route.py` が返した理由を `reason` にそのまま書く。探索で撮るかマップを作るかは呼び出し元が決める（手順4）。**マップが無いときは全項目が `explore`** で、route.py は叩かない
 
@@ -253,7 +253,7 @@ python3 $R flow --plan <plan.json> --map $M --out-dir <plan.json と同じディ
 
 **plan は1つ、`route.py flow` も1回。** 分けると連番が振り直されてフローの名前がぶつかり、どちらの `01_….yaml` か決まらなくなる。
 
-- **前置きの操作を `do` に並べない。** 確かめたい操作の手前で要る画面は `screen` で言えば、route.py が経路を計算する。`do` に並べると、何を確かめる項目なのかが読めなくなる
+- **前置きの操作を `do` に並べない。** 確かめたい操作の手前で要る画面は `from` で言えば、route.py が経路を計算する。`do` に並べると、何を確かめる項目なのかが読めなくなる
 - **標準出力をそのまま報告に載せ、フローの中身は載せない**（パスだけ書く）。中身を貼ると呼び出し元と sim-driver が打ち直すことになる
 - **`path` を別に叩かない。** `--out-dir` の標準出力が同じ実行から出た経路なので、別に叩くと食い違う余地ができる。どこが機械判定でどこが証跡頼みかも右側に出るので、**`—`（機械判定なし）が多い項目は、確認として弱いことが読む側に伝わる**
 - **画面をまたいで突き合わせる項目**（詳細の表示が一覧と一致しているか等）は、**後ろの項目に `fresh` を付けない。** 付けると起動し直して一覧を取り直し、同じデータを見ている保証が消える

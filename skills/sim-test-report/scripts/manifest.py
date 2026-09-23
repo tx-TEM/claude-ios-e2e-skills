@@ -22,7 +22,7 @@ plan.json --out-dir` が置いた `index.json` が並んでいる。証跡1枚�
 起動し直ることを知らないと証跡を読み違える**（前の項目の状態が続いているのか、
 まっさらなのか）。
 
-**`inputs` は実行時に決める値。** plan の `runtime` に当たる操作を持つ項目に付く。打つ文字
+**`inputs` は実行時に決める値。** plan で `runtime` を書いた項目に付く。打つ文字
 にも、どの行を叩くかにも付く。値が空のうちはフローを走らせられない（`run_flows.py`
 がそこで止まる）。着いた画面を見ないと決まらないものなので、埋めるのは撮影する側。
 
@@ -95,7 +95,7 @@ def main():
 
     # 一覧のぶん（フローあり）＋ 探索のぶん。探索は末尾に積む
     entries = [(e, it) for e, it in zip(index, items)] + \
-              [({"name": it.get("shot"), "screen": it.get("screen")}, it) for it in explore]
+              [({"name": it.get("shot")}, it) for it in explore]
 
     # route.py はフローの中でしか重複を見られない。explore と衝突する余地が
     # 残るのでここでも弾く。同名だと後から撮ったほうが上書きし、
@@ -116,7 +116,8 @@ def main():
         sections.append({
             "name": name,                      # 引き継ぎと突き合わせのキー
             "title": it.get("title", ""),      # 確認項目。plan が正
-            "screen": e.get("screen"),
+            "from": it.get("from"),            # 操作を始める画面（plan）
+            "screen": e.get("screen"),         # 撮った画面（route.py）。探索は撮るまで決まらない
             "expect": it.get("expect", ""),    # 証跡の中で何を確かめるか。同上
             "checked": e.get("checked"),       # None なら証跡だけが根拠
             "launch": e.get("launch"),         # true なら、ここでアプリを起動し直す

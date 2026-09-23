@@ -9,34 +9,37 @@
   route.py check                       マップ全体の自己テスト
 
   flow の引数
-    --plan <json>      項目の一覧。**項目1つ＝ screen で do を順に叩いて、1枚撮る。**
+    --plan <json>      項目の一覧。**項目1つ＝ from から do を順に叩いて、1枚撮る。**
                          {"app": "<bundle id>", "shots_dir": "<絶対パス>",
-                          "runtime": ["tap:browse.bookRow.*"], "inputs": {"<id>": "<値>"},
                           "clear_state": false,
                           "items": [
-                            {"shot": "iphone_01_list", "screen": "browse"},
-                            {"shot": "iphone_02_filter", "screen": "browse",
-                             "do": ["text:browse.searchField"]},
-                            {"shot": "iphone_03_detail", "screen": "browse", "fresh": true,
+                            {"shot": "iphone_01_list", "from": "browse"},
+                            {"shot": "iphone_02_filter", "from": "browse",
+                             "do": [{"op": "text:browse.searchField", "runtime": true}]},
+                            {"shot": "iphone_03_nohit", "from": "browse",
+                             "do": [{"op": "text:browse.searchField", "input": "zzzz"}]},
+                            {"shot": "iphone_04_detail", "from": "browse", "fresh": true,
                              "do": ["tap:browse.bookRow.*"]}]}
-                       screen    その項目の操作を始める画面。**項目は経路を持たない** —
-                                 前の項目が終わった画面から screen までは、ここで計算して
+                       from      その項目の操作を始める画面。**項目は経路を持たない** —
+                                 前の項目が終わった画面から from までは、ここで計算して
                                  繋ぐ（すでに居れば何もしない）
                        do        確かめる操作。`tap:<id>` `scroll:down` のように種類を頭に
                                  付けて指せる（scroll は必須）。**並び順がそのまま実行順。**
                                  遷移する操作も書いてよく、行き先はマップの `to` で追う。
-                                 着いた状態を見るだけの項目は空
+                                 着いた状態を見るだけの項目は空。入れる値の要る操作は
+                                 {"op": 操作id, …} にして、次のどちらかを添える
+                                   "runtime": true  **値を実行時に決める。** フローには値を
+                                        焼き込まず、`env` の未定のまま残す。着いた画面を
+                                        見ないと決まらないときに（打つ文字、どの行を叩くか）。
+                                        焼き込むと、データが変わっても古い値で黙って走る
+                                   "input": 値      データに依らない値（一致しない語など）
+                                 from までの経路の途中で叩く操作は位置で選ぶ。どれを選ぶかを
+                                 気にするなら、それは確かめる操作なので do に書く
                        fresh     その項目はアプリを起動し直した直後から始める。**項目の前提で
                                  あって、フローの切り方ではない** — 前の項目の状態（絞り込み、
                                  変えたデータ）が残ると前提が崩れるときだけ付ける
                        shot      証跡の名前。`shots_dir` の下に撮る（Maestro はデーモンの
                                  作業ディレクトリ基準で書くので、shots_dir は絶対パス）
-                       runtime   **その操作の値を実行時に決める**（`text:browse.searchField`
-                                 `tap:browse.bookRow.*`）。フローには値を焼き込まず、`env` の
-                                 未定のまま残す。着いた画面を見ないと決まらないときに。
-                                 **埋まっていないことが走らせる前に分かる** — 焼き込むと、
-                                 データが変わっても古い値で黙って走る
-                       inputs    text 操作で打つ文字のうち、データに依らないもの
                        `title` / `expect` / `explore` は読まない
                        （sim-test-report の manifest.py が読む）
     --out-dir <dir>    **項目ごとにフローを分けて**そのディレクトリに書く。
@@ -318,7 +321,7 @@ def resolve(mp, at, wanted):
     return None
 
 
-def build(mp, segments, inputs, start=None, runtime=()):
+def build(mp, segments, start=None):
     """セグメントを順に繋いで1本にする。
 
     セグメントは `goto`（経路を計算して繋ぐ）/ `do`（その場で操作する）/
@@ -346,7 +349,26 @@ def build(mp, segments, inputs, start=None, runtime=()):
     at = start or mp.start
     stack = [at]
 
-    for n, (what, value) in enumerate(segments, 1):
+    # セグメントの3つ目は、どの項目のものかと、do なら入れる値の決め方
+    # （runtime / input）。**値の決め方は do の操作だけが持つ** — 計算した経路の
+    # 途中で叩く操作はテストケースが選んだものではないので、位置で選ぶ
+    def mark(frm, ctx):
+        for st in steps[frm:]:
+            if "action" not in st:
+                continue
+            if ctx.get("item"):
+                st["item"] = ctx["item"]
+            if ctx.get("runtime"):
+                st["runtime"] = True
+            elif "input" in ctx:
+                st["input"] = ctx["input"]
+
+    marked, ctx = 0, {}
+    for n, seg in enumerate(segments, 1):
+        mark(marked, ctx)
+        marked = len(steps)
+        what, value = seg[0], seg[1]
+        ctx = seg[2] if len(seg) > 2 else {}
         tag = "[{}] {} {}".format(n, what, value).rstrip()
 
         if what == "restart":
@@ -472,24 +494,23 @@ def build(mp, segments, inputs, start=None, runtime=()):
             stack.append(a["to"])
             at = a["to"]
 
+    mark(marked, ctx)
+
     # text は値が要る。マップは値を持たない（テストケース側が決める）
     for st in steps:
         if "shot" in st or st.get("restart"):
             continue
         op, target = op_of(st["action"])
-        if op == "text" and target not in inputs and not is_runtime(op, target, runtime):
-            problems.append(("call", "text {} に打つ文字が渡されていない（plan の inputs か runtime に書く）。"
+        if op == "text" and "input" not in st and not st.get("runtime"):
+            where = "({}) ".format(st["item"]) if st.get("item") else ""
+            problems.append(("call", "{}text {} に打つ文字が渡されていない（do に {{\"op\": …, \"input\": 値}} か "
+                             "{{\"op\": …, \"runtime\": true}} で書く）。"
                              "マップは値を持たない。何を打つかはテストケースが決める"
-                             .format(target)))
+                             .format(where, target)))
     return steps, problems, notes
 
 
 # ---------- 出す ----------
-
-def is_runtime(op, target, runtime):
-    """その操作の値を実行時に決めるか。plan の `runtime`（`<種類>:<id>`） と突き合わせる。"""
-    return "{}:{}".format(op, target) in runtime
-
 
 def var_name(target):
     """操作のidから env の変数名を作る。`browse.searchField` → `BROWSE_SEARCHFIELD`。
@@ -557,8 +578,8 @@ def step_comment(mp, st):
     return head
 
 
-def emit_flow(mp, steps, inputs, app, clear_state, notes=None, timeout=10000,
-              start=None, launch=True, runtime=()):
+def emit_flow(mp, steps, app, clear_state, notes=None, timeout=10000,
+              start=None, launch=True):
     """`launch=False` はアプリを起動し直さない。続きのフローを出すため。"""
     notes = list(notes or [])
     start = start or mp.start
@@ -567,7 +588,7 @@ def emit_flow(mp, steps, inputs, app, clear_state, notes=None, timeout=10000,
     # ことが走らせる前に分かる。
     used = [var_name(op_of(st["action"])[1]) for st in steps
             if "shot" not in st and not st.get("restart")
-            and is_runtime(*op_of(st["action"]), runtime)]
+            and st.get("runtime")]
     out = ["appId: " + app]
     if used:
         out.append("env:")
@@ -608,7 +629,7 @@ def emit_flow(mp, steps, inputs, app, clear_state, notes=None, timeout=10000,
 
         if op == "tap":
             key = "text" if a.get("by") == "label" else "id"
-            if is_runtime(op, target, runtime):
+            if st.get("runtime"):
                 # パターンの `*` を変数に置き換える。どれを叩くかは走らせるときに決まる
                 val = "^" + re.escape(target.rstrip(".*")) + r"\." + "${" + var_name(target) + "}$"
             else:
@@ -624,10 +645,10 @@ def emit_flow(mp, steps, inputs, app, clear_state, notes=None, timeout=10000,
         elif op == "text":
             out.append("- tapOn:\n    id: " + q(sel_id(target)))
             out.append("- eraseText")       # 前の項目の文字が残ったまま打たない
-            if is_runtime(op, target, runtime):
+            if st.get("runtime"):
                 out.append("- inputText: ${" + var_name(target) + "}")
             else:
-                out.append("- inputText: " + q(str(inputs.get(target, ""))))
+                out.append("- inputText: " + q(str(st.get("input", ""))))
         elif op == "scroll":
             if target == "down":
                 out.append("- scroll")
@@ -714,12 +735,12 @@ def split_at_shots(mp, steps, start, launch_first=True):
     return out
 
 
-def split_before_runtime(mp, seg_start, seg_steps, runtime):
+def split_before_runtime(mp, seg_start, seg_steps):
     """実行時に決める操作の手前で切る。(前半, 前半が着く画面, 後半) を返す。"""
     for n, st in enumerate(seg_steps):
         if "shot" in st or st.get("restart"):
             continue
-        if is_runtime(*op_of(st["action"]), runtime):
+        if st.get("runtime"):
             at = seg_start
             for prev in seg_steps[:n]:
                 if prev.get("to"):
@@ -728,7 +749,7 @@ def split_before_runtime(mp, seg_start, seg_steps, runtime):
     return [], seg_start, seg_steps   # 無し。`main_steps is seg_steps` で判る
 
 
-def emit_path(mp, steps, inputs, notes, start=None):
+def emit_path(mp, steps, notes, start=None):
     """人が読む経路。**どこが機械判定でどこが証跡頼みかを明示する。**
 
     フローを見せてレビューを受けるとき、いちばん知りたいのは「この確認は
@@ -777,7 +798,7 @@ def emit_path(mp, steps, inputs, notes, start=None):
             continue
         a = st["action"]
         op, target = op_of(a)
-        extra = ' "{}"'.format(inputs.get(target, "")) if op == "text" else ""
+        extra = ' "{}"'.format(st.get("input", "")) if op == "text" else ""
         left = "  {}  {}{}".format(st["screen"].ljust(w), label_of(a), extra)
         if st.get("to"):
             dest = (mp.screens.get(st["to"]) or {}).get("anchor")
@@ -971,16 +992,20 @@ def cmd_check(mp):
     return 0
 
 
-PLAN_KEYS = {"app", "shots_dir", "clear_state", "runtime", "inputs", "items", "explore"}
-ITEM_KEYS = {"shot", "screen", "do", "fresh", "title", "expect"}
+PLAN_KEYS = {"app", "shots_dir", "clear_state", "items", "explore"}
+ITEM_KEYS = {"shot", "from", "do", "fresh", "title", "expect"}
+DO_KEYS = {"op", "runtime", "input"}
 
 
 def read_plan(path):
     """plan.json をセグメントの列に開く。経路の計算も検査も build() に任せる。
 
-    項目1つ＝「`screen` で `do` を順に叩いて、1枚撮る」。**項目は経路を持たない。**
-    `screen` へどう着くかはここで `goto` を挟んで計算させる（すでに居れば何もしない）。
-    テストケースが持つのは、どこで何を確かめるかだけ。
+    項目1つ＝「`from` から `do` を順に叩いて、1枚撮る」。**項目は経路を持たない。**
+    `from` へどう着くかはここで `goto` を挟んで計算させる（すでに居れば何もしない）。
+    テストケースが持つのは、どこから何を確かめるかだけ。
+
+    `do` の要素は操作id（`"tap:Search"`）か、入れる値の決め方を添えた
+    `{"op": 操作id, "runtime": true}` / `{"op": 操作id, "input": 値}`。
 
     `fresh` が真の項目は、アプリを起動し直した直後から始める（その項目の前提）。
     前の項目を撮った直後で起動し直すので、前の項目の状態は引き継がない。
@@ -994,8 +1019,10 @@ def read_plan(path):
     # 知らない鍵は綴り違い。黙って無視すると、その指定が効かないまま走る
     unknown = set(plan) - PLAN_KEYS
     if unknown:
-        sys.exit("plan に知らない鍵: {}（使えるのは {}）".format(
-            ", ".join(sorted(unknown)), ", ".join(sorted(PLAN_KEYS))))
+        hint = ("。値の決め方は do の操作に書く（{\"op\": …, \"runtime\": true}）"
+                if unknown & {"runtime", "inputs"} else "")
+        sys.exit("plan に知らない鍵: {}（使えるのは {}）{}".format(
+            ", ".join(sorted(unknown)), ", ".join(sorted(PLAN_KEYS)), hint))
     shots_dir = plan.get("shots_dir")
     items = plan.get("items") or []
     if items and not shots_dir:
@@ -1007,28 +1034,45 @@ def read_plan(path):
             sys.exit("plan の items[{}] に shot（証跡の名前）が無い".format(n))
         unknown = set(item) - ITEM_KEYS
         if unknown:
-            hint = ("。経路は書かない — screen に着くまでは route.py が計算する"
-                    if unknown & {"steps", "goto"} else "")
+            hint = ""
+            if unknown & {"steps", "goto"}:
+                hint = "。経路は書かない — from に着くまでは route.py が計算する"
+            elif unknown & {"runtime", "inputs"}:
+                hint = "。値の決め方は do の操作に書く（{\"op\": …, \"runtime\": true}）"
+            elif "screen" in unknown:
+                hint = "。操作を始める画面は from"
             sys.exit("plan の {} に知らない鍵: {}（使えるのは {}）{}".format(
                 shot, ", ".join(sorted(unknown)), ", ".join(sorted(ITEM_KEYS)), hint))
-        screen = item.get("screen")
-        if not screen:
-            sys.exit("plan の {} に screen（操作を始める画面）が無い".format(shot))
+        start = item.get("from")
+        if not start:
+            sys.exit("plan の {} に from（操作を始める画面）が無い".format(shot))
         do = item.get("do") or []
-        if isinstance(do, str) or not all(isinstance(d, str) for d in do):
-            sys.exit("plan の {} の do は操作idの配列で書く: {}".format(
+        if isinstance(do, (str, dict)):
+            sys.exit("plan の {} の do は配列で書く: {}".format(
                 shot, json.dumps(do, ensure_ascii=False)))
 
-        def add(seg):
-            segments.append(seg); owners.append(shot)
+        def add(what, value="", **ctx):
+            ctx["item"] = shot
+            segments.append((what, value, ctx)); owners.append(shot)
         if item.get("fresh") and segments:
-            add(("restart", ""))
-        add(("goto", screen))
+            add("restart")
+        add("goto", start)
         for d in do:
-            add(("do", d))
-        add(("shot", str(Path(os.path.expanduser(shots_dir)) / shot)))
-    return (segments, list(plan.get("runtime") or []), dict(plan.get("inputs") or {}),
-            plan.get("app"), bool(plan.get("clear_state")), owners)
+            if isinstance(d, str):
+                add("do", d)
+                continue
+            bad = not isinstance(d, dict) or not d.get("op") or set(d) - DO_KEYS \
+                or ("runtime" in d) == ("input" in d) or d.get("runtime") not in (None, True)
+            if bad:
+                sys.exit("plan の {} の do の要素は操作id か {{\"op\": 操作id, \"runtime\": true}} か "
+                         "{{\"op\": 操作id, \"input\": 値}}: {}".format(
+                             shot, json.dumps(d, ensure_ascii=False)))
+            if d.get("runtime"):
+                add("do", d["op"], runtime=True)
+            else:
+                add("do", d["op"], input=d["input"])
+        add("shot", str(Path(os.path.expanduser(shots_dir)) / shot))
+    return segments, plan.get("app"), bool(plan.get("clear_state")), owners
 
 
 def main():
@@ -1074,7 +1118,7 @@ def main():
     if cmd == "check":
         sys.exit(cmd_check(mp))
 
-    runtime, inputs, app, clear, owners = [], {}, None, False, None
+    app, clear, owners = None, False, None
     if cmd == "path":
         # 画面idを並べると、順にたどる。どう行くかを見るだけなので操作は挟まない
         if not rest:
@@ -1084,7 +1128,7 @@ def main():
     elif cmd == "flow":
         if not plan_path or not out_dir or rest:
             sys.exit("flow は `--plan <json> --out-dir <dir>` で呼ぶ（--help）")
-        segments, runtime, inputs, app, clear, owners = read_plan(plan_path)
+        segments, app, clear, owners = read_plan(plan_path)
         if not segments:
             sys.exit("plan の items が空（経路が組めた項目が無いなら route.py は要らない）")
         if not app:
@@ -1092,7 +1136,7 @@ def main():
     else:
         sys.exit(__doc__)
 
-    steps, problems, notes = build(mp, segments, inputs, None, runtime)
+    steps, problems, notes = build(mp, segments)
     if problems:
         print("経路を組めなかった:", file=sys.stderr)
         for _, msg in problems:
@@ -1107,9 +1151,8 @@ def main():
         sys.exit(2)
 
     if cmd == "path":
-        _, all_notes = emit_flow(mp, steps, inputs, "x", clear, notes, timeout,
-                                 None, launch=True, runtime=runtime)   # 補足だけ取る
-        print(emit_path(mp, steps, inputs, all_notes, None))
+        _, all_notes = emit_flow(mp, steps, "x", clear, notes, timeout)   # 補足だけ取る
+        print(emit_path(mp, steps, all_notes))
         return
     # **項目（撮影）ごとに1本ずつ。** 走らせる側は順に run して inspect するだけで、
     # 証跡と同名のダンプが揃う。
@@ -1119,26 +1162,26 @@ def main():
     written = []
     for n, (seg_start, seg_steps, shot_name, lch) in enumerate(segs, 1):
         # 実行時に決める操作があれば手前で切る。前半を先に流し、着いてから値を決める
-        pre_steps, resume_at, main_steps = split_before_runtime(mp, seg_start, seg_steps, runtime)
+        pre_steps, resume_at, main_steps = split_before_runtime(mp, seg_start, seg_steps)
         base = "{:02d}_{}".format(n, shot_name or "tail")
         # 起動も前半に出す。値を決める前に止めたとき、起動していなければ画面は見えない
         pre_name = None
         if pre_steps or (lch and main_steps is not seg_steps):
-            pre, _ = emit_flow(mp, pre_steps, inputs, app, clear, notes, timeout,
-                               seg_start, launch=lch, runtime=runtime)
+            pre, _ = emit_flow(mp, pre_steps, app, clear, notes, timeout,
+                               seg_start, launch=lch)
             pre_name = base + ".pre.yaml"
             (d / pre_name).write_text(pre, encoding="utf-8")
 
         # 自分で起動するのは1本目と fresh の項目。他は居る場所から続ける
-        flow, _ = emit_flow(mp, main_steps, inputs, app, clear, notes, timeout,
-                            resume_at, launch=lch and pre_name is None, runtime=runtime)
+        flow, _ = emit_flow(mp, main_steps, app, clear, notes, timeout,
+                            resume_at, launch=lch and pre_name is None)
         name = base + ".yaml"
         (d / name).write_text(flow, encoding="utf-8")
         screen, checked = shot_context(mp, seg_start, seg_steps)
         shot_path = next((st["shot"] for st in seg_steps if "shot" in st), None)
         runtime_inputs = {var_name(op_of(st["action"])[1]): "" for st in seg_steps
                  if "shot" not in st and not st.get("restart")
-                 and is_runtime(*op_of(st["action"]), runtime)}
+                 and st.get("runtime")}
         written.append({"name": shot_name, "screen": screen, "checked": checked,
                         "pre_flow": pre_name, "flow": name, "shot": shot_path,
                         "launch": lch, "inputs": runtime_inputs})
@@ -1147,7 +1190,7 @@ def main():
     (d / "index.json").write_text(
         json.dumps([w for w in written if w["name"]], ensure_ascii=False, indent=2),
         encoding="utf-8")
-    print(emit_path(mp, steps, inputs, notes, None))
+    print(emit_path(mp, steps, notes))
     print("\n  フロー（{}本）: {}".format(len(written), out_dir))
     for w in written:
         print("    {}{}  →  ダンプ名 {}  機械判定 {}".format(
