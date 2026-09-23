@@ -9,23 +9,26 @@
   route.py check                       マップ全体の自己テスト
 
   flow の引数
-    --plan <json>      項目と経路。**項目1つ＝ steps のあとに1枚撮る。**
+    --plan <json>      項目の一覧。**項目1つ＝ screen で do を順に叩いて、1枚撮る。**
                          {"app": "<bundle id>", "shots_dir": "<絶対パス>",
                           "runtime": ["tap:browse.bookRow.*"], "inputs": {"<id>": "<値>"},
                           "clear_state": false,
                           "items": [
-                            {"shot": "iphone_01_list", "steps": [{"goto": "browse"}]},
-                            {"shot": "iphone_02_filter",
-                             "steps": [{"do": "text:browse.searchField"}]},
-                            {"shot": "iphone_03_detail", "restart": true,
-                             "steps": [{"goto": "detail"}]}]}
-                       steps（**並び順がそのまま実行順**）
-                         goto <画面id>  いま居る画面からそこまで、経路を計算して繋ぐ
-                         do <操作id>    いま居る画面で操作する。`tap:<id>` `scroll:down` の
-                                        ように種類を頭に付けて指せる（scroll は必須）
-                       restart   その項目の手前でアプリを起動し直し、起点に戻る。**前の
-                                 項目の状態から次の項目の前提に行けないときに切る。**
-                                 落ちたときに巻き添えになる範囲も、ここで切れる
+                            {"shot": "iphone_01_list", "screen": "browse"},
+                            {"shot": "iphone_02_filter", "screen": "browse",
+                             "do": ["text:browse.searchField"]},
+                            {"shot": "iphone_03_detail", "screen": "browse", "fresh": true,
+                             "do": ["tap:browse.bookRow.*"]}]}
+                       screen    その項目の操作を始める画面。**項目は経路を持たない** —
+                                 前の項目が終わった画面から screen までは、ここで計算して
+                                 繋ぐ（すでに居れば何もしない）
+                       do        確かめる操作。`tap:<id>` `scroll:down` のように種類を頭に
+                                 付けて指せる（scroll は必須）。**並び順がそのまま実行順。**
+                                 遷移する操作も書いてよく、行き先はマップの `to` で追う。
+                                 着いた状態を見るだけの項目は空
+                       fresh     その項目はアプリを起動し直した直後から始める。**項目の前提で
+                                 あって、フローの切り方ではない** — 前の項目の状態（絞り込み、
+                                 変えたデータ）が残ると前提が崩れるときだけ付ける
                        shot      証跡の名前。`shots_dir` の下に撮る（Maestro はデーモンの
                                  作業ディレクトリ基準で書くので、shots_dir は絶対パス）
                        runtime   **その操作の値を実行時に決める**（`text:browse.searchField`
@@ -34,7 +37,7 @@
                                  **埋まっていないことが走らせる前に分かる** — 焼き込むと、
                                  データが変わっても古い値で黙って走る
                        inputs    text 操作で打つ文字のうち、データに依らないもの
-                       `title` / `expect` / `explore` など他の欄は読まない
+                       `title` / `expect` / `explore` は読まない
                        （sim-test-report の manifest.py が読む）
     --out-dir <dir>    **項目ごとにフローを分けて**そのディレクトリに書く。
                        あわせて `index.json`（撮影の名前・画面・機械判定のID・
@@ -683,7 +686,7 @@ def split_at_shots(mp, steps, start, launch_first=True):
     証跡1枚ごとに構造を残すには、撮る地点でフローを終わらせるしかない。
     2本目以降は前のフローの続きになるので、歩き直しは起きない。
 
-    返す4つ目は**そのフローが自分で起動するか。** 1本目と、`restart` の直後が
+    返す4つ目は**そのフローが自分で起動するか。** 1本目と、`fresh` の項目が
     そう。**ここが鎖の切れ目**で、走らせる側は落ちたときにどこまで諦めるかを
     これで決める（次に起動するフローからは、前が落ちていても走る）。
 
@@ -969,17 +972,20 @@ def cmd_check(mp):
 
 
 PLAN_KEYS = {"app", "shots_dir", "clear_state", "runtime", "inputs", "items", "explore"}
-STEP_KEYS = {"goto", "do"}
+ITEM_KEYS = {"shot", "screen", "do", "fresh", "title", "expect"}
 
 
 def read_plan(path):
-    """plan.json をセグメントの列に開く。**コマンドラインと同じ列にするだけ**で、
-    経路の計算も検査も build() に任せる。
+    """plan.json をセグメントの列に開く。経路の計算も検査も build() に任せる。
 
-    項目1つ＝ `steps` のあとに1枚撮る。`restart` が真の項目は、その手前（前の項目を
-    撮った直後）でアプリを起動し直す。撮影のパスは `shots_dir` と `shot` から組む。
-    `title` / `expect` など項目の他の欄はここでは見ない（manifest.py が読む）。
-    `explore` も見ない — 経路が組めなかった項目で、フローを持たない。
+    項目1つ＝「`screen` で `do` を順に叩いて、1枚撮る」。**項目は経路を持たない。**
+    `screen` へどう着くかはここで `goto` を挟んで計算させる（すでに居れば何もしない）。
+    テストケースが持つのは、どこで何を確かめるかだけ。
+
+    `fresh` が真の項目は、アプリを起動し直した直後から始める（その項目の前提）。
+    前の項目を撮った直後で起動し直すので、前の項目の状態は引き継がない。
+    撮影のパスは `shots_dir` と `shot` から組む。`title` / `expect` は読まない
+    （manifest.py が読む）。`explore` も見ない — 経路が組めなかった項目で、フローを持たない。
     """
     try:
         plan = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -999,15 +1005,28 @@ def read_plan(path):
         shot = item.get("shot")
         if not shot:
             sys.exit("plan の items[{}] に shot（証跡の名前）が無い".format(n))
-        if item.get("restart") and segments:
-            segments.append(("restart", "")); owners.append(shot)
-        for st in item.get("steps") or []:
-            if len(st) != 1 or not set(st) <= STEP_KEYS:
-                sys.exit("plan の {} の steps は {{\"goto\": 画面id}} か {{\"do\": 操作id}} を"
-                         "1つずつ並べる: {}".format(shot, json.dumps(st, ensure_ascii=False)))
-            (kind, value), = st.items()
-            segments.append((kind, value)); owners.append(shot)
-        segments.append(("shot", str(Path(os.path.expanduser(shots_dir)) / shot))); owners.append(shot)
+        unknown = set(item) - ITEM_KEYS
+        if unknown:
+            hint = ("。経路は書かない — screen に着くまでは route.py が計算する"
+                    if unknown & {"steps", "goto"} else "")
+            sys.exit("plan の {} に知らない鍵: {}（使えるのは {}）{}".format(
+                shot, ", ".join(sorted(unknown)), ", ".join(sorted(ITEM_KEYS)), hint))
+        screen = item.get("screen")
+        if not screen:
+            sys.exit("plan の {} に screen（操作を始める画面）が無い".format(shot))
+        do = item.get("do") or []
+        if isinstance(do, str) or not all(isinstance(d, str) for d in do):
+            sys.exit("plan の {} の do は操作idの配列で書く: {}".format(
+                shot, json.dumps(do, ensure_ascii=False)))
+
+        def add(seg):
+            segments.append(seg); owners.append(shot)
+        if item.get("fresh") and segments:
+            add(("restart", ""))
+        add(("goto", screen))
+        for d in do:
+            add(("do", d))
+        add(("shot", str(Path(os.path.expanduser(shots_dir)) / shot)))
     return (segments, list(plan.get("runtime") or []), dict(plan.get("inputs") or {}),
             plan.get("app"), bool(plan.get("clear_state")), owners)
 
@@ -1110,7 +1129,7 @@ def main():
             pre_name = base + ".pre.yaml"
             (d / pre_name).write_text(pre, encoding="utf-8")
 
-        # 自分で起動するのは1本目と restart の直後。他は居る場所から続ける
+        # 自分で起動するのは1本目と fresh の項目。他は居る場所から続ける
         flow, _ = emit_flow(mp, main_steps, inputs, app, clear, notes, timeout,
                             resume_at, launch=lch and pre_name is None, runtime=runtime)
         name = base + ".yaml"

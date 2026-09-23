@@ -32,7 +32,7 @@ clone したディレクトリで `./install.sh` を実行する。`~/.claude/` 
 
 ### 1. テストケースを立てる（LLM / `test-case-builder`）
 
-ユーザーの指示から確認項目を立てる。コードの差分と、事前に用意した[画面マップ](skills/screen-map/SKILL.md#スキーマ)を参照する。項目・期待・そこまでの操作を **`plan.json` 1つ**に書く。以降のフローもマニフェストもここから作り、LLM が散文から写す箇所を残さない。
+ユーザーの指示から確認項目を立てる。コードの差分と、事前に用意した[画面マップ](skills/screen-map/SKILL.md#スキーマ)を参照する。項目ごとに、どの画面で何を操作し、何が見えるはずかを **`plan.json` 1つ**に書く。そこまでの経路は書かない。以降のフローもマニフェストもここから作り、LLM が散文から写す箇所を残さない。
 
 ```json
 {
@@ -42,16 +42,15 @@ clone したディレクトリで `./install.sh` を実行する。`~/.claude/` 
   "items": [
     {"shot": "iphone_01_browse_initial", "screen": "browse",
      "title": "さがす画面の初期表示で作品一覧が出る",
-     "expect": "絞り込み無しの一覧が出て、作品の行が複数並んでいる",
-     "steps": [{"goto": "browse"}]},
+     "expect": "絞り込み無しの一覧が出て、作品の行が複数並んでいる"},
     {"shot": "iphone_02_debounce_filtered", "screen": "browse",
      "title": "キーワード入力でデバウンス絞り込みが走る",
-     "expect": "入力欄に出ている語を、一覧に残っている行がすべて作品名に含む",
-     "steps": [{"do": "text:browse.searchField"}]},
-    {"shot": "iphone_03_scroll", "screen": "browse", "restart": true,
+     "do": ["text:browse.searchField"],
+     "expect": "入力欄に出ている語を、一覧に残っている行がすべて作品名に含む"},
+    {"shot": "iphone_03_scroll", "screen": "browse", "fresh": true,
      "title": "一覧をスクロールすると次のページが読み込まれる",
-     "expect": "…",
-     "steps": [{"goto": "browse"}, {"do": "scroll:down"}]}
+     "do": ["scroll:down"],
+     "expect": "…"}
   ],
   "explore": []
 }
@@ -61,7 +60,7 @@ clone したディレクトリで `./install.sh` を実行する。`~/.claude/` 
 
 ### 2. 経路を計算して Maestro のフローを書く（`route.py`）
 
-plan の各項目の `steps` をたどる経路を画面マップから計算し、Maestro のフローとして書き出す。
+plan の各項目について、前の項目が終わった画面から `screen` までの経路を画面マップから計算し、`do` の操作と撮影を繋いでMaestro のフローとして書き出す。
 
 ```bash
 python3 ~/.claude/skills/screen-map/scripts/route.py flow \
