@@ -129,10 +129,10 @@ python3 ~/.claude/skills/sim-test-report/scripts/run_flows.py \
 
 ```bash
 python3 ~/.claude/skills/sim-test-report/scripts/build_report.py <出力先>/manifest.json \
-  --title "…" --meta "ブランチ: …" --meta "確認環境: …" --meta "実施日: …"
+  --title "…" --meta "確認環境: …"
 ```
 
-ヘッダの題と meta はここで渡す。定義ファイルには持たせない。
+ヘッダの題と確認環境はここで渡す。ブランチと実施日は、アプリのリポジトリの git と組んだ日からスクリプトが出す（別の場所で叩くなら `--repo`）。どれも定義ファイルには持たせない。
 
 画像を base64 で埋め込んだ単一HTMLと、それを1枚に描画したPNGが出る。
 

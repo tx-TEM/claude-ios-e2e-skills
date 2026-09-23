@@ -2,15 +2,18 @@
 """スクリーンショット付き動作確認レポート（単一HTML）を生成する。
 
 使い方:
-    python3 build_report.py <manifest.json> [--title <題>] [--meta <行>]... [--width=<px>] [--no-png]
+    python3 build_report.py <manifest.json> [--title <題>] [--meta <行>]... [--repo <dir>]
+                            [--width=<px>] [--no-png]
 
     python3 build_report.py manifest.json \
       --title "一覧からお気に入り登録できるようにする — 動作確認レポート" \
-      --meta "ブランチ: issues/123-favorite-from-list (a1b2c3d)" \
-      --meta "確認環境: iPhone 16 シミュレーター (iOS 26.0)" --meta "実施日: 2026-01-15"
+      --meta "確認環境: iPhone 16 シミュレーター (iOS 26.0)"
 
 **題と meta はマニフェストに持たせず、ここで渡す。** どれもレポートを組む時点で決まるもので
 （確認環境は撮影する端末を決めるまで決まらない）、確認項目の中身ではない。
+
+**ブランチと実施日は渡さない。** ブランチはアプリのリポジトリ（既定はカレント、`--repo` で
+指定）の git から、実施日は組んだ日から出す。`--meta` で渡すと止まる（二重になる）。
 
 マニフェスト形式:
 {
@@ -73,6 +76,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import date
 
 DEFAULT_WIDTH = 750
 PNG_PAGE_WIDTH = 900
@@ -375,17 +379,34 @@ def render_png(html_path: pathlib.Path) -> pathlib.Path | None:
     return png_path
 
 
+AUTO_META = ("ブランチ", "実施日")
+
+
+def branch_of(repo: str) -> str:
+    def git(*a: str) -> str:
+        r = subprocess.run(["git", "-C", repo, *a], capture_output=True, text=True)
+        if r.returncode != 0:
+            raise SystemExit(f"ブランチが取れない: {repo} は git のリポジトリではない"
+                             "（アプリのリポジトリで叩くか、--repo で指定する）")
+        return r.stdout.strip()
+    return f"{git('rev-parse', '--abbrev-ref', 'HEAD')} ({git('rev-parse', '--short', 'HEAD')})"
+
+
 def main() -> None:
     argv = sys.argv[1:]
     args, width, make_png = [], DEFAULT_WIDTH, True
-    title, meta = "動作確認レポート", []
+    title, meta, repo = "動作確認レポート", [], "."
     i = 0
     while i < len(argv):
         a = argv[i]
         if a == "--title":
             title = argv[i + 1]; i += 2
         elif a == "--meta":
+            if argv[i + 1].split(":", 1)[0].strip() in AUTO_META:
+                sys.exit(f"--meta に {argv[i + 1]!r} は渡さない。ブランチと実施日はここで出す")
             meta.append(argv[i + 1]); i += 2
+        elif a == "--repo":
+            repo = argv[i + 1]; i += 2
         elif a.startswith("--width="):
             width = int(a.split("=", 1)[1]); i += 1
         elif a == "--no-png":
@@ -397,6 +418,7 @@ def main() -> None:
     if len(args) != 1:
         print(__doc__)
         sys.exit(1)
+    meta =[f"ブランチ: {branch_of(repo)}", *meta, f"実施日: {date.today().isoformat()}"]
     out_path = build(pathlib.Path(args[0]), width, title, meta)
     size = out_path.stat().st_size
     print(f"{out_path} ({size / 1024 / 1024:.2f} MB)")
