@@ -17,8 +17,8 @@ tools: Read, Grep, Glob, Bash
 
 - **何を確認したいか**。PR番号、ブランチ、変更の意図、画面名、機能名、観点のどれでもよい（「さがす画面を一通り」「一覧と詳細の内容が一致するか」も入力として成立する）
 - **対象アプリのリポジトリのパス**
-- **証跡の出力先ディレクトリ**（plan の `shots_dir` に要る。例: `~/Desktop/sim-test-report-<slug>/shots/`）
-- **ファイル名に使う端末名**（`iphone` / `ipad`）
+- **証跡の出力先ディレクトリ**（`manifest.py` の `<出力先>`。例: `~/Desktop/sim-test-report-<slug>/`。証跡はその下の `shots/` に撮る）
+- **ファイル名に使う端末名**（`iphone` / `ipad`。`manifest.py --device` に渡す）
 - **対象アプリの bundle id**
 - iPad も対象にするか
 
@@ -198,26 +198,25 @@ python3 $R check   --map $M     # 到達できない画面、切れている箇�
 ```json
 {
   "app": "<bundle id>",
-  "shots_dir": "/Users/…/Desktop/sim-test-report-<slug>/shots",
   "items": [
-    {"shot": "iphone_01_list_all", "from": "browse",
+    {"from": "browse",
      "title": "一覧画面が初期表示で一覧を出す",
      "expect": "さがす画面が出て、行が複数並んでいる"},
-    {"shot": "iphone_02_debounce", "from": "browse",
+    {"from": "browse",
      "do": [{"op": "text:browse.searchField", "runtime": true}],
      "title": "キーワードを打つと入力が止まってから絞り込みが走る",
      "expect": "入力欄に出ている語を、一覧に残っている行がすべて品名に含む"},
-    {"shot": "iphone_03_detail", "from": "browse", "fresh": true,
+    {"from": "browse", "fresh": true,
      "do": ["tap:browse.bookRow.*"],
      "title": "行をタップすると詳細に移る",
      "expect": "詳細が開き、品名がタップした行と一致する"},
-    {"shot": "iphone_04_back", "from": "detail",
+    {"from": "detail",
      "do": ["tap:BackButton"],
      "title": "詳細から戻ると一覧に戻る",
      "expect": "さがす画面が出て、一覧が表示されている"}
   ],
   "explore": [
-    {"shot": "iphone_04_history", "from": "history",
+    {"from": "history",
      "title": "…", "expect": "…",
      "reason": "画面 history がマップに無い"}
   ]
@@ -225,20 +224,19 @@ python3 $R check   --map $M     # 到達できない画面、切れている箇�
 ```
 
 ```bash
-python3 ~/.claude/skills/sim-test-report/scripts/manifest.py <plan.json> <出力先> --map $M
+python3 ~/.claude/skills/sim-test-report/scripts/manifest.py <plan.json> <出力先> --device iphone --map $M
 ```
 
-`<出力先>` は証跡の出力先ディレクトリ（`shots/` の1つ上）。フローは plan.json と同じディレクトリに書かれる。経路が組めなければ route.py の理由が出て止まる。
+`<出力先>` は証跡の出力先ディレクトリ（証跡は `<出力先>/shots/` に撮る）。フローは plan.json と同じディレクトリに書かれる。経路が組めなければ route.py の理由が出て止まる。
 
 - **1項目＝ `from` から `do` を順に叩いて1枚。** 項目が持つのは**どこから何を確かめるか**だけで、**そこまでの経路は書かない。** 前の項目が終わった画面から `from` までは route.py が計算して繋ぐ（すでに居れば何もしない）
 - **`from` は操作を始める画面。** 撮る画面ではない。「行をタップすると詳細に移る」なら `from` は `browse` で、`do` が `tap:browse.bookRow.*`
 - **`do` は確かめる操作だけ。** `title` が言っている操作と同じものを書く。遷移する操作もここに書く（行き先はマップの `to` で追う）。**確かめたい操作を経路計算に任せない** — 「戻るボタンで戻る」を確かめたいのに `from` を戻り先にすると、どの操作で戻ったかが route.py の選択になる
 - **着いた状態を見るだけの項目は `do` を空にする**（「一覧が出る」など）
-- **`shot` は証跡の名前。** パスではない（`shots_dir` と組み合わせて route.py が絶対パスにする）。項目・証跡・ダンプを結ぶ唯一の手がかりなので、**項目ごとに別の名前にする**
 - **入れる値の決め方は `do` の操作に添える。** `{"op": 操作id, "runtime": true}`（撮影時に決める）か `{"op": 操作id, "input": 値}`（データに依らない値だけ。一致しない語など）。値の要らない操作は操作idの文字列のまま
 - **`from` までの経路の途中で叩く操作は位置で選ばれる。** どの行を開くかを気にするなら、それは確かめる操作なので `do` に書く（`from` を一覧にして、行のタップを `runtime` 付きで並べる）
 - **`title` / `expect` は route.py は読まない。** マニフェストに入る。書き方は手順1のとおり
-- **`items` の並びがそのまま連番とレポートの順になる。** 見せたい順に並べる
+- **`items` の並びがそのまま証跡の連番とレポートの順になる。** 見せたい順に並べる
 - **経路が組めなかった項目は `explore` に移す。** `route.py` が返した理由を `reason` にそのまま書く。探索で撮るかマップを作るかは呼び出し元が決める（手順4）。**マップが無いときは全項目が `explore`** で、route.py は叩かない
 
 ## `fresh` は項目の前提として付ける
@@ -265,7 +263,7 @@ python3 ~/.claude/skills/sim-test-report/scripts/manifest.py <plan.json> <出力
 `route.py` は理由を返して終了コード 2 で終わる。**その文言をそのまま報告に載せ、その項目を plan の `explore` に移して `reason` にも書く。** 残りの項目で叩き直し、組めたところまでのフローは出しておく。
 
 ```
-[2] (iphone_05_settings) goto settings: 画面 settings がマップに無い。screens/settings.yaml を作る必要がある
+[2] (iphone_05) goto settings: 画面 settings がマップに無い。screens/settings.yaml を作る必要がある
 ```
 
 - **マップの穴**（未マップの画面、`in_tree: false`、`to` の先が無い）は、**経路が組めない項目として理由つきで返す。** 探索で撮るかマップを作るかは**呼び出し元がユーザーに選んでもらう**ので、どちらかに決めて返さない。**その画面に依存している項目をまとめて挙げる** — 1画面のせいで何項目が影響を受けるかで、判断が変わる
@@ -289,20 +287,20 @@ python3 ~/.claude/skills/sim-test-report/scripts/manifest.py <plan.json> <出力
 
 1. 一覧画面が初期表示で一覧を出す [browse]
    期待: 絞り込み無しの一覧が出て、行が複数並んでいる
-   証跡: iphone_01_list_all
+   証跡: iphone_01
 
 2. キーワードを打つと入力が止まってから絞り込みが走る [browse]
    期待: 入力欄に出ている語を、一覧に残っている行がすべて品名に含む
-   証跡: iphone_02_debounce
+   証跡: iphone_02
    ※打つ文字は `runtime`（`BROWSE_SEARCHFIELD` 未定）。撮影時に一覧を見て埋める
 
 3. 検索キーで絞り込みが確定する [browse]
    期待: キーボードが閉じている。一覧は項目2と同じ行のまま
-   証跡: iphone_03_search_key
+   証跡: iphone_03
 
 4. 行をタップすると詳細に移る [browse → detail]
    期待: 詳細が開き、品名と容量がタップした行と一致する
-   証跡: iphone_04_detail
+   証跡: iphone_04
 
 ## フロー
 
@@ -310,27 +308,27 @@ plan: ~/.claude/skills/sim-test-report/.work/flows/<slug>/plan.json
 生成先: ~/.claude/skills/sim-test-report/.work/flows/<slug>/
 
   browse  起点                              ✓ browse が出ている
-          撮影 .../iphone_01_list_all
+          撮影 iphone_01
   browse  text browse.searchField ""        ✓ browse.countLabel が出ている
-          撮影 .../iphone_02_debounce
+          撮影 iphone_02
   browse  tap Search                        — 機械判定なし。証跡で見る
-          撮影 .../iphone_03_search_key
+          撮影 iphone_03
   browse  tap browse.cell.* [index 0]       ✓ detail に着いたことを確認
-          撮影 .../iphone_04_detail
+          撮影 iphone_04
 
   機械判定 3件 / 証跡でしか見られない 1件
 
 未定の実行時入力:
-- 02_iphone_02_debounce.yaml の env.BROWSE_SEARCHFIELD
+- iphone_02.yaml の env.BROWSE_SEARCHFIELD
 
 ## 経路が組めなかった項目
 
 5. 通信エラーの表示
-   route.py: [1] (iphone_05_error) goto browse ... browse.error.reloadButton は states にあるが、
+   route.py: [1] (iphone_05) goto browse ... browse.error.reloadButton は states にあるが、
    現在のデータでは踏めない。一時コードが要る。
 
 7, 8, 9. 履歴からの導線  [history]
-   route.py: [3] (iphone_07_history) goto history: 画面 history がマップに無い。
+   route.py: [3] (iphone_07) goto history: 画面 history がマップに無い。
    screens/history.yaml を作る必要がある
    → この3項目が history のマップ待ち。探索にするかマップを作るかは呼び出し元の判断。
 
@@ -356,7 +354,7 @@ plan: ~/.claude/skills/sim-test-report/.work/flows/<slug>/plan.json
 
 - **「確認項目」は plan.json を読み上げたもの。** 正は plan で、`manifest.py` がそこから `title` と `expect` を拾う。**ここに書いて plan に無いものは、どこにも残らない**。直すなら plan を直す
 - **「期待」にマップの `result` を写さない。** `result` は画面の仕様（「一覧が入れ替わる」）で、書くのは**証跡の中で何を確かめれば起きたと言えるか**（「入力欄に出ている語を、残った行がすべて含む」）。値は実行時に決まるので、**値ではなく関係で書く**（「データに依る値は、決めない」）。**関係で書けないなら、その項目はまだ何を確かめるか決まっていない**
-- **「証跡」は plan の `shot`**（パスではなく `iphone_02_debounce`）。同じ名前だと後から撮ったほうが上書きし、項目が同じ画像を指したまま通ってしまう（`route.py` と `manifest.py` が弾くが、そもそも重ねない）
+- **「証跡」は `manifest.py` が振った名前**（`iphone_02`）。標準出力の「撮影」の行にそのまま出ている
 - **フローは plan のパスと、`manifest.py` の標準出力（route.py の操作列とマニフェストのパス）で返す。** YAML の中身は貼らない。標準出力は走るファイルと同じ実行から出た操作列なので、呼び出し元はそれをそのままレビューの2段目に出し、sim-driver にはパスを渡す
 - **未定の実行時入力はファイル名と `env` のキーで並べる。** 呼び出し元が撮影時に埋める箇所なので、落とさない
 - 判断に迷った箇所、`check` で見えた限界、マップと実装の食い違いは省かずに書く

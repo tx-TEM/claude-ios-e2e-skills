@@ -193,7 +193,7 @@ def build(mp, segments, start=None):
     前者はマップの穴で screen-map の仕事、後者は呼び方の間違いで、
     値を渡すか行き先を選び直せば済む。
     """
-    steps, problems, notes, shot_names = [], [], [], set()
+    steps, problems, notes = [], [], []
     at = start or mp.start
     stack = [at]
 
@@ -220,13 +220,6 @@ def build(mp, segments, start=None):
         tag = "[{}] {} {}".format(n, what, value).rstrip()
 
         if what == "restart":
-            # 撮る前に起動し直すと、その操作の結果はどこにも残らない。
-            # フローも撮影の地点でしか切れないので、間の操作は走らないまま消える
-            if steps and "shot" not in steps[-1]:
-                problems.append(("call", "{}: 直前が撮影ではない。起動し直すと"
-                                 "その間の操作の結果はどこにも残らないので、"
-                                 "撮ってから切るか、操作の方を消す".format(tag)))
-                break
             # 起動し直すので、居る場所も歩いた履歴も捨てて起点に戻る
             at = mp.start
             stack = [at]
@@ -234,23 +227,7 @@ def build(mp, segments, start=None):
             continue
 
         if what == "shot":
-            # 相対パスは弾く。Maestro はデーモンの作業ディレクトリ基準で書くので、
-            # どこに落ちたか分からないまま「撮れた」になる。
-            if not os.path.isabs(os.path.expanduser(value)):
-                problems.append(("call", "{}: shots_dir は絶対パスで書く。"
-                                 "相対だと Maestro がどこに書くか決まらない"
-                                 .format(tag)))
-                break
-            # 名前が証跡・ダンプ・項目を結ぶ唯一の手がかりなので、重複させない。
-            # 同じ名前だと後の1枚が前を上書きし、項目が同じ画像を指したまま通る。
-            name = os.path.basename(os.path.expanduser(value))
-            if name in shot_names:
-                problems.append(("call", "{}: 証跡の名前 {} が重複している。"
-                                 "後から撮ったほうが上書きするので、項目ごとに別の名前にする"
-                                 .format(tag, name)))
-                break
-            shot_names.add(name)
-            steps.append({"shot": os.path.expanduser(value)})
+            steps.append({"shot": value})
             continue
 
         if what == "do":
@@ -840,12 +817,45 @@ def cmd_check(mp):
     return 0
 
 
-PLAN_KEYS = {"app", "shots_dir", "clear_state", "items", "explore"}
-ITEM_KEYS = {"shot", "from", "do", "fresh", "title", "expect"}
+PLAN_KEYS = {"app", "clear_state", "items", "explore"}
+ITEM_KEYS = {"from", "do", "fresh", "title", "expect"}
+
+
+def shot_name(n, device=None):
+    """証跡の名前。項目の並び順から振る（explore は items の続きの番号）。
+    端末名は撮る側の設定で、テストケースは持たない。"""
+    return "{}_{:02d}".format(device, n) if device else "{:02d}".format(n)
 DO_KEYS = {"op", "runtime", "input"}
 
 
-def read_plan(path):
+EXPLORE_KEYS = {"from", "title", "expect", "reason"}
+
+
+def load_plan(path):
+    """plan.json を読み、鍵を確かめて返す。**知らない鍵は綴り違い** — 黙って無視すると、
+    その指定が効かないまま走る。"""
+    try:
+        plan = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        sys.exit("plan を読めない: {}: {}".format(path, e))
+    unknown = set(plan) - PLAN_KEYS
+    if unknown:
+        hint = ""
+        if unknown & {"runtime", "inputs"}:
+            hint = "。値の決め方は do の操作に書く（{\"op\": …, \"runtime\": true}）"
+        elif "shots_dir" in unknown:
+            hint = "。証跡の出力先は manifest.py の引数で決まる"
+        sys.exit("plan に知らない鍵: {}（使えるのは {}）{}".format(
+            ", ".join(sorted(unknown)), ", ".join(sorted(PLAN_KEYS)), hint))
+    for n, it in enumerate(plan.get("explore") or [], 1):
+        unknown = set(it) - EXPLORE_KEYS
+        if unknown:
+            sys.exit("plan の explore[{}] に知らない鍵: {}（使えるのは {}）".format(
+                n, ", ".join(sorted(unknown)), ", ".join(sorted(EXPLORE_KEYS))))
+    return plan
+
+
+def read_plan(plan, shots_dir, device=None):
     """plan.json をセグメントの列に開く。経路の計算も検査も build() に任せる。
 
     項目1つ＝「`from` から `do` を順に叩いて、1枚撮る」。**項目は経路を持たない。**
@@ -857,33 +867,19 @@ def read_plan(path):
 
     `fresh` が真の項目は、アプリを起動し直した直後から始める（その項目の前提）。
     前の項目を撮った直後で起動し直すので、前の項目の状態は引き継がない。
-    撮影のパスは `shots_dir` と `shot` から組む。`title` / `expect` は読まない
+    撮影のパスは `shots_dir` と、並び順から振った名前（`shot_name()`）で組む。`title` / `expect` は読まない
     （manifest.py が読む）。`explore` も見ない — 経路が組めなかった項目で、フローを持たない。
     """
-    try:
-        plan = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError) as e:
-        sys.exit("plan を読めない: {}: {}".format(path, e))
-    # 知らない鍵は綴り違い。黙って無視すると、その指定が効かないまま走る
-    unknown = set(plan) - PLAN_KEYS
-    if unknown:
-        hint = ("。値の決め方は do の操作に書く（{\"op\": …, \"runtime\": true}）"
-                if unknown & {"runtime", "inputs"} else "")
-        sys.exit("plan に知らない鍵: {}（使えるのは {}）{}".format(
-            ", ".join(sorted(unknown)), ", ".join(sorted(PLAN_KEYS)), hint))
-    shots_dir = plan.get("shots_dir")
     items = plan.get("items") or []
-    if items and not shots_dir:
-        sys.exit("plan に shots_dir が要る（証跡の出力先。絶対パス）")
     segments, owners = [], []   # owners: セグメントごとの項目名。エラーをどの項目か読めるように
     for n, item in enumerate(items, 1):
-        shot = item.get("shot")
-        if not shot:
-            sys.exit("plan の items[{}] に shot（証跡の名前）が無い".format(n))
+        shot = shot_name(n, device)
         unknown = set(item) - ITEM_KEYS
         if unknown:
             hint = ""
-            if unknown & {"steps", "goto"}:
+            if "shot" in unknown:
+                hint = "。証跡の名前は並び順から振る"
+            elif unknown & {"steps", "goto"}:
                 hint = "。経路は書かない — from に着くまでは route.py が計算する"
             elif unknown & {"runtime", "inputs"}:
                 hint = "。値の決め方は do の操作に書く（{\"op\": …, \"runtime\": true}）"
@@ -920,7 +916,7 @@ def read_plan(path):
             else:
                 add("do", d["op"], input=d["input"])
         add("shot", str(Path(os.path.expanduser(shots_dir)) / shot))
-    return segments, plan.get("app"), bool(plan.get("clear_state")), owners, items
+    return segments, plan.get("app"), bool(plan.get("clear_state")), owners
 
 
 def report_problems(problems, owners=None):
@@ -936,7 +932,7 @@ def report_problems(problems, owners=None):
               "ここで推測して繋がない。", file=sys.stderr)
 
 
-def write_flows(plan_path, out_dir, mapdir=None, timeout=10000):
+def write_flows(plan, out_dir, shots_dir, device=None, mapdir=None, timeout=10000):
     """plan.json の項目ごとに Maestro のフローを out_dir に書き、項目ごとの行を返す。
 
     **項目（撮影）ごとに1本ずつ。** 走らせる側は順に run して inspect するだけで、
@@ -948,7 +944,8 @@ def write_flows(plan_path, out_dir, mapdir=None, timeout=10000):
     （撮った画面・機械判定・フローのファイル名・起動し直すか・実行時に決める値）を
     1つにしたもの。呼ぶ側が plan と突き合わせずに済むように。
     """
-    segments, app, clear, owners, items = read_plan(plan_path)
+    segments, app, clear, owners = read_plan(plan, Path(shots_dir).resolve(), device)
+    items = plan.get("items") or []
     if not segments:
         sys.exit("plan の items が空（経路が組めた項目が無いならフローは要らない）")
     if not app:
@@ -959,33 +956,32 @@ def write_flows(plan_path, out_dir, mapdir=None, timeout=10000):
         report_problems(problems, owners)
         sys.exit(2)
 
-    by_shot = {it["shot"]: it for it in items}
+    by_shot = {shot_name(n, device): it for n, it in enumerate(items, 1)}
     segs = split_at_shots(mp, steps, None)
     d = Path(out_dir)
     d.mkdir(parents=True, exist_ok=True)
     written = []
-    for n, (seg_start, seg_steps, shot_name, lch) in enumerate(segs, 1):
+    for seg_start, seg_steps, shot, lch in segs:
         # 実行時に決める操作があれば手前で切る。前半を先に流し、着いてから値を決める
         pre_steps, resume_at, main_steps = split_before_runtime(mp, seg_start, seg_steps)
-        base = "{:02d}_{}".format(n, shot_name or "tail")
         # 起動も前半に出す。値を決める前に止めたとき、起動していなければ画面は見えない
         pre_name = None
         if pre_steps or (lch and main_steps is not seg_steps):
             pre, _ = emit_flow(mp, pre_steps, app, clear, notes, timeout,
                                seg_start, launch=lch)
-            pre_name = base + ".pre.yaml"
+            pre_name = shot + ".pre.yaml"
             (d / pre_name).write_text(pre, encoding="utf-8")
 
         # 自分で起動するのは1本目と fresh の項目。他は居る場所から続ける
         flow, _ = emit_flow(mp, main_steps, app, clear, notes, timeout,
                             resume_at, launch=lch and pre_name is None)
-        name = base + ".yaml"
+        name = shot + ".yaml"
         (d / name).write_text(flow, encoding="utf-8")
         screen, checked = shot_context(mp, seg_start, seg_steps)
         runtime_inputs = {var_name(op_of(st["action"])[1]): "" for st in seg_steps
                           if "shot" not in st and not st.get("restart") and st.get("runtime")}
-        it = by_shot.get(shot_name, {})
-        written.append({"name": shot_name, "title": it.get("title", ""),
+        it = by_shot.get(shot, {})
+        written.append({"name": shot, "title": it.get("title", ""),
                         "from": it.get("from"), "expect": it.get("expect", ""),
                         "screen": screen, "checked": checked, "launch": lch,
                         "inputs": runtime_inputs, "pre_flow": pre_name, "flow": name})
@@ -994,8 +990,8 @@ def write_flows(plan_path, out_dir, mapdir=None, timeout=10000):
     for w in written:
         print("    {}{}  →  ダンプ名 {}  機械判定 {}".format(
             w["flow"], " ★起動し直す" if w["launch"] else "",
-            w["name"] or "（撮影なし）", w["checked"] or "なし"))
-    return [w for w in written if w["name"]]
+            w["name"], w["checked"] or "なし"))
+    return written
 
 
 def main():

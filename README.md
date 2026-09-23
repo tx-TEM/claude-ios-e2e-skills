@@ -37,16 +37,15 @@ clone したディレクトリで `./install.sh` を実行する。`~/.claude/` 
 ```json
 {
   "app": "tx-tem.AozoraReaderClient",
-  "shots_dir": "<出力先>/shots",
   "items": [
-    {"shot": "iphone_01_browse_initial", "from": "browse",
+    {"from": "browse",
      "title": "さがす画面の初期表示で作品一覧が出る",
      "expect": "絞り込み無しの一覧が出て、作品の行が複数並んでいる"},
-    {"shot": "iphone_02_debounce_filtered", "from": "browse",
+    {"from": "browse",
      "title": "キーワード入力でデバウンス絞り込みが走る",
      "do": [{"op": "text:browse.searchField", "runtime": true}],
      "expect": "入力欄に出ている語を、一覧に残っている行がすべて作品名に含む"},
-    {"shot": "iphone_03_scroll", "from": "browse", "fresh": true,
+    {"from": "browse", "fresh": true,
      "title": "一覧をスクロールすると次のページが読み込まれる",
      "do": ["scroll:down"],
      "expect": "…"}
@@ -63,7 +62,8 @@ plan から、Maestro のフローとテストの定義ファイル（`manifest.
 
 ```bash
 python3 ~/.claude/skills/sim-test-report/scripts/manifest.py \
-  ~/.claude/skills/sim-test-report/.work/flows/<slug>/plan.json <出力先> --map <アプリのリポジトリ>
+  ~/.claude/skills/sim-test-report/.work/flows/<slug>/plan.json <出力先> \
+  --device iphone --map <アプリのリポジトリ>
 ```
 
 中で `route.py` の経路計算を使う。plan の各項目について、前の項目が終わった画面から `from` までの経路を画面マップから計算し、`do` の操作と撮影を繋いで、項目ごとのフローとして書き出す。
@@ -81,7 +81,7 @@ env:
     visible:
       id: '^browse\.searchField$'
     timeout: 10000
-- takeScreenshot: '<出力先>/shots/iphone_02_debounce_filtered'
+- takeScreenshot: '<出力先>/shots/iphone_02'
 ```
 
 画面マップが無いアプリでは、この手順を飛ばす。マップはあっても経路が組めない項目（未マップの画面、座標が要る操作）は理由つきで返り、plan の `explore` に移る。どちらも LLM（`sim-driver`）が画面を見ながら探索して撮る。
@@ -90,7 +90,7 @@ env:
 
 ```json
 {
-  "name": "iphone_02_debounce_filtered",
+  "name": "iphone_02",
   "title": "キーワード入力でデバウンス絞り込みが走る",
   "from": "browse",
   "screen": "browse",
@@ -98,9 +98,9 @@ env:
   "checked": "browse.searchField",
   "launch": false,
   "inputs": { "BROWSE_SEARCHFIELD": "" },
-  "flow": "02_iphone_02_debounce_filtered.yaml",
-  "images": [{ "src": "shots/iphone_02_debounce_filtered.png" }],
-  "dump": "shots/iphone_02_debounce_filtered.txt",
+  "flow": "iphone_02.yaml",
+  "images": [{ "src": "shots/iphone_02.png" }],
+  "dump": "shots/iphone_02.txt",
   "desc": "",
   "result": "PENDING"
 }

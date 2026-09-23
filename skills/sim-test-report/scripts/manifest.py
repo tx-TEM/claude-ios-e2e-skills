@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """test-case-builder の plan.json から、フローを書いて manifest.json を作る。
 
-  manifest.py <plan.json> <出力先ディレクトリ> [--map <アプリのリポジトリ>]
+  manifest.py <plan.json> <出力先ディレクトリ> [--device <端末名>] [--map <アプリのリポジトリ>]
+
+証跡は `<出力先>/shots/` に撮る。名前は項目の並び順から振る（`--device iphone` なら
+`iphone_01`, `iphone_02`, …。explore は items の続きの番号）。どの端末で撮るかも、
+どこに出すかも撮る側の設定で、テストケース（plan）は持たない。
 
 1. plan の項目ごとに Maestro のフローを、plan.json と同じディレクトリに書く
    （route.py の `write_flows()`）。経路が組めなければ理由を出して止まる
@@ -10,15 +14,15 @@
 
 plan.json の形。**項目1つ＝ from から do を順に叩いて、1枚撮る。**
 
-    {"app": "<bundle id>", "shots_dir": "<絶対パス>",
+    {"app": "<bundle id>",
      "clear_state": false,
      "items": [
-       {"shot": "iphone_01_list", "from": "browse"},
-       {"shot": "iphone_02_filter", "from": "browse",
+       {"from": "browse"},
+       {"from": "browse",
         "do": [{"op": "text:browse.searchField", "runtime": true}]},
-       {"shot": "iphone_03_nohit", "from": "browse",
+       {"from": "browse",
         "do": [{"op": "text:browse.searchField", "input": "zzzz"}]},
-       {"shot": "iphone_04_detail", "from": "browse", "fresh": true,
+       {"from": "browse", "fresh": true,
         "do": ["tap:browse.bookRow.*"]}]}
   from      その項目の操作を始める画面。**項目は経路を持たない** —
             前の項目が終わった画面から from までは、ここで計算して
@@ -38,10 +42,8 @@ plan.json の形。**項目1つ＝ from から do を順に叩いて、1枚撮�
   fresh     その項目はアプリを起動し直した直後から始める。**項目の前提で
             あって、フローの切り方ではない** — 前の項目の状態（絞り込み、
             変えたデータ）が残ると前提が崩れるときだけ付ける
-  shot      証跡の名前。`shots_dir` の下に撮る（Maestro はデーモンの
-            作業ディレクトリ基準で書くので、shots_dir は絶対パス）
   title / expect  確認項目と期待。そのままマニフェストに入る
-  explore   経路が組めなかった項目（shot / from / title / expect / reason）。
+  explore   経路が組めなかった項目（from / title / expect / reason）。
             フローを持たず、末尾にセクションとして並ぶ
 
 **1本で叩く。** フローとマニフェストを別々に作ると、plan を直したときに片方だけ
@@ -68,7 +70,7 @@ plan の `explore` は**経路が組めなかった項目**。`flow` を持た�
 
 なぜスクリプトなのか。一覧の中身（証跡の名前、画面、機械判定のID、フローの
 ファイル名）は route.py が既に計算したもので、**手で写すとタイポの余地ができる。**
-plan の `shot` の名前と manifest の `src` がずれても、走らせるまで誰も気づかない。
+撮影の名前と manifest の `src` がずれても、走らせるまで誰も気づかない。
 
 `desc` / `result` / `note` は手順2で埋める。`result` を `PENDING` で置くのは、
 build_report.py が result の無いセクションを拒むため（判定していない項目が
@@ -85,12 +87,6 @@ from pathlib import Path
 import route   # 同じディレクトリ。経路の計算とフローの書き出し
 
 
-def read_json(path, what):
-    if not path.is_file():
-        sys.exit(f"{what}が無い: {path}")
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
 def main():
     argv = sys.argv[1:]
     if "--help" in argv or "-h" in argv:
@@ -99,19 +95,22 @@ def main():
     if len(argv) < 2:
         sys.exit(__doc__)
     plan_path, out_dir = Path(argv[0]).expanduser(), argv[1]
-    mapdir = None
+    mapdir, device = None, None
     i = 2
     while i < len(argv):
         if argv[i] == "--map":
             mapdir = argv[i + 1]; i += 2
+        elif argv[i] == "--device":
+            device = argv[i + 1]; i += 2
         else:
             sys.exit("知らない引数: " + argv[i] + "（題と meta は build_report.py に渡す）")
 
-    plan = read_json(plan_path, "テストケース（test-case-builder の plan.json）")
+    plan = route.load_plan(plan_path)
     items, explore = plan.get("items") or [], plan.get("explore") or []
 
     # 経路が組めた項目が1つも無ければフローは要らない（全部探索で撮る）
-    rows = route.write_flows(plan_path, plan_path.parent, mapdir) if items else []
+    shots = Path(out_dir) / "shots"
+    rows = route.write_flows(plan, plan_path.parent, shots, device, mapdir) if items else []
     if items:
         print()
 
@@ -128,21 +127,11 @@ def main():
             pass
 
     # フローのある行 ＋ 探索のぶん。探索は末尾に積む
-    entries = list(rows) + [{"name": it.get("shot"), "title": it.get("title", ""),
-                             "from": it.get("from"), "expect": it.get("expect", "")}
-                            for it in explore]
+    entries = list(rows) + [{"name": route.shot_name(len(items) + n, device),
+                             "title": it.get("title", ""), "from": it.get("from"),
+                             "expect": it.get("expect", "")}
+                            for n, it in enumerate(explore, 1)]
 
-    # route.py はフローの中でしか重複を見られない。explore と衝突する余地が
-    # 残るのでここでも弾く。同名だと後から撮ったほうが上書きし、
-    # 2つの項目が同じ画像を指したまま通る。
-    seen = {}
-    for e in entries:
-        if not e["name"]:
-            sys.exit("plan の explore に shot（証跡の名前）が無い項目がある")
-        if e["name"] in seen:
-            sys.exit(f"証跡の名前が重なっている: {e['name']}"
-                     f"（{seen[e['name']]} と {e.get('flow') or '探索'}）")
-        seen[e["name"]] = e.get("flow") or "探索"
 
     sections = []
     for e in entries:

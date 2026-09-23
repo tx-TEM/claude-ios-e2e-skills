@@ -28,8 +28,8 @@ description: iOSシミュレーターでの動作確認を、テストケース�
 
 - **何を確認したいか。** PR番号やブランチ（差分から立てる）でも、画面名・機能名（画面マップの `actions` から立てる）でも、観点（「一覧と詳細の内容が一致するか」）でもよい。**差分が無くても成立する** — マップがあれば、そこに書かれた操作と結果がそのまま項目の素になる
 - **iPadも対象にするか。** どのシミュレーターを実際に使うかは手順1で起動中のものから選ぶが、**対象にするかはここで決める。** レイアウトが分岐する変更（サイズクラス、Split View、ポップオーバー、レギュラー幅での段組み）は iPad を入れる価値が高い
-- **証跡の出力先**。`~/Desktop/sim-test-report-<テーマのslug>/shots/`。plan の `shots_dir` に要るので、ここで確定させる
-- **ファイル名に使う端末名**（`iphone` / `ipad`）
+- **証跡の出力先**。`~/Desktop/sim-test-report-<テーマのslug>/`（証跡はその下の `shots/`）。フローに撮影先を焼き込むので、ここで確定させる
+- **ファイル名に使う端末名**（`iphone` / `ipad`）。証跡の名前は `<端末名>_<連番>` になる。**1回の実行で撮るのは1端末**で、iPhone と iPad の両方を1つのレポートにまとめる仕組みはまだ無い
 - **対象アプリの bundle id**（`xcrun simctl listapps <UDID>`）。どのみち sim-driver に渡す
 
 これらと**対象アプリのリポジトリのパス**を渡して `test-case-builder` を呼ぶ。画面マップの有無はサブエージェントが見る（**無いこともある**ので、無ければ全項目が `explore` の plan だけ返る）。
@@ -82,10 +82,10 @@ description: iOSシミュレーターでの動作確認を、テストケース�
 
 ```bash
 python3 <このスキルのディレクトリ>/scripts/manifest.py .work/flows/<slug>/plan.json <出力先> \
-  --map <アプリのリポジトリ>
+  --device <端末名> --map <アプリのリポジトリ>
 ```
 
-中で `route.py` の `write_flows()` を呼んで項目ごとのフローを書き、返ってきた行から `manifest.json` を組む。**`title` / `expect` / `from` / `explore` は plan から、証跡の名前・撮った画面・機械判定・フローは経路を計算した結果から取る。** 経路が組めなければ route.py の理由を出して止まり、manifest は書かない。
+中で `route.py` の `write_flows()` を呼んで項目ごとのフローを書き、返ってきた行から `manifest.json` を組む。**`title` / `expect` / `from` / `explore` は plan から、撮った画面・機械判定・フローは経路を計算した結果から取る。証跡の名前は並び順と端末名から振る**（`iphone_01`, `iphone_02`, …）。 経路が組めなければ route.py の理由を出して止まり、manifest は書かない。
 
 **ヘッダの題と meta（ブランチ・確認環境・実施日）はマニフェストに持たせない。** レポートを組むときに `build_report.py` へ直に渡す（手順2の「レポートを出す」）。
 
@@ -113,9 +113,9 @@ python3 <このスキルのディレクトリ>/scripts/manifest.py .work/flows/<
       "screen": "browse",
       "expect": "入力欄に出ている語を、一覧に残っている行がすべて品名に含む",
       "checked": "browse.countLabel",
-      "flow": ".work/flows/A/02_iphone_02_debounce.yaml",
-      "images": [{"src": "shots/iphone_02_debounce.png"}],
-      "dump": "shots/iphone_02_debounce.txt",
+      "flow": "iphone_02.yaml",
+      "images": [{"src": "shots/iphone_02.png"}],
+      "dump": "shots/iphone_02.txt",
       "desc": "",
       "result": "PENDING"
     }
@@ -149,17 +149,17 @@ python3 <このスキルのディレクトリ>/scripts/manifest.py .work/flows/<
 ```
 2. キーワードを打つと入力が止まってから絞り込みが走る  [browse]
    期待: 入力欄に出ている語を、一覧に残っている行がすべて品名に含む
-   証跡: iphone_02_debounce  ／  機械判定: browse.countLabel
+   証跡: iphone_02  ／  機械判定: browse.countLabel
 
 3. 検索キーで絞り込みが確定する  [browse]
    期待: キーボードが閉じている。一覧は項目2と同じ行のまま
-   証跡: iphone_03_search_key  ／  機械判定なし（証跡だけが根拠）
+   証跡: iphone_03  ／  機械判定なし（証跡だけが根拠）
 ```
 
 **`manifest.json` の `sections` をそのまま読み上げたもの。** `title` / `expect` / `name` / `checked` が並んでいる。**組み立て直さない。**
 
 - **対象の画面idを添える**（手順0の柔らかい判断がここに出る）
-- **証跡は名前で書く**（`iphone_02_debounce`）。パスは名前から決まる — 撮影先は plan の `shots_dir` の下の `<名前>`、`manifest` には `shots/<名前>.png` と `shots/<名前>.txt`。**名前が項目・証跡・ダンプを結ぶ唯一の手がかり**なので、項目ごとに別の名前にする（重複は `route.py` と `manifest.py` が弾く）
+- **証跡は名前で書く**（`iphone_02`）。パスは名前から決まる — `shots/<名前>.png` と `shots/<名前>.txt`。名前は `manifest.py` が並び順から振るので、重ならない
 - **期待は、証跡の中で確かめられる関係。** 「一覧が入れ替わる」ではなく「入力欄に出ている語を、残った行がすべて含む」。ここが曖昧なら、その項目はまだ何を確かめるか決まっていない
 - **機械判定はフローの `extendedWaitUntil` になる。** 通らなければその場で落ちるので、証跡を見るまでもなく分かる
 - **「機械判定なし」は、証跡のPNGだけが根拠。** 判定するのは自分（手順2）で、**見落としたら誰も気づかない**。この注記は**その項目の行に付ける** — 集計で出すと、どの項目の話か読み替えが要る
@@ -169,7 +169,7 @@ python3 <このスキルのディレクトリ>/scripts/manifest.py .work/flows/<
 
 **`manifest.py` を1回叩くと、走るファイルと、レビューに見せる操作列の両方が出る。** 操作列は経路を計算した route.py が出したものそのもの。test-case-builder が叩いて返してくるので、plan を直さない限り叩き直さなくてよい。
 
-**フローは項目（撮影）ごとに分けて書かれる。** 1本＝1枚＝1ダンプになり、**証跡と同名のダンプ**（`iphone_01_list.png` と `iphone_01_list.txt`）が揃う。判定のとき、画像で見て同名のダンプで裏を取れる。
+**フローは項目（撮影）ごとに分けて書かれる。** 1本＝1枚＝1ダンプになり、**証跡と同名のダンプ**（`iphone_01.png` と `iphone_01.txt`）が揃う。判定のとき、画像で見て同名のダンプで裏を取れる。
 
 2本目以降は前のフローの続きなので**起動し直さない**。分割の代償は1本あたり1秒弱で、LLMには戻らない（sim-driver が `&&` で繋いで1往復で走らせる）。
 
@@ -179,13 +179,13 @@ python3 <このスキルのディレクトリ>/scripts/manifest.py .work/flows/<
 browse → detail
 
   browse  起点                            ✓ browse が出ている
-          撮影 .../iphone_01_list_all
+          撮影 iphone_01
   browse  text browse.searchField ""      ✓ browse.countLabel が出ている
-          撮影 .../iphone_02_debounce
+          撮影 iphone_02
   browse  tap Search                      — 機械判定なし。証跡で見る
-          撮影 .../iphone_03_filtered
+          撮影 iphone_03
   browse  tap browse.cell.* [index 0]     ✓ detail に着いたことを確認
-          撮影 .../iphone_04_detail
+          撮影 iphone_04
 ```
 
 **ここで出る指摘が一番多い。** 「1件目ではなく特定の1件で」「送信キーを押さずデバウンスを見たい」は、操作列を見て初めて言える。
@@ -241,9 +241,9 @@ python3 <このスキルのディレクトリ>/scripts/run_flows.py \
 ```
 
 ```
-01 iphone_01_list 撮影済み
-02 iphone_02_debounce 撮影済み
-03 iphone_03_detail 撮影済み
+01 iphone_01 撮影済み
+02 iphone_02 撮影済み
+03 iphone_03 撮影済み
 
 3件を撮った: <出力先>/shots
 ```
@@ -259,7 +259,7 @@ python3 <このスキルのディレクトリ>/scripts/run_flows.py \
 値を実行時に決める項目があると、`run_flows.py` はそこで**実行を終える。** 先へ走らせると画面が変わり、値を決めるために見ることができなくなる。
 
 ```
-02 iphone_02_filtered 入力が未定（BROWSE_SEARCHFIELD, BROWSE_BOOKROW）。
+02 iphone_02 入力が未定（BROWSE_SEARCHFIELD, BROWSE_BOOKROW）。
 いまこの画面に居る。見て BROWSE_SEARCHFIELD, BROWSE_BOOKROW を決めて、もう一度叩けば続きから走る。
 ここから先の 6件はまだ撮っていない。
 ```
@@ -354,8 +354,8 @@ sim-driver 自身も終了時に止めるが、途中で `TaskStop` した場合
 **どの項目にも証跡と同名のダンプが `shots/` に並ぶ**（フロー項目は `run_flows.py` が、探索項目は sim-driver が置く）。判定はそれを読む。sim-driver はダンプを読まない（読ませると文脈が太るだけで、判定は呼び出し元の仕事）。探索項目では、観測した事実も文章で返る。
 
 ```
-shots/iphone_02_detail.png    見た目（レイアウト・重なり・色）
-shots/iphone_02_detail.txt    構造（要素の状態・入力欄の中身・正確な文言と並び順）
+shots/iphone_02.png    見た目（レイアウト・重なり・色）
+shots/iphone_02.txt    構造（要素の状態・入力欄の中身・正確な文言と並び順）
 ```
 
 **`TaskStop` すると、撮れた証跡は残るがそこで終わる。** 導線を外しているのが見えた時点で止めるのは正しいが、止める前に `progress_<端末名>.log` を見て、どこまで進んだかを確かめる。

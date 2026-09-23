@@ -24,13 +24,13 @@ tools: Read, Bash
 
 ```json
 {
-  "name": "iphone_02_debounce_filtered",
+  "name": "iphone_02",
   "title": "キーワードを打つと入力が止まってから絞り込みが走る",
   "expect": "「夏目」を打って 300ms 待つと 6 件に絞り込まれ、先頭行が「温情の裕かな夏目さん」（内田 魯庵）になる",
   "checked": "browse.searchField",
-  "flow": "02_iphone_02_debounce_filtered.yaml",
-  "images": [{ "src": "shots/iphone_02_debounce_filtered.png" }],
-  "dump": "shots/iphone_02_debounce_filtered.txt",
+  "flow": "iphone_02.yaml",
+  "images": [{ "src": "shots/iphone_02.png" }],
+  "dump": "shots/iphone_02.txt",
   "desc": "",
   "result": "PENDING"
 }
@@ -73,7 +73,7 @@ cd <出力先>/shots && md5 -q *.png | sort | uniq -d
 **`cat` でまとめて読める。** 1件ずつ開くと往復が増えるだけ。
 
 ```bash
-cd <出力先>/shots && for f in iphone_01_… iphone_02_… iphone_03_…; do
+cd <出力先>/shots && for f in iphone_01 iphone_02 iphone_03; do
   echo "===== $f"; cat "$f.txt"; done
 ```
 
