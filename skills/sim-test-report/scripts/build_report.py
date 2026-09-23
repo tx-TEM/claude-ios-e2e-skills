@@ -2,14 +2,13 @@
 """スクリーンショット付き動作確認レポート（単一HTML）を生成する。
 
 使い方:
-    python3 build_report.py <manifest.json> [--title <題>] [--repo <dir>] [--width=<px>] [--no-png]
+    python3 build_report.py <manifest.json> [--title <題>] [--width=<px>] [--no-png]
 
     python3 build_report.py manifest.json \
       --title "一覧からお気に入り登録できるようにする — 動作確認レポート"
 
 **ヘッダは題だけ渡す。** ほかは事実から出す。
 
-- ブランチ: アプリのリポジトリ（既定はカレント、`--repo` で指定）の git から
 - 確認環境: マニフェストの `devices`（manifest.py が UDID から引いた機種名と OS）から
 - 実施日: 組んだ日
 
@@ -36,7 +35,7 @@
   "output": "verification_report.html"
 }
 
-- **「実施日」だけは件数の行の右端に出す。** 他の項目（ブランチ、確認環境）は何で確かめたかで、
+- **「実施日」だけは件数の行の右端に出す。** 他の項目（確認環境）は何で確かめたかで、
   いつの結果かはそれと性格が違う。他の項目は件数の行の下に1行ずつ並ぶ
 - 1セクションに複数の画像を並べられる。同じ確認項目をiPhoneとiPadで撮った場合など
 - images の要素は {"src": ..., "label": ...} か、ラベル不要なら文字列だけでもよい
@@ -379,27 +378,15 @@ def render_png(html_path: pathlib.Path) -> pathlib.Path | None:
     return png_path
 
 
-def branch_of(repo: str) -> str:
-    def git(*a: str) -> str:
-        r = subprocess.run(["git", "-C", repo, *a], capture_output=True, text=True)
-        if r.returncode != 0:
-            raise SystemExit(f"ブランチが取れない: {repo} は git のリポジトリではない"
-                             "（アプリのリポジトリで叩くか、--repo で指定する）")
-        return r.stdout.strip()
-    return f"{git('rev-parse', '--abbrev-ref', 'HEAD')} ({git('rev-parse', '--short', 'HEAD')})"
-
-
 def main() -> None:
     argv = sys.argv[1:]
     args, width, make_png = [], DEFAULT_WIDTH, True
-    title, repo = "動作確認レポート", "."
+    title = "動作確認レポート"
     i = 0
     while i < len(argv):
         a = argv[i]
         if a == "--title":
             title = argv[i + 1]; i += 2
-        elif a == "--repo":
-            repo = argv[i + 1]; i += 2
         elif a.startswith("--width="):
             width = int(a.split("=", 1)[1]); i += 1
         elif a == "--no-png":
@@ -414,8 +401,7 @@ def main() -> None:
     manifest_path = pathlib.Path(args[0])
     devices = json.loads(manifest_path.read_text()).get("devices") or {}
     envs = "、".join(f"{v['model']} シミュレーター ({v['os']})" for v in devices.values())
-    meta = [f"ブランチ: {branch_of(repo)}"] + ([f"確認環境: {envs}"] if envs else []) \
-        + [f"実施日: {date.today().isoformat()}"]
+    meta = ([f"確認環境: {envs}"] if envs else []) + [f"実施日: {date.today().isoformat()}"]
     out_path = build(manifest_path, width, title, meta)
     size = out_path.stat().st_size
     print(f"{out_path} ({size / 1024 / 1024:.2f} MB)")

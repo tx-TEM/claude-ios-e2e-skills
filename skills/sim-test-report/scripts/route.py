@@ -6,7 +6,7 @@
   route.py which <パス...>             変更したファイルから対象画面を引く（`-` で標準入力）
   route.py check                       マップ全体の自己テスト
 
-  --map <dir>        画面マップの場所。省くとカレントから上へ screen-map/ を探す
+  --repo <dir>       アプリのリポジトリ。画面マップはその下の screen-map/。必ず渡す
 
 **フローはここでは書かない。** plan.json から項目ごとのフローを書くのは `manifest.py` で、
 中でこのモジュールの `write_flows()` を呼ぶ。plan の形は `manifest.py --help`。
@@ -137,19 +137,16 @@ class ScreenMap(object):
         return out
 
 
-def find_map(arg):
-    if arg:
-        p = Path(arg).expanduser().resolve()
-        for cand in (p, p / "screen-map"):
-            if (cand / "config.yaml").exists():
-                return cand
-        sys.exit("{} に画面マップが無い（config.yaml を探した）".format(p))
-    here = Path.cwd().resolve()
-    for d in [here] + list(here.parents):
-        if (d / "screen-map" / "config.yaml").exists():
-            return d / "screen-map"
-    sys.exit("screen-map/ が見つからない。--map で場所を渡す。\n"
-             "このアプリにはまだ画面マップが無いのかもしれない（screen-map スキルで作る）")
+def find_map(repo):
+    """アプリのリポジトリから画面マップ（screen-map/）を引く。**呼ぶ側が必ず渡す**
+    （カレントからは探さない — どこで叩いたかで結果が変わらないように）。"""
+    if not repo:
+        sys.exit("--repo <アプリのリポジトリ> が要る")
+    p = Path(repo).expanduser().resolve() / "screen-map"
+    if (p / "config.yaml").exists():
+        return p
+    sys.exit("{} に画面マップが無い（config.yaml を探した）。\n"
+             "このアプリにはまだ画面マップが無いのかもしれない（screen-map スキルで作る）".format(p))
 
 
 # ---------- 経路を組む ----------
@@ -938,7 +935,7 @@ def report_problems(problems, owners=None):
               "ここで推測して繋がない。", file=sys.stderr)
 
 
-def write_flows(plan, out_dir, mapdir=None, timeout=10000):
+def write_flows(plan, out_dir, repo, timeout=10000):
     """plan.json の項目ごとに Maestro のフローを out_dir に書き、項目ごとの行を返す。
 
     **項目（撮影）ごとに1本ずつ。** 走らせる側は順に run して inspect するだけで、
@@ -959,7 +956,7 @@ def write_flows(plan, out_dir, mapdir=None, timeout=10000):
         sys.exit("plan の items が空（経路が組めた項目が無いならフローは要らない）")
     if not app:
         sys.exit("plan に app（bundle id）が要る（xcrun simctl listapps <UDID> で調べる）")
-    mp = ScreenMap(find_map(mapdir))
+    mp = ScreenMap(find_map(repo))
     steps, problems, notes = build(mp, segments)
     if problems:
         report_problems(problems, owners)
@@ -1015,17 +1012,17 @@ def main():
         sys.exit(__doc__)
     cmd, argv = argv[0], argv[1:]
 
-    mapdir, rest = None, []
+    repo, rest = None, []
     i = 0
     while i < len(argv):
         a = argv[i]
-        if a == "--map":
-            mapdir = argv[i + 1]; i += 2
+        if a == "--repo":
+            repo = argv[i + 1]; i += 2
         elif a.startswith("--"):
             sys.exit("知らない引数: " + a + "（--help）")
         else:
             rest.append(a); i += 1
-    mp = ScreenMap(find_map(mapdir))
+    mp = ScreenMap(find_map(repo))
 
     if cmd == "screens":
         return cmd_screens(mp)

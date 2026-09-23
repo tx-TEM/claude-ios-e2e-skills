@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """マニフェストに載っているフローを順に走らせ、証跡と同名のダンプを撮る。
 
-  run_flows.py <manifest.json> <フローのディレクトリ>
+  run_flows.py <manifest.json>
 
-**どのシミュレーターで撮るかはマニフェストの `devices` に入っている**（手順0で manifest.py に
-渡したもの）。ここで渡し直さない。その UDID が起動していなければ止まる — 別の端末で代用しない。
+**どのシミュレーターで撮るかはマニフェストの `devices` に、フローの置き場は `flows` に
+入っている**（手順0で manifest.py が書いたもの）。ここで渡し直さない。その UDID が起動していなければ止まる — 別の端末で代用しない。
 
 **1回で全端末を撮る。** マニフェストの順に1台ずつ撮り切ってから次の端末へ移る（Maestro の
 デーモンが握れるのは1台で、行き来させると切り替えのたびに約10秒かかる）。フローは
@@ -210,10 +210,13 @@ def main():
     unknown = [a for a in argv if a.startswith("--")]
     if unknown:
         sys.exit("知らない引数: " + ", ".join(unknown) + "（どの端末で撮るかはマニフェストに入っている）")
-    if len(argv) != 2:
+    if len(argv) != 1:
         sys.exit(__doc__)
-    manifest_path, flow_dir = Path(argv[0]), Path(argv[1])
+    manifest_path = Path(argv[0])
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not manifest.get("flows"):
+        sys.exit("マニフェストに flows が無い。manifest.py で作り直す")
+    flow_dir = Path(manifest["flows"])
 
     devices = manifest.get("devices") or {}
     if not devices:

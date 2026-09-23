@@ -29,7 +29,7 @@ R=~/.claude/skills/sim-test-report/scripts/route.py
 M=<アプリのリポジトリ>
 ```
 
-**route.py も manifest.py も、アプリのリポジトリで叩く。** 画面マップ（`screen-map/`）はカレントから上へ探す。別の場所で叩くときだけ `--map $M` を付ける。
+**route.py にも manifest.py にも `--repo $M`（アプリのリポジトリ）を必ず渡す。** 画面マップはその下の `screen-map/` を読む。カレントからは探さない。
 
 **入口は2つ。呼び出し元から何が来たかで決まる。**
 
@@ -45,7 +45,7 @@ M=<アプリのリポジトリ>
 **どのファイルがどの画面のものかは、`which` で引ける。**
 
 ```bash
-git -C $M diff <ベース>...HEAD --name-only | python3 $R which -
+git -C $M diff <ベース>...HEAD --name-only | python3 $R which - --repo $M
 ```
 
 ```
@@ -69,7 +69,7 @@ browse  — アイテムの一覧。キーワードで絞り込め、行をタ�
 「さがす画面を一通り」「お気に入り機能をテストして」「一覧と詳細の内容が一致するか」。**まず画面を探す。** マップは全画面の要約を持っているので、ソースを漁らずに絞れる。
 
 ```bash
-python3 $R screens                       # 呼び名と summary で画面を絞る
+python3 $R screens --repo $M              # 呼び名と summary で画面を絞る
 cat $M/screen-map/screens/<画面id>.yaml  # 絞れたら中身を読む。files に読むべきソースが並んでいる
 ```
 
@@ -90,7 +90,7 @@ cat $M/screen-map/screens/<画面id>.yaml  # 絞れたら中身を読む。files
 **`files` に読むべきソースが並んでいる。** 候補を絞ったら、その画面のコードを読んで期待値を確かめる。
 
 ```bash
-python3 $R check    # 「実装のほうが新しい」と出た画面は特に、必ず読む
+python3 $R check --repo $M    # 「実装のほうが新しい」と出た画面は特に、必ず読む
 ```
 
 - **`states` も見る。** 0件、エラー、権限なしなど、到着時点で表示が分かれるもの。`actions` には出てこないが確認項目にはなる。ただし現在のデータでは踏めないことが多いので「一時コードが要る」と書く
@@ -157,8 +157,8 @@ ls <アプリのリポジトリ>/screen-map/config.yaml
 
 ```bash
 python3 ~/.claude/skills/sim-test-report/scripts/manifest.py --help   # plan の形
-python3 $R screens     # 画面の一覧
-python3 $R check       # 到達できない画面、切れている箇所、マップの鮮度
+python3 $R screens --repo $M     # 画面の一覧
+python3 $R check   --repo $M     # 到達できない画面、切れている箇所、マップの鮮度
 ```
 
 **`manifest.py --help` を先に見る。** plan の形も、`from` `do` の意味も、`runtime` `input` の
@@ -180,7 +180,7 @@ python3 $R check       # 到達できない画面、切れている箇所、マ�
 項目ごとに「どこから何を確かめ、何が見えるはずか」を `plan.json` に書き、`manifest.py` に渡す。
 `manifest.py` がフローとマニフェストを作る。**項目・操作・期待の元はこの1つだけ。**
 
-置き場は `~/.claude/skills/sim-test-report/.work/flows/<slug>/plan.json`。`<slug>` は
+置き場は `~/.claude/skills/sim-test-report/.work/flows/<slug>/plan.json`（スキル側。**アプリのリポジトリの下に作らない**）。`<slug>` は
 証跡の出力先と同じもの（`sim-test-report-<テーマ>`）。
 
 ```json
@@ -212,10 +212,10 @@ python3 $R check       # 到達できない画面、切れている箇所、マ�
 ```
 
 ```bash
-python3 ~/.claude/skills/sim-test-report/scripts/manifest.py <plan.json> <出力先> --device iphone=<UDID> [--device ipad=<UDID>]
+python3 ~/.claude/skills/sim-test-report/scripts/manifest.py <plan.json> <出力先> --repo $M --device iphone=<UDID> [--device ipad=<UDID>]
 ```
 
-`<出力先>` は証跡の出力先ディレクトリ（証跡は `<出力先>/shots/<端末>/` に撮る）。フローは plan.json と同じディレクトリに、端末によらず1組書かれる（撮影先だけを撮るときに端末に合わせて埋める）。経路が組めなければ route.py の理由が出て止まる。
+`<出力先>` は証跡の出力先ディレクトリ（証跡は `<出力先>/shots/<端末>/` に撮る）。フローはスキル側の `.work/flows/<出力先の名前>/` に、端末によらず1組書かれる（撮影先だけを撮るときに端末に合わせて埋める）。経路が組めなければ route.py の理由が出て止まる。
 
 - **1項目＝ `from` から `do` を順に叩いて1枚。** 項目が持つのは**どこから何を確かめるか**だけで、**そこまでの経路は書かない。** 前の項目が終わった画面から `from` までは route.py が計算して繋ぐ（すでに居れば何もしない）
 - **`from` は操作を始める画面。** 撮る画面ではない。「行をタップすると詳細に移る」なら `from` は `browse` で、`do` が `tap:browse.bookRow.*`
