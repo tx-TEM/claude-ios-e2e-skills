@@ -1,4 +1,4 @@
-# claude-skills
+# claude-ios-e2e-skills
 
 ## 収録
 
