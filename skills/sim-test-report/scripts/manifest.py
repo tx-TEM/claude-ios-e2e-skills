@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """test-case-builder の plan.json から、フローを書いて manifest.json を作る。
 
-  manifest.py <plan.json> <出力先ディレクトリ> --device <端末>=<UDID> [--device …] [--map <アプリのリポジトリ>]
+  manifest.py <plan.json> <出力先ディレクトリ> --repo <アプリのリポジトリ> --device <端末>=<UDID> [--device …]
 
-アプリのリポジトリで叩く。画面マップ（`screen-map/`）はカレントから上へ探す。
-別の場所で叩くときだけ `--map` を付ける。
+`--repo` はアプリのリポジトリ。**必ず渡す。** 画面マップ（その下の `screen-map/`）は、経路を組む項目があるときに読む。
 
 証跡は `<出力先>/shots/<端末>/<名前>.png` に撮る。名前は項目の並び順から振る
 （`test_01`, `test_02`, …。explore は items の続きの番号）。**1つのテストケースを複数の端末で
@@ -16,9 +15,9 @@
 `devices` に書く。run_flows.py と sim-driver はそこから UDID を読み、build_report.py は確認環境を
 そこから出す。撮るときに手で渡し直さない。
 
-1. plan の項目ごとに Maestro のフローを、plan.json と同じディレクトリに書く
+1. plan の項目ごとに Maestro のフローを、スキル側の `.work/flows/<出力先の名前>/` に書く
    （route.py の `write_flows()`）。経路が組めなければ理由を出して止まる
-   （manifest は書かない）。組めたら読める経路（レビューの2段目になる操作列）を出す
+   （manifest は書かない）。組めたら読める経路を出す
 2. 返ってきた項目ごとの行から manifest.json を組む。証跡1枚＝1セクション
 
 plan.json の形。**項目1つ＝ from から do を順に叩いて、1枚撮る。**
@@ -54,6 +53,9 @@ plan.json の形。**項目1つ＝ from から do を順に叩いて、1枚撮�
   title / expect  確認項目と期待。そのままマニフェストに入る
   explore   経路が組めなかった項目（from / title / expect / reason）。
             フローを持たず、末尾にセクションとして並ぶ
+
+**フローはスキル側の `.work/flows/<出力先の名前>/` に書き、その場所をマニフェストの `flows` に
+記録する。** run_flows.py はそこから読む。アプリのリポジトリには何も作らない。
 
 **1本で叩く。** フローとマニフェストを別々に作ると、plan を直したときに片方だけ
 作り直す余地ができ、どちらの項目がどの証跡か決まらなくなる。
@@ -98,6 +100,7 @@ import simulators
 
 
 LABELS = {"iphone": "iPhone", "ipad": "iPad"}
+FLOWS = Path(__file__).resolve().parents[1] / ".work" / "flows"   # スキル側の作業ディレクトリ
 
 
 def main():
@@ -108,11 +111,11 @@ def main():
     if len(argv) < 2:
         sys.exit(__doc__)
     plan_path, out_dir = Path(argv[0]).expanduser(), Path(argv[1]).expanduser()
-    mapdir, devices = None, []
+    repo, devices = None, []
     i = 2
     while i < len(argv):
-        if argv[i] == "--map":
-            mapdir = argv[i + 1]; i += 2
+        if argv[i] == "--repo":
+            repo = argv[i + 1]; i += 2
         elif argv[i] == "--device":
             name, _, udid = argv[i + 1].partition("=")
             if not udid:
@@ -120,6 +123,8 @@ def main():
             devices.append((name, udid)); i += 2
         else:
             sys.exit("知らない引数: " + argv[i] + "（題と meta は build_report.py に渡す）")
+    if not repo:
+        sys.exit("--repo <アプリのリポジトリ> が要る")
     if not devices:
         sys.exit("--device <端末>=<UDID> が要る（iphone / ipad。複数の端末で撮るなら並べる）")
     names = [n for n, _ in devices]
@@ -135,8 +140,11 @@ def main():
     plan = route.load_plan(plan_path)
     items, explore = plan.get("items") or [], plan.get("explore") or []
 
-    # フローは端末によらず1組。撮影先は ${SHOTS} のままで、run_flows.py が端末ごとに埋める
-    rows = route.write_flows(plan, plan_path.parent, mapdir) if items else []
+    # フローは端末によらず1組。撮影先は ${SHOTS} のままで、run_flows.py が端末ごとに埋める。
+    # **置き場はスキル側の .work に固定する。** 呼ぶ側のカレント（アプリのリポジトリ）に
+    # 作ると、誰も片付けない。スキル側なら maestrod.py sweep が古いものを消す
+    flows = FLOWS / out_dir.resolve().name
+    rows = route.write_flows(plan, flows, repo) if items else []
     if items:
         print()
 
@@ -186,7 +194,7 @@ def main():
             "result": prev.get("result", "PENDING"),
         })
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(dict(top, devices=info, sections=sections),
+    out.write_text(json.dumps(dict(top, devices=info, flows=str(flows), sections=sections),
                               ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     blank = sum(1 for s in sections if not s["flow"])
     empty = [s["name"] for s in sections if not s["title"] or not s["expect"]]

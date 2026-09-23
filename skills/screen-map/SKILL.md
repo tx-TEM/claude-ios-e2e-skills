@@ -288,7 +288,7 @@ python3 ~/.claude/skills/sim-test-report/scripts/maestrod.py inspect <UDID> <名
 **最後に `route.py check` を通す。** 実測はIDが出るかを見るもので、こちらは**マップが経路として成立しているか**を見る。到達できない画面、遷移先のファイルが無い `to`、`anchor` の無い画面がここで出る。
 
 ```bash
-python3 ~/.claude/skills/sim-test-report/scripts/route.py check
+python3 ~/.claude/skills/sim-test-report/scripts/route.py check --repo <アプリのリポジトリ>
 ```
 
 **鮮度も出る。** `screens/<id>.yaml` より新しく `files` が触られていたら、その画面のマップは実装とずれている可能性がある（判定は git のコミット日時。mtime は clone や checkout で揃うので使わない）。リファクタやコメントの修正でも出るので不整合ではなく警告だが、**`files` が薄いと検出自体が効かない。**
@@ -329,10 +329,10 @@ python3 ~/.claude/skills/sim-test-report/scripts/maestrod.py stop
 ```bash
 R=~/.claude/skills/sim-test-report/scripts/route.py
 
-python3 $R screens                    # 画面の一覧（呼び名・できること）
-python3 $R which <パス...>            # 変更したファイルから対象画面を引く
-python3 $R path <画面id>...           # そこまでの経路を人が読む形で出す
-python3 $R check                      # 自己テスト（到達可否・切れている箇所・鮮度）
+python3 $R screens --repo <アプリ>           # 画面の一覧（呼び名・できること）
+python3 $R which <パス...> --repo <アプリ>   # 変更したファイルから対象画面を引く
+python3 $R path <画面id>... --repo <アプリ>  # そこまでの経路を人が読む形で出す
+python3 $R check --repo <アプリ>             # 自己テスト（到達可否・切れている箇所・鮮度）
 ```
 
 確認項目ごとのフローは sim-test-report の `manifest.py` が書く（中で route.py の経路計算を使う）。項目は経路を持たず、前の項目が終わった画面から項目の起点までは、マップから計算して繋ぐ。

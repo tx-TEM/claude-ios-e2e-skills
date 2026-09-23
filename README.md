@@ -63,10 +63,10 @@ plan から、Maestro のフローとテストの定義ファイル（`manifest.
 ```bash
 python3 ~/.claude/skills/sim-test-report/scripts/manifest.py \
   ~/.claude/skills/sim-test-report/.work/flows/<slug>/plan.json <出力先> \
-  --device iphone=<iPhoneのUDID> --device ipad=<iPadのUDID>
+  --repo <アプリのリポジトリ> --device iphone=<iPhoneのUDID> --device ipad=<iPadのUDID>
 ```
 
-アプリのリポジトリで叩く（画面マップはカレントから上へ探す。別の場所なら `--map`）。中で `route.py` の経路計算を使う。plan の各項目について、前の項目が終わった画面から `from` までの経路を画面マップから計算し、`do` の操作と撮影を繋いで、項目ごとのフローとして書き出す。
+中で `route.py` の経路計算を使う。plan の各項目について、前の項目が終わった画面から `from` までの経路を画面マップから計算し、`do` の操作と撮影を繋いで、項目ごとのフローとして書き出す。
 
 ```yaml
 appId: tx-tem.AozoraReaderClient
@@ -121,7 +121,7 @@ env:
 
 ```bash
 python3 ~/.claude/skills/sim-test-report/scripts/run_flows.py \
-  <出力先>/manifest.json ~/.claude/skills/sim-test-report/.work/flows/<slug>
+  <出力先>/manifest.json
 ```
 
 どのシミュレーターで撮るかは、手順2でマニフェストに記録してある。
@@ -139,7 +139,7 @@ python3 ~/.claude/skills/sim-test-report/scripts/build_report.py <出力先>/man
   --title "…"
 ```
 
-渡すのは題だけ。ブランチはアプリのリポジトリの git から（別の場所で叩くなら `--repo`）、確認環境は定義ファイルに記録した端末から、実施日は組んだ日からスクリプトが出す。
+渡すのは題だけ。確認環境は定義ファイルに記録した端末から、実施日は組んだ日からスクリプトが出す。ブランチは載せない（レポートは PR に貼るので、そちらで分かる）。
 
 画像を base64 で埋め込んだ単一HTMLと、それを1枚に描画したPNGが出る。
 
