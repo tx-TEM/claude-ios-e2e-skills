@@ -9,7 +9,7 @@ iOSアプリの動作確認を、テストケースのレビューからシミ�
 | 名前 | 種類 | 概要 |
 | --- | --- | --- |
 | `sim-test-report` | Skill | iOSシミュレーターでの動作確認を、テストケースのレビュー → 実施 → 証跡レポートまで通して進める。成果物は画像をbase64で埋め込んだ単一HTMLと、PRコメント貼り付け用の1枚PNG |
-| `screen-map` | Skill | iOSアプリの画面マップを画面単位で作る。ソースを読んで画面・遷移・確認箇所を特定し、`accessibilityIdentifier` を実装に振って `screen-map/screens/*.yaml` に落とす。`scripts/route.py` がそのマップから目的の画面までの経路を組み、`sim-test-report` が動作確認のフローとして使う |
+| `screen-map` | Skill | iOSアプリの画面マップを画面単位で作る。ソースを読んで画面・遷移・確認箇所を特定し、`accessibilityIdentifier` を実装に振って `screen-map/screens/*.yaml` に落とす。`sim-test-report` の `scripts/route.py` がそのマップから目的の画面までの経路を組み、動作確認のフローにする |
 | `test-case-builder` | Agent | 確認項目を立て、画面マップがあれば実行できるフローまで組んで返す。コードの差分と画面マップを参照する。レビューを受けるのも実施も判定もしない。`sim-test-report` から呼ばれる |
 | `sim-driver` | Agent | シミュレーターを操作して証跡スクリーンショットを撮る。判定はせず観測した事実だけ返す。`sim-test-report` から呼ばれる |
 | `evidence-judge` | Agent | 証跡を読んでOK/NGを判定し、レポートまで作る。撮影はしない。`sim-test-report` から呼ばれる |
@@ -57,7 +57,7 @@ clone したディレクトリで `./install.sh` を実行する。`~/.claude/` 
 
 期待は値ではなく、証跡の中で確かめられる関係で書く。打つ文字のようにデータに依る値は、`do` に `"runtime": true` を添えて未定のまま残し、撮影時に画面を見て埋める。
 
-### 2. フローとテストの定義ファイルを作る（`manifest.py` → `route.py`）
+### 2. フローとテストの定義ファイルを作る（`manifest.py`）
 
 plan から、Maestro のフローとテストの定義ファイル（`manifest.json`）を1本で作る。以降は定義ファイルだけで動く。
 
@@ -66,7 +66,7 @@ python3 ~/.claude/skills/sim-test-report/scripts/manifest.py \
   ~/.claude/skills/sim-test-report/.work/flows/<slug>/plan.json <出力先> --map <アプリのリポジトリ>
 ```
 
-中で `route.py flow --plan` を叩く。plan の各項目について、前の項目が終わった画面から `from` までの経路を画面マップから計算し、`do` の操作と撮影を繋いで、項目ごとのフローとして書き出す。
+中で `route.py` の経路計算を使う。plan の各項目について、前の項目が終わった画面から `from` までの経路を画面マップから計算し、`do` の操作と撮影を繋いで、項目ごとのフローとして書き出す。
 
 ```yaml
 appId: tx-tem.AozoraReaderClient

@@ -3,16 +3,52 @@
 
   manifest.py <plan.json> <出力先ディレクトリ> [--map <アプリのリポジトリ>]
 
-1. `route.py flow --plan <plan.json> --out-dir <plan.json のディレクトリ>` を叩く。
-   経路が組めなければ route.py の理由をそのまま出して止まる（manifest は書かない）。
-   組めたら route.py の標準出力（レビューの2段目になる操作列）をそのまま出す
-2. plan.json と、route.py が置いた index.json から manifest.json を組む。証跡1枚＝1セクション
+1. plan の項目ごとに Maestro のフローを、plan.json と同じディレクトリに書く
+   （route.py の `write_flows()`）。経路が組めなければ理由を出して止まる
+   （manifest は書かない）。組めたら読める経路（レビューの2段目になる操作列）を出す
+2. 返ってきた項目ごとの行から manifest.json を組む。証跡1枚＝1セクション
 
-**1本で叩く。** route.py と manifest を別々に叩くと、plan を直したときに片方だけ
-叩き直す余地ができ、どちらの項目がどの証跡か決まらなくなる。
+plan.json の形。**項目1つ＝ from から do を順に叩いて、1枚撮る。**
 
-**どちらからも写さない。** 証跡の名前・撮った画面・機械判定のID・フローのファイル名は
-`index.json` から、`title` / `expect` / `from` は `plan.json` から取る。
+    {"app": "<bundle id>", "shots_dir": "<絶対パス>",
+     "clear_state": false,
+     "items": [
+       {"shot": "iphone_01_list", "from": "browse"},
+       {"shot": "iphone_02_filter", "from": "browse",
+        "do": [{"op": "text:browse.searchField", "runtime": true}]},
+       {"shot": "iphone_03_nohit", "from": "browse",
+        "do": [{"op": "text:browse.searchField", "input": "zzzz"}]},
+       {"shot": "iphone_04_detail", "from": "browse", "fresh": true,
+        "do": ["tap:browse.bookRow.*"]}]}
+  from      その項目の操作を始める画面。**項目は経路を持たない** —
+            前の項目が終わった画面から from までは、ここで計算して
+            繋ぐ（すでに居れば何もしない）
+  do        確かめる操作。`tap:<id>` `scroll:down` のように種類を頭に
+            付けて指せる（scroll は必須）。**並び順がそのまま実行順。**
+            遷移する操作も書いてよく、行き先はマップの `to` で追う。
+            着いた状態を見るだけの項目は空。入れる値の要る操作は
+            {"op": 操作id, …} にして、次のどちらかを添える
+              "runtime": true  **値を実行時に決める。** フローには値を
+                   焼き込まず、`env` の未定のまま残す。着いた画面を
+                   見ないと決まらないときに（打つ文字、どの行を叩くか）。
+                   焼き込むと、データが変わっても古い値で黙って走る
+              "input": 値      データに依らない値（一致しない語など）
+            from までの経路の途中で叩く操作は位置で選ぶ。どれを選ぶかを
+            気にするなら、それは確かめる操作なので do に書く
+  fresh     その項目はアプリを起動し直した直後から始める。**項目の前提で
+            あって、フローの切り方ではない** — 前の項目の状態（絞り込み、
+            変えたデータ）が残ると前提が崩れるときだけ付ける
+  shot      証跡の名前。`shots_dir` の下に撮る（Maestro はデーモンの
+            作業ディレクトリ基準で書くので、shots_dir は絶対パス）
+  title / expect  確認項目と期待。そのままマニフェストに入る
+  explore   経路が組めなかった項目（shot / from / title / expect / reason）。
+            フローを持たず、末尾にセクションとして並ぶ
+
+**1本で叩く。** フローとマニフェストを別々に作ると、plan を直したときに片方だけ
+作り直す余地ができ、どちらの項目がどの証跡か決まらなくなる。
+
+**写さない。** 証跡の名前・撮った画面・機械判定のID・フローのファイル名は経路を計算した
+結果から、`title` / `expect` / `from` は plan から、どちらも write_flows() が1行にして返す。
 
 **ヘッダの題と meta（ブランチ・確認環境・実施日）は持たない。** レポートを組むときに
 `build_report.py` へ直に渡す。確認環境は撮影する端末を決めるまで決まらない。
@@ -43,9 +79,10 @@ build_report.py が result の無いセクションを拒むため（判定し�
 直すなら plan を直して叩き直す。
 """
 import json
-import subprocess
 import sys
 from pathlib import Path
+
+import route   # 同じディレクトリ。経路の計算とフローの書き出し
 
 
 def read_json(path, what):
@@ -54,12 +91,11 @@ def read_json(path, what):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-# screen-map スキルの route.py。skills/ の下で隣り合っている（install.sh のリンクをたどっても同じ）
-ROUTE_PY = Path(__file__).resolve().parents[2] / "screen-map" / "scripts" / "route.py"
-
-
 def main():
     argv = sys.argv[1:]
+    if "--help" in argv or "-h" in argv:
+        print(__doc__)
+        sys.exit(0)
     if len(argv) < 2:
         sys.exit(__doc__)
     plan_path, out_dir = Path(argv[0]).expanduser(), argv[1]
@@ -73,26 +109,11 @@ def main():
 
     plan = read_json(plan_path, "テストケース（test-case-builder の plan.json）")
     items, explore = plan.get("items") or [], plan.get("explore") or []
-    src = plan_path.parent
 
-    # 経路が組めた項目が1つも無ければ route.py は要らない（全部探索で撮る）
+    # 経路が組めた項目が1つも無ければフローは要らない（全部探索で撮る）
+    rows = route.write_flows(plan_path, plan_path.parent, mapdir) if items else []
     if items:
-        cmd = [sys.executable, str(ROUTE_PY), "flow", "--plan", str(plan_path),
-               "--out-dir", str(src)]
-        if mapdir:
-            cmd += ["--map", mapdir]
-        r = subprocess.run(cmd)
-        if r.returncode != 0:
-            sys.exit(r.returncode)
         print()
-    index = read_json(src / "index.json", "フローの一覧（route.py flow --out-dir の index.json）") \
-        if items else []
-
-    planned = [it.get("shot") for it in items]
-    listed = [e["name"] for e in index]
-    if planned != listed:
-        sys.exit("plan.json の items と index.json の並びが合わない\n"
-                 f"  plan:  {planned}\n  index: {listed}")
 
     out = Path(out_dir) / "manifest.json"
 
@@ -106,15 +127,16 @@ def main():
         except Exception:
             pass
 
-    # 一覧のぶん（フローあり）＋ 探索のぶん。探索は末尾に積む
-    entries = [(e, it) for e, it in zip(index, items)] + \
-              [({"name": it.get("shot")}, it) for it in explore]
+    # フローのある行 ＋ 探索のぶん。探索は末尾に積む
+    entries = list(rows) + [{"name": it.get("shot"), "title": it.get("title", ""),
+                             "from": it.get("from"), "expect": it.get("expect", "")}
+                            for it in explore]
 
     # route.py はフローの中でしか重複を見られない。explore と衝突する余地が
     # 残るのでここでも弾く。同名だと後から撮ったほうが上書きし、
     # 2つの項目が同じ画像を指したまま通る。
     seen = {}
-    for e, _ in entries:
+    for e in entries:
         if not e["name"]:
             sys.exit("plan の explore に shot（証跡の名前）が無い項目がある")
         if e["name"] in seen:
@@ -123,15 +145,15 @@ def main():
         seen[e["name"]] = e.get("flow") or "探索"
 
     sections = []
-    for e, it in entries:
+    for e in entries:
         name = e["name"]
         prev = kept.get(name, {})
         sections.append({
             "name": name,                      # 引き継ぎと突き合わせのキー
-            "title": it.get("title", ""),      # 確認項目。plan が正
-            "from": it.get("from"),            # 操作を始める画面（plan）
-            "screen": e.get("screen"),         # 撮った画面（route.py）。探索は撮るまで決まらない
-            "expect": it.get("expect", ""),    # 証跡の中で何を確かめるか。同上
+            "title": e.get("title", ""),       # 確認項目。plan が正
+            "from": e.get("from"),             # 操作を始める画面（plan）
+            "screen": e.get("screen"),         # 撮った画面（経路の計算）。探索は撮るまで決まらない
+            "expect": e.get("expect", ""),     # 証跡の中で何を確かめるか。plan が正
             "checked": e.get("checked"),       # None なら証跡だけが根拠
             "launch": e.get("launch"),         # true なら、ここでアプリを起動し直す
             "inputs": e.get("inputs") or {},    # 空の値があるうちは走らせられない

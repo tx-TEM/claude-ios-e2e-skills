@@ -288,7 +288,7 @@ python3 ~/.claude/skills/sim-test-report/scripts/maestrod.py inspect <UDID> <名
 **最後に `route.py check` を通す。** 実測はIDが出るかを見るもので、こちらは**マップが経路として成立しているか**を見る。到達できない画面、遷移先のファイルが無い `to`、`anchor` の無い画面がここで出る。
 
 ```bash
-python3 ~/.claude/skills/screen-map/scripts/route.py check
+python3 ~/.claude/skills/sim-test-report/scripts/route.py check
 ```
 
 **鮮度も出る。** `screens/<id>.yaml` より新しく `files` が触られていたら、その画面のマップは実装とずれている可能性がある（判定は git のコミット日時。mtime は clone や checkout で揃うので使わない）。リファクタやコメントの修正でも出るので不整合ではなく警告だが、**`files` が薄いと検出自体が効かない。**
@@ -324,23 +324,18 @@ python3 ~/.claude/skills/sim-test-report/scripts/maestrod.py stop
 
 ## 経路になる
 
-マップは `to` で辺を持っているので、起点からの経路はグラフの最短路として機械的に組める。`scripts/route.py` がそれをやる。**このスキルの成果物がそのまま sim-test-report の入力になるのは、ここを通してのこと。**
+マップは `to` で辺を持っているので、起点からの経路はグラフの最短路として機械的に組める。sim-test-report の `scripts/route.py` がそれをやる。**このスキルの成果物がそのまま sim-test-report の入力になるのは、ここを通してのこと。**
 
 ```bash
-R=~/.claude/skills/screen-map/scripts/route.py
+R=~/.claude/skills/sim-test-report/scripts/route.py
 
 python3 $R screens                    # 画面の一覧（呼び名・できること）
 python3 $R which <パス...>            # 変更したファイルから対象画面を引く
 python3 $R path <画面id>...           # そこまでの経路を人が読む形で出す
-python3 $R flow --plan <json> --out-dir <dir>   # 項目ごとの Maestro のフロー
 python3 $R check                      # 自己テスト（到達可否・切れている箇所・鮮度）
 ```
 
-`flow` は **plan（確認項目の JSON）を読み、項目ごとにフローを分けて書く**。項目1つ＝ `from` から `do` の操作を順に叩いて1枚撮る。**項目は経路を持たない** — 前の項目が終わった画面から `from` までは、ここがマップから計算して繋ぐ。形は `--help` にある。sim-test-report の test-case-builder が書く。
-
-1本＝1枚になるので、走らせる側が証跡と同名のダンプを取れる（ダンプはフローの途中では取れないため）。2本目以降は起動し直さず続きから始まる。標準出力には読める経路が出る。レビューに見せる文と実際に走るものが1回の実行から出るので食い違わず、フローの中身がモデルの文脈を通らない。
-
-**引数列で経路を渡す口は持たない。** 手で並べると、項目と撮影の対応や起動し直す位置を書き違える。
+確認項目ごとのフローは sim-test-report の `manifest.py` が書く（中で route.py の経路計算を使う）。項目は経路を持たず、前の項目が終わった画面から項目の起点までは、マップから計算して繋ぐ。
 
 書く側として効いてくるのは次の点。
 

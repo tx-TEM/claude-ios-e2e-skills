@@ -161,16 +161,16 @@ ls <アプリのリポジトリ>/screen-map/config.yaml
 **無ければここは飛ばし、項目だけ返す。** 無いことは異常ではない。
 
 ```bash
-R=~/.claude/skills/screen-map/scripts/route.py
+R=~/.claude/skills/sim-test-report/scripts/route.py
 M=<アプリのリポジトリ>
 
-python3 $R --help               # セグメントと引数の一覧
+python3 ~/.claude/skills/sim-test-report/scripts/manifest.py --help   # plan の形
 python3 $R screens --map $M     # 画面の一覧
 python3 $R check   --map $M     # 到達できない画面、切れている箇所、マップの鮮度
 ```
 
-**`--help` を先に見る。** plan の形も、`from` `do` の意味も、`runtime` `input` の使い分けも、
-そこに書いてある。**ソースを読みに行かない** — 1000行あり、
+**`manifest.py --help` を先に見る。** plan の形も、`from` `do` の意味も、`runtime` `input` の
+使い分けも、そこに書いてある。**route.py のソースを読みに行かない** — 1000行あり、
 読んでも `--help` 以上のことは分からない。
 
 （`$R` と `$M` は手順1で使ったものと同じ。）
@@ -188,8 +188,8 @@ python3 $R check   --map $M     # 到達できない画面、切れている箇�
 # 3. 項目と経路を plan.json に書く
 
 **引数列を手で並べない。** 項目ごとに「何を確かめるか」と「そこまでの操作」を
-`plan.json` に書き、`manifest.py` に渡す。`manifest.py` は中で `route.py flow --plan` を
-叩いてフローを書き、同じファイルから `title` と `expect` を拾ってマニフェストを組む。**項目・経路・期待の元はこの1つだけ**で、
+`plan.json` に書き、`manifest.py` に渡す。`manifest.py` は route.py で経路を計算して
+フローを書き、同じファイルから `title` と `expect` を拾ってマニフェストを組む。**項目・経路・期待の元はこの1つだけ**で、
 誰も写さない。
 
 置き場は `~/.claude/skills/sim-test-report/.work/flows/<slug>/plan.json`。`<slug>` は
@@ -228,7 +228,7 @@ python3 $R check   --map $M     # 到達できない画面、切れている箇�
 python3 ~/.claude/skills/sim-test-report/scripts/manifest.py <plan.json> <出力先> --map $M
 ```
 
-`<出力先>` は証跡の出力先ディレクトリ（`shots/` の1つ上）。フローと `index.json` は plan.json と同じディレクトリに書かれる。経路が組めなければ route.py の理由が出て止まる。
+`<出力先>` は証跡の出力先ディレクトリ（`shots/` の1つ上）。フローは plan.json と同じディレクトリに書かれる。経路が組めなければ route.py の理由が出て止まる。
 
 - **1項目＝ `from` から `do` を順に叩いて1枚。** 項目が持つのは**どこから何を確かめるか**だけで、**そこまでの経路は書かない。** 前の項目が終わった画面から `from` までは route.py が計算して繋ぐ（すでに居れば何もしない）
 - **`from` は操作を始める画面。** 撮る画面ではない。「行をタップすると詳細に移る」なら `from` は `browse` で、`do` が `tap:browse.bookRow.*`
