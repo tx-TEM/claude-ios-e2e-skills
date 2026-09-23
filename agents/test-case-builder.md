@@ -18,7 +18,7 @@ tools: Read, Grep, Glob, Bash
 - **何を確認したいか**。PR番号、ブランチ、変更の意図、画面名、機能名、観点のどれでもよい（「さがす画面を一通り」「一覧と詳細の内容が一致するか」も入力として成立する）
 - **対象アプリのリポジトリのパス**
 - **証跡の出力先ディレクトリ**（`manifest.py` の `<出力先>`。例: `~/Desktop/sim-test-report-<slug>/`。証跡はその下の `shots/` に撮る）
-- **ファイル名に使う端末名**（`iphone` / `ipad`。`manifest.py --device` に渡す）
+- **撮る端末**（`iphone` / `ipad`。両方でもよい。`manifest.py --device` に渡す）
 - **対象アプリの bundle id**（plan の `app`）
 - iPad も対象にするか
 
@@ -212,10 +212,10 @@ python3 $R check       # 到達できない画面、切れている箇所、マ�
 ```
 
 ```bash
-python3 ~/.claude/skills/sim-test-report/scripts/manifest.py <plan.json> <出力先> --device iphone
+python3 ~/.claude/skills/sim-test-report/scripts/manifest.py <plan.json> <出力先> --device iphone [--device ipad]
 ```
 
-`<出力先>` は証跡の出力先ディレクトリ（証跡は `<出力先>/shots/` に撮る）。フローは plan.json と同じディレクトリに書かれる。経路が組めなければ route.py の理由が出て止まる。
+`<出力先>` は証跡の出力先ディレクトリ（証跡は `<出力先>/shots/<端末>/` に撮る）。フローは plan.json と同じディレクトリに、端末によらず1組書かれる（撮影先だけを撮るときに端末に合わせて埋める）。経路が組めなければ route.py の理由が出て止まる。
 
 - **1項目＝ `from` から `do` を順に叩いて1枚。** 項目が持つのは**どこから何を確かめるか**だけで、**そこまでの経路は書かない。** 前の項目が終わった画面から `from` までは route.py が計算して繋ぐ（すでに居れば何もしない）
 - **`from` は操作を始める画面。** 撮る画面ではない。「行をタップすると詳細に移る」なら `from` は `browse` で、`do` が `tap:browse.bookRow.*`
@@ -249,7 +249,7 @@ python3 ~/.claude/skills/sim-test-report/scripts/manifest.py <plan.json> <出力
 `route.py` は理由を返して終了コード 2 で終わる。**その文言をそのまま報告に載せ、その項目を plan の `explore` に移して `reason` にも書く。** 残りの項目で叩き直し、組めたところまでのフローは出しておく。
 
 ```
-[2] (iphone_05) goto settings: 画面 settings がマップに無い。screens/settings.yaml を作る必要がある
+[2] (test_05) goto settings: 画面 settings がマップに無い。screens/settings.yaml を作る必要がある
 ```
 
 - **マップの穴**（未マップの画面、`in_tree: false`、`to` の先が無い）は、**経路が組めない項目として理由つきで返す。** 探索で撮るかマップを作るかは**呼び出し元がユーザーに選んでもらう**ので、どちらかに決めて返さない。**その画面に依存している項目をまとめて挙げる** — 1画面のせいで何項目が影響を受けるかで、判断が変わる
@@ -277,27 +277,27 @@ manifest: ~/Desktop/sim-test-report-<slug>/manifest.json
 ## 操作列（manifest.py の標準出力）
 
   browse  起点                              ✓ browse が出ている
-          撮影 iphone_01
+          撮影 test_01
   browse  text browse.searchField ""        ✓ browse.countLabel が出ている
-          撮影 iphone_02
+          撮影 test_02
   browse  tap Search                        — 機械判定なし。証跡で見る
-          撮影 iphone_03
+          撮影 test_03
   browse  tap browse.cell.* [index 0]       ✓ detail に着いたことを確認
-          撮影 iphone_04
+          撮影 test_04
 
   機械判定 3件 / 証跡でしか見られない 1件
 
 未定の実行時入力:
-- iphone_02.yaml の env.BROWSE_SEARCHFIELD
+- test_02.yaml の env.BROWSE_SEARCHFIELD
 
 ## 経路が組めなかった項目
 
 5. 通信エラーの表示
-   route.py: [1] (iphone_05) goto browse ... browse.error.reloadButton は states にあるが、
+   route.py: [1] (test_05) goto browse ... browse.error.reloadButton は states にあるが、
    現在のデータでは踏めない。一時コードが要る。
 
 7, 8, 9. 履歴からの導線  [history]
-   route.py: [3] (iphone_07) goto history: 画面 history がマップに無い。
+   route.py: [3] (test_07) goto history: 画面 history がマップに無い。
    screens/history.yaml を作る必要がある
    → この3項目が history のマップ待ち。探索にするかマップを作るかは呼び出し元の判断。
 

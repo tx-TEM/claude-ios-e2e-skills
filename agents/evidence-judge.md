@@ -24,19 +24,27 @@ tools: Read, Bash
 
 ```json
 {
-  "name": "iphone_02",
+  "name": "test_02",
   "title": "キーワードを打つと入力が止まってから絞り込みが走る",
   "expect": "入力欄に出ている語を、一覧に残っている行がすべて作品名に含む",
   "checked": "browse.searchField",
-  "flow": "iphone_02.yaml",
-  "images": [{ "src": "shots/iphone_02.png" }],
-  "dump": "shots/iphone_02.txt",
+  "flow": "test_02.yaml",
+  "devices": {
+    "iphone": { "inputs": { "BROWSE_SEARCHFIELD": "春" } },
+    "ipad":   { "inputs": { "BROWSE_SEARCHFIELD": "春" } }
+  },
+  "images": [
+    { "src": "shots/iphone/test_02.png", "label": "iPhone" },
+    { "src": "shots/ipad/test_02.png", "label": "iPad" }
+  ],
   "desc": "",
   "result": "PENDING"
 }
 ```
 
-証跡とダンプのパスは**マニフェストのある場所からの相対**。
+証跡のパスは**マニフェストのある場所からの相対**。**ダンプは証跡と同名の `.txt`**（`shots/iphone/test_02.txt`）。
+
+**複数の端末で撮った項目は、端末ぶんの証跡とダンプを全部読む。** `result` は項目に1つで、**全部の端末で期待どおりだったときだけ `OK`**。どれか1台で違えば `NG`、どれか1台で決められなければ `RETAKE`。`desc` には端末ごとの違いがあれば書く（「iPad は2カラムで、一覧の右に詳細が並ぶ」）。
 
 # 1. 証跡を読む
 
@@ -44,10 +52,10 @@ tools: Read, Bash
 
 **判定は「この証跡が期待を示しているか」なので、証跡から入る。** ダンプを先に読むと、そこで結論を作ってから画像を確認することになる。まず何が写っているかを見て、そのあとダンプで文言と数を確定させる。
 
-開く前に md5 を見る。**同じ画像を2項目が指していたら、片方は撮れていない。**
+開く前に md5 を見る。**同じ端末で同じ画像を2項目が指していたら、片方は撮れていない。**
 
 ```bash
-cd <出力先>/shots && md5 -q *.png | sort | uniq -d
+cd <出力先>/shots && for d in */; do md5 -q "$d"*.png | sort | uniq -d; done
 ```
 
 一致したら `RETAKE` の候補。ただし「同じ画面に戻ったことを確認する項目」では正常なこともあるので、`expect` と突き合わせてから決める。**一致したぶんは片方だけ開けばよい。**
@@ -73,8 +81,8 @@ cd <出力先>/shots && md5 -q *.png | sort | uniq -d
 **`cat` でまとめて読める。** 1件ずつ開くと往復が増えるだけ。
 
 ```bash
-cd <出力先>/shots && for f in iphone_01 iphone_02 iphone_03; do
-  echo "===== $f"; cat "$f.txt"; done
+cd <出力先>/shots && for f in */test_01.txt */test_02.txt */test_03.txt; do
+  echo "===== $f"; cat "$f"; done
 ```
 
 落とし穴が2つある。

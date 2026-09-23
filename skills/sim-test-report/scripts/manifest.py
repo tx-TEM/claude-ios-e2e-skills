@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """test-case-builder の plan.json から、フローを書いて manifest.json を作る。
 
-  manifest.py <plan.json> <出力先ディレクトリ> [--device <端末名>] [--map <アプリのリポジトリ>]
+  manifest.py <plan.json> <出力先ディレクトリ> --device <端末名> [--device <端末名>]... [--map <アプリのリポジトリ>]
 
 アプリのリポジトリで叩く。画面マップ（`screen-map/`）はカレントから上へ探す。
 別の場所で叩くときだけ `--map` を付ける。
 
-証跡は `<出力先>/shots/` に撮る。名前は項目の並び順から振る（`--device iphone` なら
-`iphone_01`, `iphone_02`, …。explore は items の続きの番号）。どの端末で撮るかも、
-どこに出すかも撮る側の設定で、テストケース（plan）は持たない。
+証跡は `<出力先>/shots/<端末>/<名前>.png` に撮る。名前は項目の並び順から振る
+（`test_01`, `test_02`, …。explore は items の続きの番号）。**1つのテストケースを複数の端末で
+撮れる**（`--device iphone --device ipad`）。フローは端末によらず1組で、撮影先だけを
+`${SHOTS}` のまま書き、run_flows.py が端末に合わせて埋める。どの端末で撮るか、どこに出すかは
+撮る側の設定で、テストケース（plan）は持たない。
 
 1. plan の項目ごとに Maestro のフローを、plan.json と同じディレクトリに書く
    （route.py の `write_flows()`）。経路が組めなければ理由を出して止まる
@@ -90,6 +92,9 @@ from pathlib import Path
 import route   # 同じディレクトリ。経路の計算とフローの書き出し
 
 
+LABELS = {"iphone": "iPhone", "ipad": "iPad"}
+
+
 def main():
     argv = sys.argv[1:]
     if "--help" in argv or "-h" in argv:
@@ -97,27 +102,30 @@ def main():
         sys.exit(0)
     if len(argv) < 2:
         sys.exit(__doc__)
-    plan_path, out_dir = Path(argv[0]).expanduser(), argv[1]
-    mapdir, device = None, None
+    plan_path, out_dir = Path(argv[0]).expanduser(), Path(argv[1]).expanduser()
+    mapdir, devices = None, []
     i = 2
     while i < len(argv):
         if argv[i] == "--map":
             mapdir = argv[i + 1]; i += 2
         elif argv[i] == "--device":
-            device = argv[i + 1]; i += 2
+            devices.append(argv[i + 1]); i += 2
         else:
             sys.exit("知らない引数: " + argv[i] + "（題と meta は build_report.py に渡す）")
+    if not devices:
+        sys.exit("--device <端末名> が要る（iphone / ipad。複数の端末で撮るなら並べる）")
+    if len(set(devices)) != len(devices):
+        sys.exit("--device が重なっている: " + ", ".join(devices))
 
     plan = route.load_plan(plan_path)
     items, explore = plan.get("items") or [], plan.get("explore") or []
 
-    # 経路が組めた項目が1つも無ければフローは要らない（全部探索で撮る）
-    shots = Path(out_dir) / "shots"
-    rows = route.write_flows(plan, plan_path.parent, shots, device, mapdir) if items else []
+    # フローは端末によらず1組。撮影先は ${SHOTS} のままで、run_flows.py が端末ごとに埋める
+    rows = route.write_flows(plan, plan_path.parent, mapdir) if items else []
     if items:
         print()
 
-    out = Path(out_dir) / "manifest.json"
+    out = out_dir / "manifest.json"
 
     # 判定の欄は、作り直しても消さない。footer など判定側が足した欄も残す
     kept, top = {}, {}
@@ -125,34 +133,36 @@ def main():
         try:
             old = json.loads(out.read_text(encoding="utf-8"))
             kept = {sec.get("name"): sec for sec in old.get("sections", []) if sec.get("name")}
-            top = {k: v for k, v in old.items() if k not in ("sections", "title", "meta")}
+            top = {k: v for k, v in old.items()
+                   if k not in ("sections", "title", "meta", "resume")}
         except Exception:
             pass
 
     # フローのある行 ＋ 探索のぶん。探索は末尾に積む
-    entries = list(rows) + [{"name": route.shot_name(len(items) + n, device),
+    entries = list(rows) + [{"name": route.shot_name(len(items) + n),
                              "title": it.get("title", ""), "from": it.get("from"),
                              "expect": it.get("expect", "")}
                             for n, it in enumerate(explore, 1)]
-
 
     sections = []
     for e in entries:
         name = e["name"]
         prev = kept.get(name, {})
         sections.append({
-            "name": name,                      # 引き継ぎと突き合わせのキー
+            "name": name,                      # 証跡・ダンプ・フローのファイル名。引き継ぎの鍵
             "title": e.get("title", ""),       # 確認項目。plan が正
             "from": e.get("from"),             # 操作を始める画面（plan）
             "screen": e.get("screen"),         # 撮った画面（経路の計算）。探索は撮るまで決まらない
             "expect": e.get("expect", ""),     # 証跡の中で何を確かめるか。plan が正
             "checked": e.get("checked"),       # None なら証跡だけが根拠
             "launch": e.get("launch"),         # true なら、ここでアプリを起動し直す
-            "inputs": e.get("inputs") or {},    # 空の値があるうちは走らせられない
-            "pre_flow": e.get("pre_flow"),      # 値を決める操作の手前まで。先に走らせる
-            "flow": e.get("flow"),
-            "images": [{"src": f"shots/{name}.png"}],
-            "dump": f"shots/{name}.txt",
+            "pre_flow": e.get("pre_flow"),     # 値を決める操作の手前まで。先に走らせる
+            "flow": e.get("flow"),             # 全端末で同じフロー
+            # 実行時に決める値は端末ごと（その端末の画面を見て決める）
+            "devices": {d: {"inputs": dict(e.get("inputs") or {})} for d in devices},
+            # 証跡は端末ごとに1枚。ダンプは同名の .txt
+            "images": [{"src": f"shots/{d}/{name}.png", "label": LABELS.get(d, d)}
+                       for d in devices],
             "desc": prev.get("desc", ""),
             "note": prev.get("note", ""),      # この項目だけの但し書き。判定で埋める
             "result": prev.get("result", "PENDING"),
@@ -163,7 +173,7 @@ def main():
     blank = sum(1 for s in sections if not s["flow"])
     empty = [s["name"] for s in sections if not s["title"] or not s["expect"]]
     print(out)
-    print(f"  {len(sections)}セクション。")
+    print(f"  {len(sections)}セクション × {len(devices)}端末（{', '.join(devices)}）。")
     if empty:
         print(f"  title か expect が空: {', '.join(empty)}。plan.json を埋めて叩き直す")
     nochk = sum(1 for s in sections if s["flow"] and not s["checked"])
@@ -171,6 +181,5 @@ def main():
         print(f"  {nochk}件はフローに機械判定が無い（証跡だけが根拠）")
     if blank:
         print(f"  {blank}件はフローが無い（探索で撮る。sim-driver に渡す）")
-
 
 main()
