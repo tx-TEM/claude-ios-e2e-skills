@@ -32,48 +32,52 @@ clone したディレクトリで `./install.sh` を実行する。`~/.claude/` 
 
 ### 1. テストケースを立てる（LLM / `test-case-builder`）
 
-ユーザーの指示から確認項目を立てる。コードの差分と、事前に用意した[画面マップ](skills/screen-map/SKILL.md#スキーマ)を参照する。
+ユーザーの指示から確認項目を立てる。コードの差分と、事前に用意した[画面マップ](skills/screen-map/SKILL.md#スキーマ)を参照する。項目・期待・そこまでの操作を **`plan.json` 1つ**に書く。以降のフローもマニフェストもここから作り、LLM が散文から写す箇所を残さない。
 
+```json
+{
+  "app": "tx-tem.AozoraReaderClient",
+  "shots_dir": "<出力先>/shots",
+  "runtime": ["text:browse.searchField"],
+  "items": [
+    {"shot": "iphone_01_browse_initial", "screen": "browse",
+     "title": "さがす画面の初期表示で作品一覧が出る",
+     "expect": "絞り込み無しの一覧が出て、作品の行が複数並んでいる",
+     "steps": [{"goto": "browse"}]},
+    {"shot": "iphone_02_debounce_filtered", "screen": "browse",
+     "title": "キーワード入力でデバウンス絞り込みが走る",
+     "expect": "入力欄に出ている語を、一覧に残っている行がすべて作品名に含む",
+     "steps": [{"do": "text:browse.searchField"}]},
+    {"shot": "iphone_03_scroll", "screen": "browse", "restart": true,
+     "title": "一覧をスクロールすると次のページが読み込まれる",
+     "expect": "…",
+     "steps": [{"goto": "browse"}, {"do": "scroll:down"}]}
+  ],
+  "explore": []
+}
 ```
-1. さがす画面の初期表示で作品一覧が出る [browse]
-   期待: 未絞り込みの状態で、一覧の先頭が「BOITEUX・BOITEUSE」（李 箱）になる
-   証跡: iphone_01_browse_initial
 
-2. キーワード入力でデバウンス絞り込みが走る [browse]
-   期待: 「夏目」を打って 300ms 待つと 6 件に絞り込まれ、先頭行が
-         「温情の裕かな夏目さん」（内田 魯庵）になる。キーボードは開いたまま
-   証跡: iphone_02_debounce_filtered
-
-3. 検索キーで絞り込みが即時確定する [browse]
-   期待: 直前と同じ 6 件のまま、キーボードが閉じる
-   証跡: iphone_03_search_key_filtered
-
-…
-```
+期待は値ではなく、証跡の中で確かめられる関係で書く。打つ文字のようにデータに依る値は `runtime` で未定のまま残し、撮影時に画面を見て埋める。
 
 ### 2. 経路を計算して Maestro のフローを書く（`route.py`）
 
-テストケースを元に、たどる経路を画面マップから計算し、Maestro のフローとして書き出す。
+plan の各項目の `steps` をたどる経路を画面マップから計算し、Maestro のフローとして書き出す。
 
 ```bash
-python3 ~/.claude/skills/screen-map/scripts/route.py flow --app <bundle id> \
-  --out-dir ~/.claude/skills/sim-test-report/.work/flows/<slug> \
-  --goto browse --shot <出力先>/shots/iphone_01_browse_initial \
-  --do text:browse.searchField --input browse.searchField=夏目 --shot … \
-  --restart --goto browse --do scroll:down --shot …
+python3 ~/.claude/skills/screen-map/scripts/route.py flow \
+  --plan ~/.claude/skills/sim-test-report/.work/flows/<slug>/plan.json \
+  --out-dir ~/.claude/skills/sim-test-report/.work/flows/<slug>
 ```
 
 ```yaml
 appId: tx-tem.AozoraReaderClient
+env:
+  BROWSE_SEARCHFIELD: ''
 ---
-- extendedWaitUntil:
-    visible:
-      id: '^browse$'
-    timeout: 10000
 - tapOn:
     id: '^browse\.searchField$'
 - eraseText
-- inputText: '夏目'
+- inputText: ${BROWSE_SEARCHFIELD}
 - extendedWaitUntil:
     visible:
       id: '^browse\.searchField$'
@@ -81,11 +85,11 @@ appId: tx-tem.AozoraReaderClient
 - takeScreenshot: '<出力先>/shots/iphone_02_debounce_filtered'
 ```
 
-画面マップが無いアプリでは、この手順を飛ばす。マップはあっても経路が組めない項目（未マップの画面、座標が要る操作）は理由つきで返る。どちらも LLM（`sim-driver`）が画面を見ながら探索して撮る。
+画面マップが無いアプリでは、この手順を飛ばす。マップはあっても経路が組めない項目（未マップの画面、座標が要る操作）は理由つきで返り、plan の `explore` に移る。どちらも LLM（`sim-driver`）が画面を見ながら探索して撮る。
 
 ### 3. テストの定義ファイルを作る（`manifest.py`）
 
-手順1のテストケースと、手順2で書き出したフローを1つのファイルにまとめる。以降はこのファイルだけで動く。
+plan の項目と期待、手順2で書き出したフローの一覧を1つのファイルにまとめる。以降はこのファイルだけで動く。
 
 ```bash
 python3 ~/.claude/skills/sim-test-report/scripts/manifest.py \
@@ -95,11 +99,12 @@ python3 ~/.claude/skills/sim-test-report/scripts/manifest.py \
 ```json
 {
   "name": "iphone_02_debounce_filtered",
-  "title": "キーワードを打つと入力が止まってから絞り込みが走る",
+  "title": "キーワード入力でデバウンス絞り込みが走る",
   "screen": "browse",
-  "expect": "「夏目」を打って 300ms 待つと 6 件に絞り込まれ、先頭行が「温情の裕かな夏目さん」（内田 魯庵）になる",
+  "expect": "入力欄に出ている語を、一覧に残っている行がすべて作品名に含む",
   "checked": "browse.searchField",
   "launch": false,
+  "inputs": { "BROWSE_SEARCHFIELD": "" },
   "flow": "02_iphone_02_debounce_filtered.yaml",
   "images": [{ "src": "shots/iphone_02_debounce_filtered.png" }],
   "dump": "shots/iphone_02_debounce_filtered.txt",
@@ -108,9 +113,9 @@ python3 ~/.claude/skills/sim-test-report/scripts/manifest.py \
 }
 ```
 
-経路が組めなかった項目も、フローを持たないセクションとして同じファイルに並べる。
+経路が組めなかった項目（plan の `explore`）も、フローを持たないセクションとして同じファイルに並べる。
 
-このファイルを読み上げてレビューを受ける。合意してから撮影に入る。
+このファイルを読み上げてレビューを受ける。直すところがあれば plan を直して手順2・3を叩き直し、合意してから撮影に入る。
 
 ### 4. フローを走らせる（`run_flows.py`）
 
