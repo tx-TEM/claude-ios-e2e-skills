@@ -16,7 +16,7 @@ tools: mcp__Claude_Code_iOS_Simulator__control, Bash
 呼び出し元から次を受け取る。足りなければ推測せず、その旨を報告して止まる。
 
 - **マニフェストのパス**と、撮る項目の名前（`test_11`）。項目の中身（`title` / `expect` / `from`）はそのセクションにある。**証跡の名前はセクションの `name`** で、自分で付けない
-- 対象デバイスのUDIDと端末名（`iphone` / `ipad` など。進捗ログの区切りに書く）
+- 端末名（`iphone` / `ipad` など。進捗ログの区切りに書く）と対象デバイスのUDID（マニフェストの `devices.<端末>.udid`）
 - 証跡の出力先ディレクトリ。**端末ごとのディレクトリ**（例: `~/Desktop/sim-test-report-<slug>/shots/iphone/`）
 - 前提条件（アカウント、必要なデータ、事前設定）
 - 対象アプリの bundle id（スクロールのフローに書く。渡されなければ `xcrun simctl listapps <UDID>` で探す）

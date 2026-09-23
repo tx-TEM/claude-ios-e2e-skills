@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """マニフェストに載っているフローを順に走らせ、証跡と同名のダンプを撮る。
 
-  run_flows.py <manifest.json> <フローのディレクトリ> --device <端末>=<UDID> [--device …]
-  run_flows.py <manifest.json> <フローのディレクトリ> <UDID>      （端末が1つのマニフェスト）
-  run_flows.py … --from <名前>                                    （端末を1つだけ渡すとき）
+  run_flows.py <manifest.json> <フローのディレクトリ>
 
-**1回で全端末を撮る。** 渡した順に1台ずつ撮り切ってから次の端末へ移る（Maestro の
+**どのシミュレーターで撮るかはマニフェストの `devices` に入っている**（手順0で manifest.py に
+渡したもの）。ここで渡し直さない。その UDID が起動していなければ止まる — 別の端末で代用しない。
+
+**1回で全端末を撮る。** マニフェストの順に1台ずつ撮り切ってから次の端末へ移る（Maestro の
 デーモンが握れるのは1台で、行き来させると切り替えのたびに約10秒かかる）。フローは
 全端末で同じで、撮影先の `${SHOTS}` にここで `<出力先>/shots/<端末>` を入れる。
 進捗ログは `<出力先>/progress_<端末>.log`。実行時に決める値は端末ごと — その端末の
@@ -47,7 +48,6 @@
 
 **続きから走るとき、前を撮り直さない** — 止まった時点でアプリはその画面に居るので、
 続きのフローはそのまま走る。手前からやり直すと、撮れている証跡を捨てて撮り直すことになる。
-`--from` は記録を無視して、1台の決まった項目から走らせたいときだけ使う。
 
 **入力が未定ならそこで終える。** 落ちたときは次の鎖へ進むが、こちらは進めない
 — 先へ走らせると画面が変わり、値を決めるために見ることができなくなる。
@@ -63,6 +63,8 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+
+import simulators   # 同じディレクトリ。UDID から起動しているかを引く
 
 HERE = Path(__file__).resolve().parent
 MAESTROD = HERE / "maestrod.py"
@@ -205,38 +207,23 @@ def main():
     if "--help" in argv or "-h" in argv:
         print(__doc__)
         sys.exit(0)
-    pairs, resume_arg, rest = [], None, []
-    i = 0
-    while i < len(argv):
-        if argv[i] == "--device":
-            d, _, u = argv[i + 1].partition("=")
-            if not u:
-                sys.exit(f"--device は <端末>=<UDID> で渡す: {argv[i + 1]}")
-            pairs.append((d, u)); i += 2
-        elif argv[i] == "--from":
-            resume_arg = argv[i + 1]; i += 2
-        elif argv[i].startswith("--"):
-            sys.exit("知らない引数: " + argv[i])
-        else:
-            rest.append(argv[i]); i += 1
-    if len(rest) not in (2, 3):
+    unknown = [a for a in argv if a.startswith("--")]
+    if unknown:
+        sys.exit("知らない引数: " + ", ".join(unknown) + "（どの端末で撮るかはマニフェストに入っている）")
+    if len(argv) != 2:
         sys.exit(__doc__)
-    manifest_path, flow_dir = Path(rest[0]), Path(rest[1])
+    manifest_path, flow_dir = Path(argv[0]), Path(argv[1])
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
-    known = list((manifest["sections"][0].get("devices") or {}) if manifest["sections"] else {})
-    if len(rest) == 3:
-        # UDID だけ渡す書き方は、端末が1つのマニフェストに限る
-        if pairs or len(known) != 1:
-            sys.exit(f"端末ごとに --device <端末>=<UDID> で渡す（このマニフェストの端末: {', '.join(known)}）")
-        pairs = [(known[0], rest[2])]
-    if not pairs:
-        sys.exit(f"--device <端末>=<UDID> が要る（このマニフェストの端末: {', '.join(known)}）")
-    for d, _ in pairs:
-        if d not in known:
-            sys.exit(f"端末 {d} はこのマニフェストに無い（ある端末: {', '.join(known)}）")
-    if resume_arg and len(pairs) != 1:
-        sys.exit("--from は端末を1つだけ渡すときに使う（どの端末のどこからか決まらない）")
+    devices = manifest.get("devices") or {}
+    if not devices:
+        sys.exit("マニフェストに devices が無い。manifest.py を --device <端末>=<UDID> で叩き直す")
+    pairs = [(d, v["udid"]) for d, v in devices.items()]
+    # 手順0で決めた端末が起動していなければ止まる。別の端末で代用しない
+    down = [f"{d}: {v['model']} ({v['os']}) {v['udid']}" for d, v in devices.items()
+            if not simulators.lookup(v["udid"])["booted"]]
+    if down:
+        sys.exit("起動していないシミュレーターがある。起動してから叩き直す:\n  " + "\n  ".join(down))
 
     if not any(s.get("flow") for s in manifest["sections"]):
         sys.exit("flow を持つセクションが無い。全部探索なので sim-driver に渡す。")
@@ -246,10 +233,10 @@ def main():
     finished = list(state.get("done") or [])
     total, lost_all = 0, []
     for d, u in pairs:
-        if d in finished and not resume_arg:
+        if d in finished:
             print(f"--- {d} は撮り終えている。飛ばす")
             continue
-        resume = resume_arg or (state.get("from") if state.get("device") == d else None)
+        resume = state.get("from") if state.get("device") == d else None
         stopped, done, lost = run_device(manifest, manifest_path, flow_dir, d, u, resume)
         total += done
         lost_all += lost

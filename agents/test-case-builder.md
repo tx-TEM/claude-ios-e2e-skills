@@ -18,7 +18,7 @@ tools: Read, Grep, Glob, Bash
 - **何を確認したいか**。PR番号、ブランチ、変更の意図、画面名、機能名、観点のどれでもよい（「さがす画面を一通り」「一覧と詳細の内容が一致するか」も入力として成立する）
 - **対象アプリのリポジトリのパス**
 - **証跡の出力先ディレクトリ**（`manifest.py` の `<出力先>`。例: `~/Desktop/sim-test-report-<slug>/`。証跡はその下の `shots/` に撮る）
-- **撮る端末**（`iphone` / `ipad`。両方でもよい。`manifest.py --device` に渡す）
+- **撮る端末とシミュレーターの UDID**（`iphone=<UDID>`。両方でもよい。`manifest.py --device` にそのまま渡す）
 - **対象アプリの bundle id**（plan の `app`）
 - iPad も対象にするか
 
@@ -212,7 +212,7 @@ python3 $R check       # 到達できない画面、切れている箇所、マ�
 ```
 
 ```bash
-python3 ~/.claude/skills/sim-test-report/scripts/manifest.py <plan.json> <出力先> --device iphone [--device ipad]
+python3 ~/.claude/skills/sim-test-report/scripts/manifest.py <plan.json> <出力先> --device iphone=<UDID> [--device ipad=<UDID>]
 ```
 
 `<出力先>` は証跡の出力先ディレクトリ（証跡は `<出力先>/shots/<端末>/` に撮る）。フローは plan.json と同じディレクトリに、端末によらず1組書かれる（撮影先だけを撮るときに端末に合わせて埋める）。経路が組めなければ route.py の理由が出て止まる。

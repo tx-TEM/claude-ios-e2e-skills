@@ -2,27 +2,29 @@
 """スクリーンショット付き動作確認レポート（単一HTML）を生成する。
 
 使い方:
-    python3 build_report.py <manifest.json> [--title <題>] [--meta <行>]... [--repo <dir>]
-                            [--width=<px>] [--no-png]
+    python3 build_report.py <manifest.json> [--title <題>] [--repo <dir>] [--width=<px>] [--no-png]
 
     python3 build_report.py manifest.json \
-      --title "一覧からお気に入り登録できるようにする — 動作確認レポート" \
-      --meta "確認環境: iPhone 16 シミュレーター (iOS 26.0)"
+      --title "一覧からお気に入り登録できるようにする — 動作確認レポート"
 
-**題と meta はマニフェストに持たせず、ここで渡す。** どれもレポートを組む時点で決まるもので
-（確認環境は撮影する端末を決めるまで決まらない）、確認項目の中身ではない。
+**ヘッダは題だけ渡す。** ほかは事実から出す。
 
-**ブランチと実施日は渡さない。** ブランチはアプリのリポジトリ（既定はカレント、`--repo` で
-指定）の git から、実施日は組んだ日から出す。`--meta` で渡すと止まる（二重になる）。
+- ブランチ: アプリのリポジトリ（既定はカレント、`--repo` で指定）の git から
+- 確認環境: マニフェストの `devices`（manifest.py が UDID から引いた機種名と OS）から
+- 実施日: 組んだ日
 
 マニフェスト形式:
 {
+  "devices": {
+    "iphone": {"udid": "…", "model": "iPhone 17 Pro", "os": "iOS 26.5"},
+    "ipad": {"udid": "…", "model": "iPad Air 13-inch (M4)", "os": "iOS 26.5"}
+  },
   "sections": [
     {
       "title": "一覧のセルにお気に入りボタンが表示される",
       "images": [
-        {"src": "shots/iphone_01_list_favorite_button.png", "label": "iPhone"},
-        {"src": "shots/ipad_01_list_favorite_button.png", "label": "iPad"}
+        {"src": "shots/iphone/test_01.png", "label": "iPhone"},
+        {"src": "shots/ipad/test_01.png", "label": "iPad"}
       ],
       "expect": "各セルの右端に星アイコンのボタンが出る",
       "desc": "アイテム一覧画面。各セルの右端に星アイコンのボタンが表示される。",
@@ -34,8 +36,6 @@
   "output": "verification_report.html"
 }
 
-- --meta の各行は「ラベル: 値」で書くと、ヘッダでラベルと値に分けて並ぶ。1行に「／」で
-  区切って複数書いてもよい。コロンの無い行はそのまま1項目になる
 - **「実施日」だけは件数の行の右端に出す。** 他の項目（ブランチ、確認環境）は何で確かめたかで、
   いつの結果かはそれと性格が違う。他の項目は件数の行の下に1行ずつ並ぶ
 - 1セクションに複数の画像を並べられる。同じ確認項目をiPhoneとiPadで撮った場合など
@@ -379,9 +379,6 @@ def render_png(html_path: pathlib.Path) -> pathlib.Path | None:
     return png_path
 
 
-AUTO_META = ("ブランチ", "実施日")
-
-
 def branch_of(repo: str) -> str:
     def git(*a: str) -> str:
         r = subprocess.run(["git", "-C", repo, *a], capture_output=True, text=True)
@@ -395,16 +392,12 @@ def branch_of(repo: str) -> str:
 def main() -> None:
     argv = sys.argv[1:]
     args, width, make_png = [], DEFAULT_WIDTH, True
-    title, meta, repo = "動作確認レポート", [], "."
+    title, repo = "動作確認レポート", "."
     i = 0
     while i < len(argv):
         a = argv[i]
         if a == "--title":
             title = argv[i + 1]; i += 2
-        elif a == "--meta":
-            if argv[i + 1].split(":", 1)[0].strip() in AUTO_META:
-                sys.exit(f"--meta に {argv[i + 1]!r} は渡さない。ブランチと実施日はここで出す")
-            meta.append(argv[i + 1]); i += 2
         elif a == "--repo":
             repo = argv[i + 1]; i += 2
         elif a.startswith("--width="):
@@ -418,8 +411,12 @@ def main() -> None:
     if len(args) != 1:
         print(__doc__)
         sys.exit(1)
-    meta =[f"ブランチ: {branch_of(repo)}", *meta, f"実施日: {date.today().isoformat()}"]
-    out_path = build(pathlib.Path(args[0]), width, title, meta)
+    manifest_path = pathlib.Path(args[0])
+    devices = json.loads(manifest_path.read_text()).get("devices") or {}
+    envs = "、".join(f"{v['model']} シミュレーター ({v['os']})" for v in devices.values())
+    meta = [f"ブランチ: {branch_of(repo)}"] + ([f"確認環境: {envs}"] if envs else []) \
+        + [f"実施日: {date.today().isoformat()}"]
+    out_path = build(manifest_path, width, title, meta)
     size = out_path.stat().st_size
     print(f"{out_path} ({size / 1024 / 1024:.2f} MB)")
     if make_png:

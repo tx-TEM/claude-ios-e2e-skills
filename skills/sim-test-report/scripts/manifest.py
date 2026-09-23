@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
 """test-case-builder の plan.json から、フローを書いて manifest.json を作る。
 
-  manifest.py <plan.json> <出力先ディレクトリ> --device <端末名> [--device <端末名>]... [--map <アプリのリポジトリ>]
+  manifest.py <plan.json> <出力先ディレクトリ> --device <端末>=<UDID> [--device …] [--map <アプリのリポジトリ>]
 
 アプリのリポジトリで叩く。画面マップ（`screen-map/`）はカレントから上へ探す。
 別の場所で叩くときだけ `--map` を付ける。
 
 証跡は `<出力先>/shots/<端末>/<名前>.png` に撮る。名前は項目の並び順から振る
 （`test_01`, `test_02`, …。explore は items の続きの番号）。**1つのテストケースを複数の端末で
-撮れる**（`--device iphone --device ipad`）。フローは端末によらず1組で、撮影先だけを
+撮れる**（`--device iphone=<UDID> --device ipad=<UDID>`）。フローは端末によらず1組で、撮影先だけを
 `${SHOTS}` のまま書き、run_flows.py が端末に合わせて埋める。どの端末で撮るか、どこに出すかは
 撮る側の設定で、テストケース（plan）は持たない。
+
+**どのシミュレーターで撮るかもここで決める。** UDID から機種名と OS を引いて、マニフェストの
+`devices` に書く。run_flows.py と sim-driver はそこから UDID を読み、build_report.py は確認環境を
+そこから出す。撮るときに手で渡し直さない。
 
 1. plan の項目ごとに Maestro のフローを、plan.json と同じディレクトリに書く
    （route.py の `write_flows()`）。経路が組めなければ理由を出して止まる
@@ -90,6 +94,7 @@ import sys
 from pathlib import Path
 
 import route   # 同じディレクトリ。経路の計算とフローの書き出し
+import simulators
 
 
 LABELS = {"iphone": "iPhone", "ipad": "iPad"}
@@ -109,13 +114,23 @@ def main():
         if argv[i] == "--map":
             mapdir = argv[i + 1]; i += 2
         elif argv[i] == "--device":
-            devices.append(argv[i + 1]); i += 2
+            name, _, udid = argv[i + 1].partition("=")
+            if not udid:
+                sys.exit(f"--device は <端末>=<UDID> で渡す: {argv[i + 1]}")
+            devices.append((name, udid)); i += 2
         else:
             sys.exit("知らない引数: " + argv[i] + "（題と meta は build_report.py に渡す）")
     if not devices:
-        sys.exit("--device <端末名> が要る（iphone / ipad。複数の端末で撮るなら並べる）")
-    if len(set(devices)) != len(devices):
-        sys.exit("--device が重なっている: " + ", ".join(devices))
+        sys.exit("--device <端末>=<UDID> が要る（iphone / ipad。複数の端末で撮るなら並べる）")
+    names = [n for n, _ in devices]
+    if len(set(names)) != len(names):
+        sys.exit("--device の端末が重なっている: " + ", ".join(names))
+    # 機種名と OS は UDID から引く。撮った端末として、確認環境にそのまま出る
+    info = {}
+    for n, u in devices:
+        sim = simulators.lookup(u)
+        info[n] = {"udid": u, "model": sim["model"], "os": sim["os"]}
+    devices = names
 
     plan = route.load_plan(plan_path)
     items, explore = plan.get("items") or [], plan.get("explore") or []
@@ -168,12 +183,14 @@ def main():
             "result": prev.get("result", "PENDING"),
         })
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(dict(top, sections=sections),
+    out.write_text(json.dumps(dict(top, devices=info, sections=sections),
                               ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     blank = sum(1 for s in sections if not s["flow"])
     empty = [s["name"] for s in sections if not s["title"] or not s["expect"]]
     print(out)
-    print(f"  {len(sections)}セクション × {len(devices)}端末（{', '.join(devices)}）。")
+    print(f"  {len(sections)}セクション × {len(devices)}端末")
+    for n in devices:
+        print(f"    {n}: {info[n]['model']} ({info[n]['os']})  {info[n]['udid']}")
     if empty:
         print(f"  title か expect が空: {', '.join(empty)}。plan.json を埋めて叩き直す")
     nochk = sum(1 for s in sections if s["flow"] and not s["checked"])
