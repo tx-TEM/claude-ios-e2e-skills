@@ -28,6 +28,8 @@
   "output": "verification_report.html"
 }
 
+- meta の各行は「ラベル: 値」で書くと、ヘッダでラベルと値に分けて並ぶ。1行に「／」で
+  区切って複数書いてもよい。コロンの無い行はそのまま1項目になる
 - 1セクションに複数の画像を並べられる。同じ確認項目をiPhoneとiPadで撮った場合など
 - images の要素は {"src": ..., "label": ...} か、ラベル不要なら文字列だけでもよい
 - 画像が1枚なら "image": "shots/01_foo.png" と書いてもよい（images 1件と等価）
@@ -150,6 +152,16 @@ def section_images(section: dict, base_dir: pathlib.Path) -> list[tuple[pathlib.
     return items
 
 
+def meta_items(meta: list[str]) -> list[tuple[str, str]]:
+    """meta の行を (ラベル, 値) にする。「／」で区切った行は複数の項目に分ける。"""
+    items = []
+    for line in meta:
+        for part in re.split(r"\s*／\s*", line.strip()):
+            m = re.match(r"([^:：]+?)\s*[:：]\s*(.+)", part)
+            items.append((m.group(1), m.group(2)) if m else ("", part))
+    return [(k, v) for k, v in items if v]
+
+
 def section_rows(section: dict) -> tuple[list[tuple[str, str]], str]:
     """証跡の上に出す期待と結果、下に出す注記。値の無いものは出さない。
 
@@ -204,7 +216,10 @@ def build(manifest_path: pathlib.Path, width: int) -> pathlib.Path:
       {rows_html}
     </section>'''
 
-    meta_lines = "".join(f"<p>{html.escape(m)}</p>" for m in manifest.get("meta", []))
+    meta_lines = "".join(
+        f'<div><dt>{html.escape(k)}</dt><dd>{html.escape(v)}</dd></div>'
+        for k, v in meta_items(manifest.get("meta", [])))
+    meta_lines = f'<dl class="meta">{meta_lines}</dl>' if meta_lines else ""
     summary = (f'<div class="summary"><span class="ok">OK {counts["OK"]}</span>'
                f'<span class="ng">NG {counts["NG"]}</span>'
                f'<span class="all">全 {counts["OK"] + counts["NG"]} 項目</span></div>')
@@ -233,7 +248,10 @@ def build(manifest_path: pathlib.Path, width: int) -> pathlib.Path:
   body {{ font-family: -apple-system, "Hiragino Sans", sans-serif; margin: 0; padding: 32px 24px; background: var(--bg); color: var(--text); line-height: 1.7; }}
   .wrap {{ max-width: 880px; margin: 0 auto; }}
   header h1 {{ font-size: 22px; line-height: 1.4; margin: 0 0 8px; }}
-  header p {{ margin: 0; color: var(--sub); font-size: 13px; }}
+  .meta {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 1px; margin: 12px 0 0; background: var(--line); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }}
+  .meta div {{ background: var(--card); padding: 8px 14px; }}
+  .meta dt {{ font-size: 11px; color: var(--faint); }}
+  .meta dd {{ margin: 0; font-size: 13px; word-break: keep-all; overflow-wrap: anywhere; }}
   .summary {{ display: flex; gap: 8px; margin-top: 14px; font-size: 13px; font-weight: 600; }}
   .summary span {{ padding: 3px 12px; border-radius: 999px; }}
   .summary .ok {{ color: var(--ok); background: var(--ok-bg); }}
