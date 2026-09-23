@@ -12,7 +12,7 @@ iOSアプリの動作確認を、テストケースのレビューからシミ�
 | `screen-map` | Skill | iOSアプリの画面マップを画面単位で作る。ソースを読んで画面・遷移・確認箇所を特定し、`accessibilityIdentifier` を実装に振って `screen-map/screens/*.yaml` に落とす。`sim-test-report` の `scripts/route.py` がそのマップから目的の画面までの経路を組み、動作確認のフローにする |
 | `test-case-builder` | Agent | 確認項目を立て、画面マップがあれば実行できるフローまで組んで返す。コードの差分と画面マップを参照する。レビューを受けるのも実施も判定もしない。`sim-test-report` から呼ばれる |
 | `sim-driver` | Agent | シミュレーターを操作して証跡スクリーンショットを撮る。判定はせず観測した事実だけ返す。`sim-test-report` から呼ばれる |
-| `evidence-judge` | Agent | 証跡を読んでOK/NGを判定し、レポートまで作る。撮影はしない。`sim-test-report` から呼ばれる |
+| `evidence-judge` | Agent | 証跡を読んでOK/NGを判定し、定義ファイルに書き込む。撮影もレポート生成もしない。`sim-test-report` から呼ばれる |
 
 ## セットアップ
 
@@ -83,7 +83,7 @@ env:
 - takeScreenshot: '<出力先>/shots/iphone_02'
 ```
 
-画面マップが無いアプリでは、この手順を飛ばす。マップはあっても経路が組めない項目（未マップの画面、座標が要る操作）は理由つきで返り、plan の `explore` に移る。どちらも LLM（`sim-driver`）が画面を見ながら探索して撮る。
+画面マップが無いアプリでは全項目が plan の `explore` になり、フローは書かない。マップはあっても経路が組めない項目（未マップの画面、座標が要る操作）は理由つきで返り、`explore` に移る。どちらも LLM（`sim-driver`）が画面を見ながら探索して撮る。
 
 続けて、plan の項目と期待、書き出したフローの一覧を定義ファイルにまとめる。
 
