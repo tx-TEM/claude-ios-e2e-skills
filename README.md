@@ -125,6 +125,8 @@ python3 ~/.claude/skills/sim-test-report/scripts/run_flows.py \
 
 撮影したスクリーンショットとダンプを見て、結果を記録する。渡すのは定義ファイルのパスだけで、確認項目も期待も証跡もそこに入っている。
 
+項目ごとに観測した事実（`desc`）と OK / NG（`result`）を書く。期待を訂正したときや、画像以外を根拠にしたときは、その項目の注記（`note`）に残す。
+
 ### 6. レポートを組む（`build_report.py`）
 
 ```bash
@@ -132,6 +134,8 @@ python3 ~/.claude/skills/sim-test-report/scripts/build_report.py <出力先>/man
 ```
 
 画像を base64 で埋め込んだ単一HTMLと、それを1枚に描画したPNGが出る。
+
+項目ごとのカードには、レビューで合意した期待と、観測した結果が並び、その下に証跡が続く。レポートだけを見た人にも、何を期待して OK / NG にしたのかが読める。
 
 ![動作確認レポートの先頭部分](docs/report-example.png)
 

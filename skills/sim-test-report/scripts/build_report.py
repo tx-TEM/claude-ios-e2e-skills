@@ -18,21 +18,38 @@
         {"src": "shots/iphone_01_list_favorite_button.png", "label": "iPhone"},
         {"src": "shots/ipad_01_list_favorite_button.png", "label": "iPad"}
       ],
+      "expect": "各セルの右端に星アイコンのボタンが出る",
       "desc": "アイテム一覧画面。各セルの右端に星アイコンのボタンが表示される。",
+      "note": "",
       "result": "OK"
     }
   ],
-  "footer": "補足事項（画面で確認できなかった項目、作成したテストデータなど）",
+  "footer": "実行全体の補足（確認していない項目、一時コード、作成したテストデータなど）",
   "output": "verification_report.html"
 }
 
+- meta の各行は「ラベル: 値」で書くと、ヘッダでラベルと値に分けて並ぶ。1行に「／」で
+  区切って複数書いてもよい。コロンの無い行はそのまま1項目になる
+- **「実施日」だけは件数の行の右端に出す。** 他の項目（ブランチ、確認環境）は何で確かめたかで、
+  いつの結果かはそれと性格が違う。他の項目は件数の行の下に1行ずつ並ぶ
 - 1セクションに複数の画像を並べられる。同じ確認項目をiPhoneとiPadで撮った場合など
 - images の要素は {"src": ..., "label": ...} か、ラベル不要なら文字列だけでもよい
 - 画像が1枚なら "image": "shots/01_foo.png" と書いてもよい（images 1件と等価）
 - 複数端末を撮った項目は、全ての端末で確認できたときだけ result を "OK" にする
 - **result は省略できず、`PENDING` や `RETAKE` のままでも止まる。** title が空のときも止まる（骨組みのまま生成しようとしている）
+- カードは「期待 → 結果 → 証跡 → 注記」の順。**2つを続けて証跡の上に置くのは、
+  OK の根拠をその場で読めるようにするため。** 結果の帯は OK / NG と同じ色にする。 desc は観測した事実なので、それだけでは
+  何を期待していたかが分からない。枚数でレイアウトは変えない。どの欄も省略でき、
+  無い欄は行ごと出さない
+    expect  期待（レビューで合意したもの）
+    desc    結果（観測した事実）
+    note    その項目だけの但し書き（期待の訂正、証跡の読み方の注意）
+- **機械判定（checked）は出さない。** 撮影のフローが何を待ったかは作る側の話で、
+  読む側は全項目で画像と判定を見る。確認として弱い項目は手順0のレビューで扱う
+- **項目ごとの話はカードに書き、footer は実行全体の話だけにする。** footer に項目番号つきで
+  書くと、読む側がカードと行き来して突き合わせることになる
 - sections には他の欄を持たせてよい。**知らない欄は無視する** — このマニフェストは
-  手順0で作って工程ごとに埋めていくので、expect / screen / checked / flow / dump が載っている
+  手順0で作って工程ごとに埋めていくので、screen / flow / dump なども載っている
 - src はマニフェストからの相対パスまたは絶対パス
 - 画像は sips があれば --width（デフォルト750px）に縮小してから埋め込む
 - output 省略時は manifest と同じディレクトリに verification_report.html を出力
@@ -137,11 +154,34 @@ def section_images(section: dict, base_dir: pathlib.Path) -> list[tuple[pathlib.
     return items
 
 
+def meta_items(meta: list[str]) -> list[tuple[str, str]]:
+    """meta の行を (ラベル, 値) にする。「／」で区切った行は複数の項目に分ける。"""
+    items = []
+    for line in meta:
+        for part in re.split(r"\s*／\s*", line.strip()):
+            m = re.match(r"([^:：]+?)\s*[:：]\s*(.+)", part)
+            items.append((m.group(1), m.group(2)) if m else ("", part))
+    return [(k, v) for k, v in items if v]
+
+
+def section_rows(section: dict) -> tuple[list[tuple[str, str]], str]:
+    """証跡の上に出す期待と結果、下に出す注記。値の無いものは出さない。
+
+    **2つを続けて証跡の上に出す。** 何を期待し何が起きたかを突き合わせてから
+    画像を見る。枚数でレイアウトを変えないので、1枚でも複数端末でも同じ順に並ぶ。
+    """
+    top = [(label, section[key])
+           for label, key in (("期待", "expect"), ("結果", "desc"))
+           if (section.get(key) or "").strip()]
+    return top, (section.get("note") or "").strip()
+
+
 def build(manifest_path: pathlib.Path, width: int) -> pathlib.Path:
     manifest = json.loads(manifest_path.read_text())
     base_dir = manifest_path.parent
 
     cards = ""
+    counts = {"OK": 0, "NG": 0}
     for i, section in enumerate(manifest["sections"], start=1):
         # **既定を OK にしない。** このマニフェストは工程ごとに埋めていくので、
         # 判定を書き忘れた項目が黙って OK で出ると、確かめていないものを
@@ -159,21 +199,39 @@ def build(manifest_path: pathlib.Path, width: int) -> pathlib.Path:
             shots += (f'<figure>{caption}<img src="data:image/png;base64,'
                       f'{load_image_b64(path, width)}" alt="{html.escape(label) or f"screenshot {i}"}" /></figure>')
         multi = " multi" if len(section_images(section, base_dir)) > 1 else ""
+        top, note = section_rows(section)
+        # 期待と結果は別の帯にする。1つの枠に並べると、どこまでが期待か読み分けにくい
+        expect_html = "".join(
+            f'<div class="block {"expect" if label == "期待" else "outcome"}">'
+            f'<span>{label}</span><p>{html.escape(value)}</p></div>'
+            for label, value in top)
+        rows_html = (f'<div class="note"><span>注記</span><p>{html.escape(note)}</p></div>'
+                     if note else "")
         result = section["result"]
-        result_class = "result" if result == "OK" else "result ng"
-        mark = "✓" if result == "OK" else "✗"
+        ok = result == "OK"
+        counts["OK" if ok else "NG"] += 1
         cards += f'''
-    <section class="card">
-      <h2><span class="badge">{i}</span>{html.escape(section["title"])}<span class="{result_class}">{mark} {html.escape(result)}</span></h2>
-      <div class="body">
-        <div class="shots{multi}">{shots}</div>
-        <p>{html.escape(section.get("desc") or "")}</p>
-      </div>
+    <section class="card{"" if ok else " ng"}">
+      <h2><span class="badge">{i}</span><span class="title">{html.escape(section["title"])}</span><span class="result">{"✓" if ok else "✗"} {html.escape(result)}</span></h2>
+      {expect_html}
+      <div class="shots{multi}">{shots}</div>
+      {rows_html}
     </section>'''
 
-    meta_lines = "".join(f"<p>{html.escape(m)}</p>" for m in manifest.get("meta", []))
+    items = meta_items(manifest.get("meta", []))
+    dates = [v for k, v in items if k == "実施日"]
+    meta_lines = "".join(
+        f'<p>{f"<span>{html.escape(k)}</span>" if k else ""}{html.escape(v)}</p>'
+        for k, v in items if k != "実施日")
+    meta_lines = f'<div class="meta">{meta_lines}</div>' if meta_lines else ""
+    summary = (f'<div class="summary"><span class="ok">OK {counts["OK"]}</span>'
+               f'<span class="ng">NG {counts["NG"]}</span>'
+               f'<span class="all">全 {counts["OK"] + counts["NG"]} 項目</span>'
+               + "".join(f'<span class="date">実施日 {html.escape(d)}</span>' for d in dates)
+               + '</div>')
     footer = manifest.get("footer", "")
-    footer_html = f"<footer>{html.escape(footer)}</footer>" if footer else ""
+    footer_html = (f'<footer class="card"><h2>補足</h2><p>{html.escape(footer)}</p></footer>'
+                   if footer else "")
 
     doc = f'''<!DOCTYPE html>
 <html lang="ja">
@@ -182,34 +240,66 @@ def build(manifest_path: pathlib.Path, width: int) -> pathlib.Path:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(manifest["title"])}</title>
 <style>
-  :root {{ color-scheme: light dark; }}
-  body {{ font-family: -apple-system, "Hiragino Sans", sans-serif; margin: 0; padding: 24px; background: #f5f6f7; color: #222; line-height: 1.7; }}
-  @media (prefers-color-scheme: dark) {{ body {{ background: #1c1e21; color: #e4e6e8; }} .card {{ background: #26282c !important; }} header p, .body p {{ color: #b6bac0 !important; }} .shots figcaption {{ color: #9aa0a6 !important; }} }}
+  :root {{
+    color-scheme: light dark;
+    --bg: #f4f5f7; --card: #fff; --text: #1f2328; --sub: #59636e; --faint: #8c959f;
+    --line: #e3e6ea; --ok: #1a7f37; --ok-bg: #dafbe1; --ng: #cf222e; --ng-bg: #ffebe9;
+    --expect-bg: #f0f4fa; --expect-line: #6e8fb8; --note-bg: #fff8c5; --badge: #57606a;
+  }}
+  @media (prefers-color-scheme: dark) {{ :root {{
+    --bg: #16181b; --card: #22252a; --text: #e6e8eb; --sub: #aab1b9; --faint: #7d858f;
+    --line: #33373d; --ok: #4ac26b; --ok-bg: #12311d; --ng: #ff6b6b; --ng-bg: #3d1618;
+    --expect-bg: #1c2633; --expect-line: #6e8fb8; --note-bg: #3a3212; --badge: #6e7781;
+  }} }}
+  body {{ font-family: -apple-system, "Hiragino Sans", sans-serif; margin: 0; padding: 32px 24px; background: var(--bg); color: var(--text); line-height: 1.7; }}
   .wrap {{ max-width: 880px; margin: 0 auto; }}
-  header h1 {{ font-size: 22px; margin: 0 0 4px; }}
-  header p {{ margin: 2px 0; color: #555; font-size: 13px; }}
-  .card {{ background: #fff; border-radius: 12px; padding: 20px 24px; margin-top: 20px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }}
-  .card h2 {{ font-size: 16px; margin: 0 0 12px; display: flex; align-items: center; gap: 10px; }}
-  .badge {{ background: #2f9e63; color: #fff; border-radius: 50%; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; flex: none; }}
-  .result {{ margin-left: auto; color: #2f9e63; font-size: 14px; flex: none; }}
-  .result.ng {{ color: #d64545; }}
-  .body {{ display: block; }}
-  .shots {{ display: flex; gap: 12px; flex-wrap: wrap; margin: 0 0 14px; }}
+  header h1 {{ font-size: 22px; line-height: 1.4; margin: 0 0 8px; }}
+  .meta {{ margin: 10px 0 0; font-size: 13px; color: var(--sub); }}
+  .meta p {{ margin: 0; }}
+  .meta span {{ color: var(--faint); margin-right: 10px; }}
+  .summary {{ display: flex; gap: 8px; margin-top: 14px; font-size: 13px; font-weight: 600; }}
+  .summary span {{ padding: 3px 12px; border-radius: 999px; }}
+  .summary .ok {{ color: var(--ok); background: var(--ok-bg); }}
+  .summary .ng {{ color: var(--ng); background: var(--ng-bg); }}
+  .summary .all {{ color: var(--sub); background: var(--card); border: 1px solid var(--line); }}
+  .summary {{ align-items: center; flex-wrap: wrap; }}
+  .summary .date {{ margin-left: auto; padding: 0; color: var(--sub); font-weight: 400; }}
+  .card {{ background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px 24px; margin-top: 16px; }}
+  .card.ng {{ border-left: 4px solid var(--ng); }}
+  .card h2 {{ font-size: 16px; line-height: 1.5; margin: 0; display: flex; align-items: flex-start; gap: 10px; }}
+  .card h2 .title {{ flex: 1; padding-top: 1px; }}
+  .badge {{ background: var(--badge); color: #fff; border-radius: 50%; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; flex: none; }}
+  .result {{ flex: none; font-size: 13px; font-weight: 700; padding: 2px 12px; border-radius: 999px; color: var(--ok); background: var(--ok-bg); }}
+  .card.ng .result {{ color: var(--ng); background: var(--ng-bg); }}
+  .block {{ margin: 12px 0 0; padding: 8px 14px 10px; border-left: 3px solid; border-radius: 4px; font-size: 14px; }}
+  .block span {{ display: block; font-size: 12px; font-weight: 700; margin-bottom: 2px; }}
+  .block p {{ margin: 0; white-space: pre-wrap; }}
+  .block.expect {{ background: var(--expect-bg); border-color: var(--expect-line); }}
+  .block.expect span {{ color: var(--expect-line); }}
+  .block.outcome {{ background: var(--ok-bg); border-color: var(--ok); }}
+  .block.outcome span {{ color: var(--ok); }}
+  .card.ng .block.outcome {{ background: var(--ng-bg); border-color: var(--ng); }}
+  .card.ng .block.outcome span {{ color: var(--ng); }}
+  .shots {{ display: flex; gap: 12px; flex-wrap: wrap; margin: 16px 0 0; }}
   .shots figure {{ margin: 0; }}
-  .shots img {{ width: 400px; max-width: 100%; border-radius: 10px; border: 1px solid rgba(128,128,128,.35); display: block; }}
-  /* 複数端末を並べたときはカード幅を分け合う。1枚だけのときは伸ばさない */
+  .shots img {{ width: 360px; max-width: 100%; border-radius: 10px; border: 1px solid var(--line); display: block; }}
+  /* 複数端末を並べたときはカード幅を分け合う */
   .shots.multi figure {{ flex: 1 1 0; min-width: 0; }}
   .shots.multi img {{ width: 100%; }}
-  .shots figcaption {{ margin-bottom: 6px; font-size: 12px; color: #777; text-align: center; }}
-  .body p {{ margin: 0; font-size: 14px; color: #444; white-space: pre-wrap; }}
-  @media (max-width: 640px) {{ .shots {{ flex-direction: column; }} .shots.multi img {{ width: 100%; }} }}
-  footer {{ margin-top: 24px; font-size: 12px; color: #888; white-space: pre-wrap; }}
+  .shots figcaption {{ margin-bottom: 6px; font-size: 12px; color: var(--faint); text-align: center; }}
+  .note {{ display: flex; gap: 12px; margin: 16px 0 0; padding: 8px 14px; background: var(--note-bg); border-radius: 4px; font-size: 14px; }}
+  .note span {{ font-weight: 700; flex: none; font-size: 13px; padding-top: 1px; }}
+  .note p {{ margin: 0; white-space: pre-wrap; }}
+  footer.card h2 {{ font-size: 15px; margin-bottom: 8px; }}
+  footer.card p {{ margin: 0; font-size: 13px; color: var(--sub); white-space: pre-wrap; }}
+  @media (max-width: 640px) {{ body {{ padding: 20px 16px; }} .card {{ padding: 16px; }} .shots {{ flex-direction: column; }} }}
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
     <h1>{html.escape(manifest["title"])}</h1>
+    {summary}
     {meta_lines}
   </header>
   {cards}
@@ -258,6 +348,9 @@ def render_png(html_path: pathlib.Path) -> pathlib.Path | None:
     if not pathlib.Path(CHROME).exists():
         print("Chromeが見つからないためPNG生成をスキップしました。", file=sys.stderr)
         return None
+    # file:// の後ろは絶対パスでないと読めない。マニフェストを相対パスで渡すと
+    # HTML の出力先も相対になり、Chrome はエラーページを撮ってそのまま PNG にする
+    html_path = html_path.resolve()
     height = measure_page_height(html_path)
     png_path = html_path.with_suffix(".png")
     for scale in PNG_SCALES:
