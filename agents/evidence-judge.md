@@ -24,13 +24,13 @@ tools: Read, Bash
 
 ```json
 {
-  "name": "iphone_02_debounce_filtered",
+  "name": "iphone_02",
   "title": "キーワードを打つと入力が止まってから絞り込みが走る",
-  "expect": "「夏目」を打って 300ms 待つと 6 件に絞り込まれ、先頭行が「温情の裕かな夏目さん」（内田 魯庵）になる",
+  "expect": "入力欄に出ている語を、一覧に残っている行がすべて作品名に含む",
   "checked": "browse.searchField",
-  "flow": "02_iphone_02_debounce_filtered.yaml",
-  "images": [{ "src": "shots/iphone_02_debounce_filtered.png" }],
-  "dump": "shots/iphone_02_debounce_filtered.txt",
+  "flow": "iphone_02.yaml",
+  "images": [{ "src": "shots/iphone_02.png" }],
+  "dump": "shots/iphone_02.txt",
   "desc": "",
   "result": "PENDING"
 }
@@ -63,25 +63,24 @@ cd <出力先>/shots && md5 -q *.png | sort | uniq -d
 
 # 2. ダンプで裏を取る
 
-| | トークン | 読み取り |
-|---|---|---|
-| 証跡 `.png` | 約2,500 | **見た目はこれでしか分からない。** 文言は取り違えが起きる |
-| ダンプ `.txt` | 約1,000 | 文言・要素の状態・並び順は**確実** |
+| | 読み取り |
+|---|---|
+| 証跡 `.png` | **見た目はこれでしか分からない。** 文言は取り違えが起きる |
+| ダンプ `.txt` | 文言・要素の状態・並び順は**確実** |
 
 **文言・件数・並び順・要素の状態は、ダンプの行で確定させる。** 画像から読み取った文字を `desc` に書かない。「6件に絞られた」と書くなら、ダンプに行が6つあることで裏を取る。
 
 **`cat` でまとめて読める。** 1件ずつ開くと往復が増えるだけ。
 
 ```bash
-cd <出力先>/shots && for f in iphone_01_… iphone_02_… iphone_03_…; do
+cd <出力先>/shots && for f in iphone_01 iphone_02 iphone_03; do
   echo "===== $f"; cat "$f.txt"; done
 ```
 
-落とし穴が3つある。
+落とし穴が2つある。
 
 - **「ダンプに無い＝画面に無い」と判断しない。** iOS は遅延描画するので、画面から遠い要素はツリーに存在しない
 - **重なりはダンプから判定できない。** 画面内 `○` でもモーダルの下にあることがある
-- **ダンプが無い項目がある。** 探索で撮ったもの（`flow` を持たないセクション）。そちらは画像だけが手がかり
 
 **画像とダンプが食い違ったら `RETAKE`。** `run_flows.py` は撮影とダンプを別のコマンドで順に叩くので、その間に画面が変われば食い違う。どちらが正しいかは決められない。
 

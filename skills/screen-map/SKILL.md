@@ -288,7 +288,7 @@ python3 ~/.claude/skills/sim-test-report/scripts/maestrod.py inspect <UDID> <名
 **最後に `route.py check` を通す。** 実測はIDが出るかを見るもので、こちらは**マップが経路として成立しているか**を見る。到達できない画面、遷移先のファイルが無い `to`、`anchor` の無い画面がここで出る。
 
 ```bash
-python3 ~/.claude/skills/screen-map/scripts/route.py check
+python3 ~/.claude/skills/sim-test-report/scripts/route.py check
 ```
 
 **鮮度も出る。** `screens/<id>.yaml` より新しく `files` が触られていたら、その画面のマップは実装とずれている可能性がある（判定は git のコミット日時。mtime は clone や checkout で揃うので使わない）。リファクタやコメントの修正でも出るので不整合ではなく警告だが、**`files` が薄いと検出自体が効かない。**
@@ -324,42 +324,28 @@ python3 ~/.claude/skills/sim-test-report/scripts/maestrod.py stop
 
 ## 経路になる
 
-マップは `to` で辺を持っているので、起点からの経路はグラフの最短路として機械的に組める。`scripts/route.py` がそれをやる。**このスキルの成果物がそのまま sim-test-report の入力になるのは、ここを通してのこと。**
+マップは `to` で辺を持っているので、起点からの経路はグラフの最短路として機械的に組める。sim-test-report の `scripts/route.py` がそれをやる。**このスキルの成果物がそのまま sim-test-report の入力になるのは、ここを通してのこと。**
 
 ```bash
-R=~/.claude/skills/screen-map/scripts/route.py
+R=~/.claude/skills/sim-test-report/scripts/route.py
 
 python3 $R screens                    # 画面の一覧（呼び名・できること）
 python3 $R which <パス...>            # 変更したファイルから対象画面を引く
-python3 $R path <セグメント...>       # 人が読む経路
-python3 $R flow <セグメント...> --app <bundle id> --out <パス>   # Maestro のフロー
+python3 $R path <画面id>...           # そこまでの経路を人が読む形で出す
 python3 $R check                      # 自己テスト（到達可否・切れている箇所・鮮度）
 ```
 
-`flow --out` は、**走るフローをファイルに書き、標準出力には読める経路を出す**。レビューに見せる文と実際に走るものが1回の実行から出るので食い違わず、フローの中身がモデルの文脈を通らない。
-
-`--out-dir <dir>` を付けると、**`--shot` ごとにフローを分けて**書く。1本＝1枚になるので、走らせる側が証跡と同名のダンプを取れる（ダンプはフローの途中では取れないため）。2本目以降は起動し直さず続きから始まる。
-
-`--from <画面id>` は、**いまその画面に居る前提で続きのフローを出す**（`stopApp` を付けない）。`--out-dir` が内部で使っているのと同じ仕組みで、手で切りたいときに使う。
-
-経路は**セグメントを並べて組む**。`--goto <画面id>`（いま居る画面からそこまで計算して繋ぐ）、`--do <操作id>`（その場で操作する）、`--shot <パス>`（撮る）の3つで、**並び順がそのまま実行順**。
-
-```bash
-python3 $R flow --app <bundle id> \
-  --goto browse --do text:browse.searchField --input browse.searchField=牛乳 \
-  --goto detail --shot <出力先>/iphone_05_detail \
-  --goto browse
-```
+確認項目ごとのフローは sim-test-report の `manifest.py` が書く（中で route.py の経路計算を使う）。項目は経路を持たず、前の項目が終わった画面から項目の起点までは、マップから計算して繋ぐ。
 
 書く側として効いてくるのは次の点。
 
 - **`anchor` が到達判定になる。** 各ホップの後に `assertVisible` として積まれる。`anchor` が無い画面は経路に使えても「着いた」を確かめられない
 - **`to` の先はファイルとして実在する必要がある。** 無ければ `check` が不整合として出す。`stub` を置くのはこのため
-- **`kind: back` / `dismiss` は `--goto` の復路になる。** 往路の探索からは外れるが、**深く入った先から戻る経路はこれで組む**。戻る操作を持たない画面は、そこから先へ進むしかなくなる（`route.py` が「戻る操作がマップに無いので向かえない」と返す）ので、push で入る画面には戻る操作を書く
+- **`kind: back` / `dismiss` は経路計算の復路になる。** 往路の探索からは外れるが、**深く入った先から戻る経路はこれで組む**。戻る操作を持たない画面は、そこから先へ進むしかなくなる（`route.py` が「戻る操作がマップに無いので向かえない」と返す）ので、push で入る画面には戻る操作を書く
 - **`kind: back` の `to` は、複数の入口を持つ画面では嘘になる。** どこから来たかで戻り先が変わるため。`route.py` は歩いた履歴の方を採り、食い違いを補足として出す。**宣言と履歴が食い違う画面は、マップを読む人にも同じ罠になる**ので、補足が出たら `to` を見直す
 - **`in_tree: false` はそこで経路が切れる。** その先の画面は到達不能として `check` に出る
 - **`select.index` はそのまま `tapOn` の `index` になる。** `capture` はフローには積めない（Maestro の変数は1つしか無い）ので、何を選んだかは着いた先のダンプと証跡で拾う。**証跡を読んで判定するのは呼び出し元の仕事**なので、マップ側に「突き合わせるために読む要素」のIDを足す必要はない
-- **`text` の値はマップが持たない。** 呼ぶ側が `--input` で渡す。何を打つかを決めるのはテストケース
+- **`text` の値はマップが持たない。** 呼ぶ側が plan の `do` に `"input"` か `"runtime": true` を添えて渡す。何を打つかを決めるのはテストケース
 - **`result` はフローのコメントになる。** 組んだフローはそのままレビューに出るので、`result` が「何が起きるか」を書けていないと、人が導線を確かめられない
 
 **経路が組めないことは、マップの穴がそのまま出たもの。** `route.py` は推測して繋がない。埋めるのはこのスキルの仕事で、次にこのアプリを触るときの対象リストになる。

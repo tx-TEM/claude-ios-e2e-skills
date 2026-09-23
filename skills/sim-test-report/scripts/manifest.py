@@ -1,111 +1,151 @@
 #!/usr/bin/env python3
-"""route.py が出したフローの一覧から manifest.json の骨組みを作る。
+"""test-case-builder の plan.json から、フローを書いて manifest.json を作る。
 
-  manifest.py <フローのディレクトリ> <出力先ディレクトリ>
-              [--title <題>] [--meta <行>]... [--explore <証跡の名前>]...
+  manifest.py <plan.json> <出力先ディレクトリ> [--device <端末名>] [--map <アプリのリポジトリ>]
 
-`route.py --out-dir` が置いた `index.json` を読み、証跡1枚＝1セクションの manifest を書く。
-**一覧から導ける欄だけ埋め、判断が要る欄（`title` / `expect`）は空で残す。**
-呼ぶ側（test-case-builder の項目）がそこを書く。
+アプリのリポジトリで叩く。画面マップ（`screen-map/`）はカレントから上へ探す。
+別の場所で叩くときだけ `--map` を付ける。
 
-`route.py flow --out-dir` は1回の実行ぶんのフロー一式を書くので、**マニフェストも1つ。**
-ディレクトリを渡せばその中の `index.json` を読む。
+証跡は `<出力先>/shots/` に撮る。名前は項目の並び順から振る（`--device iphone` なら
+`iphone_01`, `iphone_02`, …。explore は items の続きの番号）。どの端末で撮るかも、
+どこに出すかも撮る側の設定で、テストケース（plan）は持たない。
+
+1. plan の項目ごとに Maestro のフローを、plan.json と同じディレクトリに書く
+   （route.py の `write_flows()`）。経路が組めなければ理由を出して止まる
+   （manifest は書かない）。組めたら読める経路（レビューの2段目になる操作列）を出す
+2. 返ってきた項目ごとの行から manifest.json を組む。証跡1枚＝1セクション
+
+plan.json の形。**項目1つ＝ from から do を順に叩いて、1枚撮る。**
+
+    {"app": "<bundle id>",
+     "clear_state": false,
+     "items": [
+       {"from": "browse"},
+       {"from": "browse",
+        "do": [{"op": "text:browse.searchField", "runtime": true}]},
+       {"from": "browse",
+        "do": [{"op": "text:browse.searchField", "input": "zzzz"}]},
+       {"from": "browse", "fresh": true,
+        "do": ["tap:browse.bookRow.*"]}]}
+  from      その項目の操作を始める画面。**項目は経路を持たない** —
+            前の項目が終わった画面から from までは、ここで計算して
+            繋ぐ（すでに居れば何もしない）
+  do        確かめる操作。`tap:<id>` `scroll:down` のように種類を頭に
+            付けて指せる（scroll は必須）。**並び順がそのまま実行順。**
+            遷移する操作も書いてよく、行き先はマップの `to` で追う。
+            着いた状態を見るだけの項目は空。入れる値の要る操作は
+            {"op": 操作id, …} にして、次のどちらかを添える
+              "runtime": true  **値を実行時に決める。** フローには値を
+                   焼き込まず、`env` の未定のまま残す。着いた画面を
+                   見ないと決まらないときに（打つ文字、どの行を叩くか）。
+                   焼き込むと、データが変わっても古い値で黙って走る
+              "input": 値      データに依らない値（一致しない語など）
+            from までの経路の途中で叩く操作は位置で選ぶ。どれを選ぶかを
+            気にするなら、それは確かめる操作なので do に書く
+  fresh     その項目はアプリを起動し直した直後から始める。**項目の前提で
+            あって、フローの切り方ではない** — 前の項目の状態（絞り込み、
+            変えたデータ）が残ると前提が崩れるときだけ付ける
+  title / expect  確認項目と期待。そのままマニフェストに入る
+  explore   経路が組めなかった項目（from / title / expect / reason）。
+            フローを持たず、末尾にセクションとして並ぶ
+
+**1本で叩く。** フローとマニフェストを別々に作ると、plan を直したときに片方だけ
+作り直す余地ができ、どちらの項目がどの証跡か決まらなくなる。
+
+**写さない。** 証跡の名前・撮った画面・機械判定のID・フローのファイル名は経路を計算した
+結果から、`title` / `expect` / `from` は plan から、どちらも write_flows() が1行にして返す。
+
+**ヘッダの題と meta（ブランチ・確認環境・実施日）は持たない。** レポートを組むときに
+`build_report.py` へ直に渡す。確認環境は撮影する端末を決めるまで決まらない。
 
 **`launch` をそのまま持ってくる。** そのフローが自分でアプリを起動するかどうかで、
-**鎖の切れ目**を表す（1本目と `--restart` の直後が `true`）。`run_flows.py` は
+**鎖の切れ目**を表す（1本目と plan で `fresh` を付けた項目が `true`）。`run_flows.py` は
 落ちたときにどこまで諦めるかをこれで決め、レビューと判定は**そこでアプリが
 起動し直ることを知らないと証跡を読み違える**（前の項目の状態が続いているのか、
 まっさらなのか）。
 
-**`inputs` は実行時に決める値。** `route.py --runtime` を使った項目に付く。打つ文字
+**`inputs` は実行時に決める値。** plan で `runtime` を書いた項目に付く。打つ文字
 にも、どの行を叩くかにも付く。値が空のうちはフローを走らせられない（`run_flows.py`
 がそこで止まる）。着いた画面を見ないと決まらないものなので、埋めるのは撮影する側。
 
-`--explore` は**経路が組めなかった項目**。一覧に無いので、名前だけ渡して
-セクションを足す。`flow` を持たないので `run_flows.py` は飛ばし、sim-driver が
-探索で撮る。**末尾に並ぶ** — 機械判定の付かない項目がまとまる。
+plan の `explore` は**経路が組めなかった項目**。`flow` を持たないので `run_flows.py` は
+飛ばし、sim-driver が探索で撮る。**末尾に並ぶ** — 機械判定の付かない項目がまとまる。
 
 なぜスクリプトなのか。一覧の中身（証跡の名前、画面、機械判定のID、フローの
 ファイル名）は route.py が既に計算したもので、**手で写すとタイポの余地ができる。**
-`--shot` の名前と manifest の `src` がずれても、走らせるまで誰も気づかない。
+撮影の名前と manifest の `src` がずれても、走らせるまで誰も気づかない。
 
 `desc` / `result` / `note` は手順2で埋める。`result` を `PENDING` で置くのは、
 build_report.py が result の無いセクションを拒むため（判定していない項目が
 黙って OK で出ないように）。
 
-**同じ場所に既にマニフェストがあれば、人が書いた欄を引き継ぐ。** レビューで
-導線が変わればフローを作り直すことになり、そのたびに title と expect が
-消えるのでは使えない。引き継ぎのキーは証跡の名前。
+**同じ場所に既にマニフェストがあれば、判定の欄（`desc` / `note` / `result`）を
+引き継ぐ。** 引き継ぎのキーは証跡の名前。`title` / `expect` は plan が正で、
+直すなら plan を直して叩き直す。
 """
 import json
 import sys
 from pathlib import Path
 
-
-def read_index(src):
-    """`route.py --out-dir` の index.json を読む。ディレクトリでも中を見る。"""
-    src = Path(src)
-    if src.is_dir():
-        src = src / "index.json"
-    if not src.is_file():
-        sys.exit(f"フローの一覧が無い: {src}")
-    return json.loads(src.read_text(encoding="utf-8"))
+import route   # 同じディレクトリ。経路の計算とフローの書き出し
 
 
 def main():
     argv = sys.argv[1:]
+    if "--help" in argv or "-h" in argv:
+        print(__doc__)
+        sys.exit(0)
     if len(argv) < 2:
         sys.exit(__doc__)
-    index_path, out_dir = argv[0], argv[1]
-    title, meta, explore = "動作確認レポート", [], []
+    plan_path, out_dir = Path(argv[0]).expanduser(), argv[1]
+    mapdir, device = None, None
     i = 2
     while i < len(argv):
-        if argv[i] == "--title":
-            title = argv[i + 1]; i += 2
-        elif argv[i] == "--meta":
-            meta.append(argv[i + 1]); i += 2
-        elif argv[i] == "--explore":
-            explore.append(argv[i + 1]); i += 2
+        if argv[i] == "--map":
+            mapdir = argv[i + 1]; i += 2
+        elif argv[i] == "--device":
+            device = argv[i + 1]; i += 2
         else:
-            sys.exit("知らない引数: " + argv[i])
+            sys.exit("知らない引数: " + argv[i] + "（題と meta は build_report.py に渡す）")
 
-    entries = read_index(index_path)
+    plan = route.load_plan(plan_path)
+    items, explore = plan.get("items") or [], plan.get("explore") or []
+
+    # 経路が組めた項目が1つも無ければフローは要らない（全部探索で撮る）
+    shots = Path(out_dir) / "shots"
+    rows = route.write_flows(plan, plan_path.parent, shots, device, mapdir) if items else []
+    if items:
+        print()
+
     out = Path(out_dir) / "manifest.json"
 
-    # 人が書いた欄は、作り直しても消さない
-    kept = {}
+    # 判定の欄は、作り直しても消さない。footer など判定側が足した欄も残す
+    kept, top = {}, {}
     if out.exists():
         try:
             old = json.loads(out.read_text(encoding="utf-8"))
             kept = {sec.get("name"): sec for sec in old.get("sections", []) if sec.get("name")}
-            title = old.get("title", title) if title == "動作確認レポート" else title
-            meta = meta or old.get("meta", [])
+            top = {k: v for k, v in old.items() if k not in ("sections", "title", "meta")}
         except Exception:
             pass
 
-    # 一覧のぶん（フローあり）＋ 探索のぶん。探索は末尾に積む
-    entries = list(entries) + [{"name": n} for n in explore]
+    # フローのある行 ＋ 探索のぶん。探索は末尾に積む
+    entries = list(rows) + [{"name": route.shot_name(len(items) + n, device),
+                             "title": it.get("title", ""), "from": it.get("from"),
+                             "expect": it.get("expect", "")}
+                            for n, it in enumerate(explore, 1)]
 
-    # route.py はフローの中でしか重複を見られない。--explore と衝突する余地が
-    # 残るのでここでも弾く。同名だと後から撮ったほうが上書きし、
-    # 2つの項目が同じ画像を指したまま通る。
-    seen = {}
-    for e in entries:
-        if e["name"] in seen:
-            sys.exit(f"証跡の名前が重なっている: {e['name']}"
-                     f"（{seen[e['name']]} と {e.get('flow') or '探索'}）")
-        seen[e["name"]] = e.get("flow") or "探索"
 
-    sections, carried = [], 0
+    sections = []
     for e in entries:
         name = e["name"]
         prev = kept.get(name, {})
-        carried += 1 if (prev.get("title") or prev.get("expect")) else 0
         sections.append({
             "name": name,                      # 引き継ぎと突き合わせのキー
-            "title": prev.get("title", ""),    # 確認項目。一覧からは導けない
-            "screen": e.get("screen"),
-            "expect": prev.get("expect", ""),  # 渡したデータで何が起きるか。同上
+            "title": e.get("title", ""),       # 確認項目。plan が正
+            "from": e.get("from"),             # 操作を始める画面（plan）
+            "screen": e.get("screen"),         # 撮った画面（経路の計算）。探索は撮るまで決まらない
+            "expect": e.get("expect", ""),     # 証跡の中で何を確かめるか。plan が正
             "checked": e.get("checked"),       # None なら証跡だけが根拠
             "launch": e.get("launch"),         # true なら、ここでアプリを起動し直す
             "inputs": e.get("inputs") or {},    # 空の値があるうちは走らせられない
@@ -118,16 +158,14 @@ def main():
             "result": prev.get("result", "PENDING"),
         })
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps({"title": title, "meta": meta, "sections": sections},
+    out.write_text(json.dumps(dict(top, sections=sections),
                               ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     blank = sum(1 for s in sections if not s["flow"])
-    empty = sum(1 for s in sections if not s["title"] or not s["expect"])
+    empty = [s["name"] for s in sections if not s["title"] or not s["expect"]]
     print(out)
     print(f"  {len(sections)}セクション。")
-    if carried:
-        print(f"  {carried}件は前のマニフェストから title / expect を引き継いだ")
     if empty:
-        print(f"  {empty}件は title か expect が空。埋める")
+        print(f"  title か expect が空: {', '.join(empty)}。plan.json を埋めて叩き直す")
     nochk = sum(1 for s in sections if s["flow"] and not s["checked"])
     if nochk:
         print(f"  {nochk}件はフローに機械判定が無い（証跡だけが根拠）")
