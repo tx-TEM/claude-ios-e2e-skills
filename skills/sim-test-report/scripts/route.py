@@ -415,6 +415,9 @@ def emit_flow(mp, steps, app, clear_state, notes=None, timeout=10000,
             if "shot" not in st and not st.get("restart")
             and st.get("runtime")]
     out = ["appId: " + app]
+    # 撮影先は端末で変わるので焼き込まない。走らせる側が端末に合わせて埋める
+    if any("shot" in st for st in steps):
+        used.insert(0, SHOTS_VAR)
     if used:
         out.append("env:")
         for v in dict.fromkeys(used):
@@ -445,7 +448,7 @@ def emit_flow(mp, steps, app, clear_state, notes=None, timeout=10000,
             relaunch(mp.start)
             continue
         if "shot" in st:
-            out.append("- takeScreenshot: " + q(st["shot"]))
+            out.append("- takeScreenshot: " + q("${" + SHOTS_VAR + "}/" + st["shot"]))
             continue
         a = st["action"]
         out.append(step_comment(mp, st))
@@ -506,7 +509,7 @@ def shot_context(mp, seg_start, seg_steps):
 
     `write_flows()` が返す行に載せるためのもの。**呼ぶ側が経路を読み直して導出せずに済ませる。**
     確かめたIDが無い（`expect` を持たない操作で終わった）なら None で、
-    その証跡は機械判定なし＝画像だけが根拠になる。
+    その証跡は自動確認なし＝画像だけが根拠になる。
     """
     at, checked = seg_start, (mp.screens.get(seg_start) or {}).get("anchor")
     for st in seg_steps:
@@ -575,7 +578,7 @@ def split_before_runtime(mp, seg_start, seg_steps):
 
 
 def emit_path(mp, steps, notes, start=None):
-    """人が読む経路。**どこが機械判定でどこが証跡頼みかを明示する。**
+    """人が読む経路。**どこに自動確認があり、どこが証跡頼みかを明示する。**
 
     フローを見せてレビューを受けるとき、いちばん知りたいのは「この確認は
     何によって裏付けられるのか」。遷移は `anchor`、遷移しない操作は `expect`
@@ -631,7 +634,7 @@ def emit_path(mp, steps, notes, start=None):
         elif a.get("expect"):
             right = "✓ {} が出ている".format(a["expect"])
         else:
-            right = "— 機械判定なし。証跡で見る"
+            right = "— 自動確認なし。証跡で見る"
         checked += right.startswith("✓")
         unchecked += right.startswith("—")
         rows.append((left, right))
@@ -641,7 +644,7 @@ def emit_path(mp, steps, notes, start=None):
         out.append(left if not right else "{}  {}".format(left.ljust(pad), right))
 
     out.append("")
-    out.append("  機械判定 {}件 / 証跡でしか見られない {}件".format(checked, unchecked))
+    out.append("  自動確認あり {}件 / 証跡だけ {}件".format(checked, unchecked))
     for n in notes:
         out.append("  補足: " + n)
     return "\n".join(out)
@@ -821,10 +824,10 @@ PLAN_KEYS = {"app", "clear_state", "items", "explore"}
 ITEM_KEYS = {"from", "do", "fresh", "title", "expect"}
 
 
-def shot_name(n, device=None):
-    """証跡の名前。項目の並び順から振る（explore は items の続きの番号）。
-    端末名は撮る側の設定で、テストケースは持たない。"""
-    return "{}_{:02d}".format(device, n) if device else "{:02d}".format(n)
+def shot_name(n):
+    """項目の名前。並び順から振る（explore は items の続きの番号）。証跡・ダンプ・
+    フローのファイル名になる。端末はディレクトリで分けるので、名前には入れない。"""
+    return "test_{:02d}".format(n)
 DO_KEYS = {"op", "runtime", "input"}
 
 
@@ -855,7 +858,10 @@ def load_plan(path):
     return plan
 
 
-def read_plan(plan, shots_dir, device=None):
+SHOTS_VAR = "SHOTS"   # 撮影先のディレクトリ。run_flows.py が端末ごとに埋める
+
+
+def read_plan(plan):
     """plan.json をセグメントの列に開く。経路の計算も検査も build() に任せる。
 
     項目1つ＝「`from` から `do` を順に叩いて、1枚撮る」。**項目は経路を持たない。**
@@ -867,13 +873,13 @@ def read_plan(plan, shots_dir, device=None):
 
     `fresh` が真の項目は、アプリを起動し直した直後から始める（その項目の前提）。
     前の項目を撮った直後で起動し直すので、前の項目の状態は引き継がない。
-    撮影のパスは `shots_dir` と、並び順から振った名前（`shot_name()`）で組む。`title` / `expect` は読まない
+    撮影は並び順から振った名前（`shot_name()`）で、置き場は `${SHOTS}` のまま残す。`title` / `expect` は読まない
     （manifest.py が読む）。`explore` も見ない — 経路が組めなかった項目で、フローを持たない。
     """
     items = plan.get("items") or []
     segments, owners = [], []   # owners: セグメントごとの項目名。エラーをどの項目か読めるように
     for n, item in enumerate(items, 1):
-        shot = shot_name(n, device)
+        shot = shot_name(n)
         unknown = set(item) - ITEM_KEYS
         if unknown:
             hint = ""
@@ -915,7 +921,7 @@ def read_plan(plan, shots_dir, device=None):
                 add("do", d["op"], runtime=True)
             else:
                 add("do", d["op"], input=d["input"])
-        add("shot", str(Path(os.path.expanduser(shots_dir)) / shot))
+        add("shot", shot)
     return segments, plan.get("app"), bool(plan.get("clear_state")), owners
 
 
@@ -932,7 +938,7 @@ def report_problems(problems, owners=None):
               "ここで推測して繋がない。", file=sys.stderr)
 
 
-def write_flows(plan, out_dir, shots_dir, device=None, mapdir=None, timeout=10000):
+def write_flows(plan, out_dir, mapdir=None, timeout=10000):
     """plan.json の項目ごとに Maestro のフローを out_dir に書き、項目ごとの行を返す。
 
     **項目（撮影）ごとに1本ずつ。** 走らせる側は順に run して inspect するだけで、
@@ -941,10 +947,13 @@ def write_flows(plan, out_dir, shots_dir, device=None, mapdir=None, timeout=1000
     終了コード 2 で終わり、何も書かない。
 
     返す行は、plan の項目の欄（`title` / `expect` / `from`）と、ここで計算した欄
-    （撮った画面・機械判定・フローのファイル名・起動し直すか・実行時に決める値）を
+    （撮った画面・自動確認のID・フローのファイル名・起動し直すか・実行時に決める値）を
     1つにしたもの。呼ぶ側が plan と突き合わせずに済むように。
+
+    **フローは端末によらず1組。** 撮影先は `${SHOTS}` のまま書き、走らせる側
+    （run_flows.py）が端末に合わせて埋める。経路も操作も端末で変わらない。
     """
-    segments, app, clear, owners = read_plan(plan, Path(shots_dir).resolve(), device)
+    segments, app, clear, owners = read_plan(plan)
     items = plan.get("items") or []
     if not segments:
         sys.exit("plan の items が空（経路が組めた項目が無いならフローは要らない）")
@@ -956,7 +965,7 @@ def write_flows(plan, out_dir, shots_dir, device=None, mapdir=None, timeout=1000
         report_problems(problems, owners)
         sys.exit(2)
 
-    by_shot = {shot_name(n, device): it for n, it in enumerate(items, 1)}
+    by_shot = {shot_name(n): it for n, it in enumerate(items, 1)}
     segs = split_at_shots(mp, steps, None)
     d = Path(out_dir)
     d.mkdir(parents=True, exist_ok=True)
@@ -982,13 +991,14 @@ def write_flows(plan, out_dir, shots_dir, device=None, mapdir=None, timeout=1000
                           if "shot" not in st and not st.get("restart") and st.get("runtime")}
         it = by_shot.get(shot, {})
         written.append({"name": shot, "title": it.get("title", ""),
-                        "from": it.get("from"), "expect": it.get("expect", ""),
+                        "from": it.get("from"), "fresh": bool(it.get("fresh")),
+                        "do": it.get("do") or [], "expect": it.get("expect", ""),
                         "screen": screen, "checked": checked, "launch": lch,
                         "inputs": runtime_inputs, "pre_flow": pre_name, "flow": name})
     print(emit_path(mp, steps, notes))
     print("\n  フロー（{}本）: {}".format(len(written), out_dir))
     for w in written:
-        print("    {}{}  →  ダンプ名 {}  機械判定 {}".format(
+        print("    {}{}  →  ダンプ名 {}  自動確認 {}".format(
             w["flow"], " ★起動し直す" if w["launch"] else "",
             w["name"], w["checked"] or "なし"))
     return written

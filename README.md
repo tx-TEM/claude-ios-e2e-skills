@@ -62,7 +62,8 @@ plan から、Maestro のフローとテストの定義ファイル（`manifest.
 
 ```bash
 python3 ~/.claude/skills/sim-test-report/scripts/manifest.py \
-  ~/.claude/skills/sim-test-report/.work/flows/<slug>/plan.json <出力先> --device iphone
+  ~/.claude/skills/sim-test-report/.work/flows/<slug>/plan.json <出力先> \
+  --device iphone=<iPhoneのUDID> --device ipad=<iPadのUDID>
 ```
 
 アプリのリポジトリで叩く（画面マップはカレントから上へ探す。別の場所なら `--map`）。中で `route.py` の経路計算を使う。plan の各項目について、前の項目が終わった画面から `from` までの経路を画面マップから計算し、`do` の操作と撮影を繋いで、項目ごとのフローとして書き出す。
@@ -80,7 +81,7 @@ env:
     visible:
       id: '^browse\.searchField$'
     timeout: 10000
-- takeScreenshot: '<出力先>/shots/iphone_02'
+- takeScreenshot: '<出力先>/shots/iphone/test_02'
 ```
 
 画面マップが無いアプリでは全項目が plan の `explore` になり、フローは書かない。マップはあっても経路が組めない項目（未マップの画面、座標が要る操作）は理由つきで返り、`explore` に移る。どちらも LLM（`sim-driver`）が画面を見ながら探索して撮る。
@@ -89,17 +90,22 @@ env:
 
 ```json
 {
-  "name": "iphone_02",
+  "name": "test_02",
   "title": "キーワード入力でデバウンス絞り込みが走る",
   "from": "browse",
   "screen": "browse",
   "expect": "入力欄に出ている語を、一覧に残っている行がすべて作品名に含む",
   "checked": "browse.searchField",
   "launch": false,
-  "inputs": { "BROWSE_SEARCHFIELD": "" },
-  "flow": "iphone_02.yaml",
-  "images": [{ "src": "shots/iphone_02.png" }],
-  "dump": "shots/iphone_02.txt",
+  "flow": "test_02.yaml",
+  "devices": {
+    "iphone": { "inputs": { "BROWSE_SEARCHFIELD": "" } },
+    "ipad":   { "inputs": { "BROWSE_SEARCHFIELD": "" } }
+  },
+  "images": [
+    { "src": "shots/iphone/test_02.png", "label": "iPhone" },
+    { "src": "shots/ipad/test_02.png", "label": "iPad" }
+  ],
   "desc": "",
   "result": "PENDING"
 }
@@ -111,12 +117,14 @@ env:
 
 ### 3. フローを走らせる（`run_flows.py`）
 
-フローを順に走らせ、証跡と同名のダンプを撮る。フローを持たない項目は LLM（`sim-driver`）が撮る。
+フローを順に走らせ、証跡と同名のダンプを撮る。1回で全端末を、1台ずつ撮り切りながら回る。フローを持たない項目は LLM（`sim-driver`）が撮る。
 
 ```bash
 python3 ~/.claude/skills/sim-test-report/scripts/run_flows.py \
-  <出力先>/manifest.json ~/.claude/skills/sim-test-report/.work/flows/<slug> <UDID>
+  <出力先>/manifest.json ~/.claude/skills/sim-test-report/.work/flows/<slug>
 ```
+
+どのシミュレーターで撮るかは、手順2でマニフェストに記録してある。
 
 ### 4. 判定を書き込む（LLM / `evidence-judge`）
 
@@ -128,10 +136,10 @@ python3 ~/.claude/skills/sim-test-report/scripts/run_flows.py \
 
 ```bash
 python3 ~/.claude/skills/sim-test-report/scripts/build_report.py <出力先>/manifest.json \
-  --title "…" --meta "確認環境: …"
+  --title "…"
 ```
 
-ヘッダの題と確認環境はここで渡す。ブランチと実施日は、アプリのリポジトリの git と組んだ日からスクリプトが出す（別の場所で叩くなら `--repo`）。どれも定義ファイルには持たせない。
+渡すのは題だけ。ブランチはアプリのリポジトリの git から（別の場所で叩くなら `--repo`）、確認環境は定義ファイルに記録した端末から、実施日は組んだ日からスクリプトが出す。
 
 画像を base64 で埋め込んだ単一HTMLと、それを1枚に描画したPNGが出る。
 

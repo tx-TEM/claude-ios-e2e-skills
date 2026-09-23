@@ -18,7 +18,7 @@ tools: Read, Grep, Glob, Bash
 - **何を確認したいか**。PR番号、ブランチ、変更の意図、画面名、機能名、観点のどれでもよい（「さがす画面を一通り」「一覧と詳細の内容が一致するか」も入力として成立する）
 - **対象アプリのリポジトリのパス**
 - **証跡の出力先ディレクトリ**（`manifest.py` の `<出力先>`。例: `~/Desktop/sim-test-report-<slug>/`。証跡はその下の `shots/` に撮る）
-- **ファイル名に使う端末名**（`iphone` / `ipad`。`manifest.py --device` に渡す）
+- **撮る端末とシミュレーターの UDID**（`iphone=<UDID>`。両方でもよい。`manifest.py --device` にそのまま渡す）
 - **対象アプリの bundle id**（plan の `app`）
 - iPad も対象にするか
 
@@ -104,7 +104,7 @@ python3 $R check    # 「実装のほうが新しい」と出た画面は特に�
 - 現在のデータでは踏めない項目（課金プラン限定、特定のアカウント状態、エラー表示）は**そう明記する**。一時コードを仕込むのは呼び出し元の仕事なので、ここでは「一時コードが要る」とだけ書く
 - 複数端末を見る場合も**端末ごとに項目を分けない。** 同じ項目を各端末で撮る
 - **人が観点を言っていたら、必ずその項目を含める。** 差分にもマップにも現れないので、落ちやすい
-- **項目ごとに対象の画面idを書く。** レビューする側が、観点と画面の対応を読める
+- **画面は `from` に書く。`title` に画面 id を入れない**（`browse: …` や `… [browse]` にしない）。撮った画面は manifest.py が `screen` に入れ、レビューでは `from` と `screen` が読まれる
 
 ## データに依る値は、決めない
 
@@ -169,7 +169,7 @@ python3 $R check       # 到達できない画面、切れている箇所、マ�
 
 対象画面は `summary` と `names` を読んで絞る。**ここが唯一の柔らかい判断。**
 
-- **選んだ画面idを各項目に必ず書く。** 取り違えてもその画面の `anchor` を確かめるフローになるので通ってしまい、機械の側に気づく手がかりが無い。人が読んで気づけるようにするのが唯一の歯止め
+- **選んだ画面は各項目の `from` に書く。** 取り違えてもその画面の `anchor` を確かめるフローになるので通ってしまい、機械の側に気づく手がかりが無い。レビューで `from` と `screen` を人が読んで気づけるようにするのが唯一の歯止め
 - **候補が複数あったら1つに決めない。** 候補を並べ、どれを採るかは呼び出し元に委ねる。ユーザーに聞けない立場なので、**黙って選ぶより並べて返す**
 - **該当する画面が無いなら、近い画面で代用しない。** 「マップに無い」と書く。それが**マップに足す候補の一次情報**で、代用するとその情報ごと消える
 
@@ -212,10 +212,10 @@ python3 $R check       # 到達できない画面、切れている箇所、マ�
 ```
 
 ```bash
-python3 ~/.claude/skills/sim-test-report/scripts/manifest.py <plan.json> <出力先> --device iphone
+python3 ~/.claude/skills/sim-test-report/scripts/manifest.py <plan.json> <出力先> --device iphone=<UDID> [--device ipad=<UDID>]
 ```
 
-`<出力先>` は証跡の出力先ディレクトリ（証跡は `<出力先>/shots/` に撮る）。フローは plan.json と同じディレクトリに書かれる。経路が組めなければ route.py の理由が出て止まる。
+`<出力先>` は証跡の出力先ディレクトリ（証跡は `<出力先>/shots/<端末>/` に撮る）。フローは plan.json と同じディレクトリに、端末によらず1組書かれる（撮影先だけを撮るときに端末に合わせて埋める）。経路が組めなければ route.py の理由が出て止まる。
 
 - **1項目＝ `from` から `do` を順に叩いて1枚。** 項目が持つのは**どこから何を確かめるか**だけで、**そこまでの経路は書かない。** 前の項目が終わった画面から `from` までは route.py が計算して繋ぐ（すでに居れば何もしない）
 - **`from` は操作を始める画面。** 撮る画面ではない。「行をタップすると詳細に移る」なら `from` は `browse` で、`do` が `tap:browse.bookRow.*`
@@ -249,7 +249,7 @@ python3 ~/.claude/skills/sim-test-report/scripts/manifest.py <plan.json> <出力
 `route.py` は理由を返して終了コード 2 で終わる。**その文言をそのまま報告に載せ、その項目を plan の `explore` に移して `reason` にも書く。** 残りの項目で叩き直し、組めたところまでのフローは出しておく。
 
 ```
-[2] (iphone_05) goto settings: 画面 settings がマップに無い。screens/settings.yaml を作る必要がある
+[2] (test_05) goto settings: 画面 settings がマップに無い。screens/settings.yaml を作る必要がある
 ```
 
 - **マップの穴**（未マップの画面、`in_tree: false`、`to` の先が無い）は、**経路が組めない項目として理由つきで返す。** 探索で撮るかマップを作るかは**呼び出し元がユーザーに選んでもらう**ので、どちらかに決めて返さない。**その画面に依存している項目をまとめて挙げる** — 1画面のせいで何項目が影響を受けるかで、判断が変わる
@@ -274,30 +274,17 @@ python3 ~/.claude/skills/sim-test-report/scripts/manifest.py <plan.json> <出力
 plan:     ~/.claude/skills/sim-test-report/.work/flows/<slug>/plan.json
 manifest: ~/Desktop/sim-test-report-<slug>/manifest.json
 
-## 操作列（manifest.py の標準出力）
-
-  browse  起点                              ✓ browse が出ている
-          撮影 iphone_01
-  browse  text browse.searchField ""        ✓ browse.countLabel が出ている
-          撮影 iphone_02
-  browse  tap Search                        — 機械判定なし。証跡で見る
-          撮影 iphone_03
-  browse  tap browse.cell.* [index 0]       ✓ detail に着いたことを確認
-          撮影 iphone_04
-
-  機械判定 3件 / 証跡でしか見られない 1件
-
 未定の実行時入力:
-- iphone_02.yaml の env.BROWSE_SEARCHFIELD
+- test_02.yaml の env.BROWSE_SEARCHFIELD
 
 ## 経路が組めなかった項目
 
 5. 通信エラーの表示
-   route.py: [1] (iphone_05) goto browse ... browse.error.reloadButton は states にあるが、
+   route.py: [1] (test_05) goto browse ... browse.error.reloadButton は states にあるが、
    現在のデータでは踏めない。一時コードが要る。
 
 7, 8, 9. 履歴からの導線  [history]
-   route.py: [3] (iphone_07) goto history: 画面 history がマップに無い。
+   route.py: [3] (test_07) goto history: 画面 history がマップに無い。
    screens/history.yaml を作る必要がある
    → この3項目が history のマップ待ち。探索にするかマップを作るかは呼び出し元の判断。
 
@@ -315,13 +302,12 @@ manifest: ~/Desktop/sim-test-report-<slug>/manifest.json
 
 - 履歴画面（未マップ）— 今回の差分で追加された画面。経路が組めないので項目7は探索になる
 - root.bannerImage は in_tree: false で、promo へ経路が無い
-- browse の `tap Search` に expect が無く、押した結果が機械判定にならない
+- browse の `tap Search` に expect が無く、押した結果が自動確認にならない
 ```
 
 - **ここに書くのは、マップで画面が決まらなかったものだけ。** 画面が決まったうえで細部を確かめるために `files` を読むのは普通のことで、穴ではない。混ぜると穴の一次情報として使えなくなる
-- **「expect がマップに無い」の補足は、必ずここに載せる。** `expect` の無い操作は機械判定が付かず、証跡だけが根拠になる。足せばそのまま機械判定になる箇所が特定されている状態なので、捨てない
+- **「expect がマップに無い」の補足は、必ずここに載せる。** `expect` の無い操作は画面の自動確認が付かず、証跡だけが根拠になる。足せばそのまま自動確認が付く箇所が特定されている状態なので、捨てない
 
 - **確認項目を散文で並べ直さない。** 呼び出し元はマニフェストを読み上げてレビューに出す。ここに書いて plan に無いものは、どこにも残らない
-- **操作列は `manifest.py` の標準出力をそのまま載せる。** フローの YAML は貼らない。呼び出し元はそれをそのままレビューの2段目に出す
 - **未定の実行時入力はファイル名と `env` のキーで並べる。** 呼び出し元が撮影時に埋める箇所なので、落とさない
 - 判断に迷った箇所、`check` で見えた限界、マップと実装の食い違いは省かずに書く

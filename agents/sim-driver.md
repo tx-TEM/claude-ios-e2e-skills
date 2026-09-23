@@ -15,9 +15,9 @@ tools: mcp__Claude_Code_iOS_Simulator__control, Bash
 
 呼び出し元から次を受け取る。足りなければ推測せず、その旨を報告して止まる。
 
-- **マニフェストのパス**と、撮る項目の名前。項目の中身（`title` / `expect` / `from`）はそのセクションにある。**証跡の名前はセクションの `name`** で、自分で付けない
-- 対象デバイスのUDIDと端末名（`iphone` / `ipad` など。進捗ログの区切りに書く）
-- 証跡の出力先ディレクトリ（例: `~/Desktop/sim-test-report-<slug>/shots/`）
+- **マニフェストのパス**と、撮る項目の名前（`test_11`）。項目の中身（`title` / `expect` / `from`）はそのセクションにある。**証跡の名前はセクションの `name`** で、自分で付けない
+- 端末名（`iphone` / `ipad` など。進捗ログの区切りに書く）と対象デバイスのUDID（マニフェストの `devices.<端末>.udid`）
+- 証跡の出力先ディレクトリ。**端末ごとのディレクトリ**（例: `~/Desktop/sim-test-report-<slug>/shots/iphone/`）
 - 前提条件（アカウント、必要なデータ、事前設定）
 - 対象アプリの bundle id（スクロールのフローに書く。渡されなければ `xcrun simctl listapps <UDID>` で探す）
 - 進捗ログのパス（例: `~/Desktop/sim-test-report-<slug>/progress_<端末名>.log`）。渡されなければ書かない
@@ -51,7 +51,7 @@ xcrun simctl list devices booted
 ```bash
 M=~/.claude/skills/sim-test-report/scripts/maestrod.py
 
-python3 $M inspect <UDID> <名前> [<出力先>/shots]     # 画面を読む
+python3 $M inspect <UDID> <名前> [<出力先>]           # 画面を読む
 python3 $M tap     <UDID> <x> <y> <名前> <bundle id>  # タップ→確認
 python3 $M run     <UDID> '<flow yaml>'                           # スクロールなど
 python3 $M stop    <UDID>                                         # 撮影が終わったら止める
@@ -65,9 +65,9 @@ python3 $M stop    <UDID>                                         # 撮影が終
 
 画面内の行が標準出力に出る。
 
-**名前は証跡と揃える**（`iphone_03`、同じ項目で撮り足すなら `iphone_03_before_tap`）。同じ項番で複数回取るときは、何をした後かを足す。付けないと上書きされ、**外した項目のダンプが残らない**。
+**名前は証跡と揃える**（`test_03`、同じ項目で撮り足すなら `test_03_before_tap`）。同じ項番で複数回取るときは、何をした後かを足す。付けないと上書きされ、**外した項目のダンプが残らない**。
 
-**証跡として残す地点では、第3引数に `<出力先>/shots` を渡す。** 証跡と同名で `.txt` が並び、判定する側が画像と対で読める。**座標を探すための下見には渡さない**（証跡ではないので）。
+**証跡として残す地点では、第3引数に証跡の出力先を渡す。** 証跡と同名で `.txt` が並び、判定する側が画像と対で読める。**座標を探すための下見には渡さない**（証跡ではないので）。
 
 **生のJSON（`.work/dumps/`）を自分で読まない。** 1回2千トークンを超える。`inspect` が出す抽出後で判断する。
 
@@ -183,8 +183,8 @@ python3 $M run <UDID> 'appId: <bundle id>
 - eraseText
 - inputText: "<キーワード>"
 - pressKey: Enter' \
-  && python3 $M inspect <UDID> <名前> <出力先>/shots \
-  && xcrun simctl io <UDID> screenshot <出力先>/shots/<名前>.png \
+  && python3 $M inspect <UDID> <名前> <出力先> \
+  && xcrun simctl io <UDID> screenshot <出力先>/<名前>.png \
   && echo "<項番> 撮影済み <ファイル名> <観測した事実>" >> <進捗ログのパス>
 ```
 
@@ -210,8 +210,8 @@ python3 $M run <UDID> 'appId: <bundle id>
 - eraseText
 - inputText: "<キーワード>"
 - pressKey: Enter' \
-  && python3 $M inspect <UDID> <名前> <出力先>/shots \
-  && xcrun simctl io <UDID> screenshot <出力先>/shots/<名前>.png \
+  && python3 $M inspect <UDID> <名前> <出力先> \
+  && xcrun simctl io <UDID> screenshot <出力先>/<名前>.png \
   && echo "<項番> 撮影済み <ファイル名> <観測した事実>" >> <進捗ログのパス>
 ```
 
@@ -241,12 +241,12 @@ python3 $M run <UDID> 'appId: <bundle id>
 ## フローの外で撮る（既定）
 
 ```bash
-xcrun simctl io <UDID> screenshot <出力先>/shots/<名前>.png
+xcrun simctl io <UDID> screenshot <出力先>/<名前>.png
 ```
 
 - **`booted` は使わない。** iPhoneとiPadを同時に起動している場合、どちらが撮られるか決まらない。渡されたUDIDを必ず指定する
 - 1確認項目につき1枚。撮る前に、その項目の判定に必要な情報が画面内にあることを**ダンプで**確かめる。画像を読んで確かめない
-- **名前はマニフェストのそのセクションの `name` をそのまま使う**（`iphone_02`）。自分で付けない。項目・証跡・ダンプを結ぶのはこの名前だけで、ずれるとその項目の証跡が見つからない
+- **名前はマニフェストのそのセクションの `name` をそのまま使う**（`test_02`）。自分で付けない。項目・証跡・ダンプを結ぶのはこの名前だけで、ずれるとその項目の証跡が見つからない
 
 ## フローの中で撮る
 
@@ -259,7 +259,7 @@ xcrun simctl io <UDID> screenshot <出力先>/shots/<名前>.png
 python3 $M run <UDID> 'appId: <bundle id>
 ---
 - tapOn: ...
-- takeScreenshot: <出力先>/shots/<名前>'
+- takeScreenshot: <出力先>/<名前>'
 ```
 
 操作と撮影を1本のフローに並べて `run` する。**そのフローの後ろに `xcrun simctl` を繋がない**（外から撮ると別の瞬間になる）。
@@ -294,7 +294,7 @@ echo "--- <端末名> 開始 $(date '+%H:%M')" >> <進捗ログのパス>
 以降は1項目1行。**項番は2桁ゼロ埋めで固定する。**
 
 ```bash
-echo "03 撮影済み iphone_03.png ボタンが「保存済み」に変わった" >> <進捗ログのパス>
+echo "test_03 撮影済み ボタンが「保存済み」に変わった" >> <進捗ログのパス>
 ```
 
 撮り直すと同じログに続けて書かれる。区切り行が無いと前回の行と混ざり、どちらが最新か分からなくなる。書式が揺れるのも同じ理由で避ける。
@@ -311,7 +311,7 @@ echo "03 撮影済み iphone_03.png ボタンが「保存済み」に変わっ�
 **ダンプから観測した事実を書く。** 何も検証されていないので、これが唯一の手がかりになる。
 
 ```
-5. shots/iphone_05.png
+test_05  shots/iphone/test_05.png
    ホーム画面。サマリーに「今週の目標」「70,000歩」、累計 48,432歩、
    前週比 +5,120歩 (+11.8%)、月/火/水の3行が並んでいる。
 
