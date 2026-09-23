@@ -348,6 +348,9 @@ def render_png(html_path: pathlib.Path) -> pathlib.Path | None:
     if not pathlib.Path(CHROME).exists():
         print("Chromeが見つからないためPNG生成をスキップしました。", file=sys.stderr)
         return None
+    # file:// の後ろは絶対パスでないと読めない。マニフェストを相対パスで渡すと
+    # HTML の出力先も相対になり、Chrome はエラーページを撮ってそのまま PNG にする
+    html_path = html_path.resolve()
     height = measure_page_height(html_path)
     png_path = html_path.with_suffix(".png")
     for scale in PNG_SCALES:
