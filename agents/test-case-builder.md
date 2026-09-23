@@ -192,7 +192,7 @@ python3 $R check   --map $M     # 到達できない画面、切れている箇�
 ```bash
 python3 $R flow --app <bundle id> --map $M \
   --goto browse --shot <出力先>/iphone_01_browse_all \
-  --do text:browse.searchField --input browse.searchField=牛乳 \
+  --do text:browse.searchField --runtime 'text:browse.searchField' \
   --shot <出力先>/iphone_02_debounce \
   --do tap:Search --shot <出力先>/iphone_03_list_filtered \
   --goto detail --shot <出力先>/iphone_04_detail
@@ -245,28 +245,39 @@ python3 $R flow --app <bundle id> --map $M \
 ## 確認項目
 
 1. 一覧画面が初期表示で一覧を出す [browse]
-   期待: 絞り込み無しの一覧が出て、先頭行が「牛乳」（1,000ml）
+   期待: 絞り込み無しの一覧が出て、行が複数並んでいる
    証跡: iphone_01_list_all
 
 2. キーワードを打つと入力が止まってから絞り込みが走る [browse]
-   期待: 300ms 後に絞り込みが走り、一覧が「牛乳」を含む項目だけになる（先頭は「牛乳」）
+   期待: 入力欄に出ている語を、一覧に残っている行がすべて品名に含む
    証跡: iphone_02_debounce
+   ※打つ文字は `--runtime`（`BROWSE_SEARCHFIELD` 未定）。撮影時に一覧を見て埋める
 
 3. 検索キーで絞り込みが確定する [browse]
-   期待: 一覧は直前と同じまま、キーボードが閉じる
+   期待: キーボードが閉じている。一覧は項目2と同じ行のまま
    証跡: iphone_03_search_key
 
 4. 行をタップすると詳細に移る [browse → detail]
-   期待: 先頭行「牛乳」の詳細が開き、品名と容量が一覧の行と一致する
+   期待: 詳細が開き、品名と容量がタップした行と一致する
    証跡: iphone_04_detail
 
 ## フロー
 
-### A（項目1,2,3,4）
-appId: com.example.MyApp
----
-- stopApp
-...
+生成先: ~/.claude/skills/sim-test-report/.work/flows/<slug>/
+
+  browse  起点                              ✓ browse が出ている
+          撮影 .../iphone_01_list_all
+  browse  text browse.searchField ""        ✓ browse.countLabel が出ている
+          撮影 .../iphone_02_debounce
+  browse  tap Search                        — 機械判定なし。証跡で見る
+          撮影 .../iphone_03_search_key
+  browse  tap browse.cell.* [index 0]       ✓ detail に着いたことを確認
+          撮影 .../iphone_04_detail
+
+  機械判定 3件 / 証跡でしか見られない 1件
+
+未定の実行時入力:
+- 02_iphone_02_debounce.yaml の env.BROWSE_SEARCHFIELD
 
 ## 経路が組めなかった項目
 
@@ -300,7 +311,8 @@ appId: com.example.MyApp
 - **`route.py` が出した「expect がマップに無い」の補足は、必ずここに載せる。** sim-driver はフロー項目でダンプを取らないので、**`expect` の無い操作は証跡のPNGだけが根拠**になる。足せばそのまま機械判定になる箇所が特定されている状態なので、捨てない
 
 - **項目ごとに「期待」と「証跡」を書く。** 呼び出し元がこれを `manifest.json` の `expect` と `images` にする。**判定するときに、何を期待していたかが証跡と同じ行にある**ようにするため
-- **「期待」にマップの `result` を写さない。** `result` は画面の仕様（「一覧が入れ替わる」）で、書くのは**渡したデータで何が起きるか**（「「牛乳」を含む項目だけになる」）。**データを決めたのは自分**なので、何が出るはずかまで書く。**書けないなら、その項目はまだ何を確かめるか決まっていない**
+- **「期待」にマップの `result` を写さない。** `result` は画面の仕様（「一覧が入れ替わる」）で、書くのは**証跡の中で何を確かめれば起きたと言えるか**（「入力欄に出ている語を、残った行がすべて含む」）。値は実行時に決まるので、**値ではなく関係で書く**（「データに依る値は、決めない」）。**関係で書けないなら、その項目はまだ何を確かめるか決まっていない**
 - **「証跡」は `--shot` に渡した名前**（パスではなく `iphone_02_debounce`）。ここが項目・証跡・ダンプを結ぶ唯一の手がかりなので、**項目ごとに別の名前にする**。同じ名前だと後から撮ったほうが上書きし、項目が同じ画像を指したまま通ってしまう（`route.py` が弾くが、そもそも重ねない）
-- **フローは全文そのまま返す。** 要約しない。呼び出し元はこれをそのままレビューに出し、sim-driver に渡す
+- **フローは `route.py flow` の標準出力と生成先のパスで返す。** YAML の中身は貼らない。標準出力は走るファイルと同じ実行から出た操作列なので、呼び出し元はそれをそのままレビューの2段目に出し、sim-driver にはパスを渡す
+- **未定の実行時入力はファイル名と `env` のキーで並べる。** 呼び出し元が撮影時に埋める箇所なので、落とさない
 - 判断に迷った箇所、`check` で見えた限界、マップと実装の食い違いは省かずに書く
