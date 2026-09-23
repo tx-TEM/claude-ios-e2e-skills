@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
-"""test-case-builder の plan.json と、route.py が出したフローの一覧から manifest.json を作る。
+"""test-case-builder の plan.json から、フローを書いて manifest.json を作る。
 
-  manifest.py <フローのディレクトリ> <出力先ディレクトリ>
-              [--title <題>] [--meta <行>]...
+  manifest.py <plan.json> <出力先ディレクトリ> [--map <アプリのリポジトリ>]
 
-ディレクトリには `plan.json`（test-case-builder が書く）と、`route.py flow --plan
-plan.json --out-dir` が置いた `index.json` が並んでいる。証跡1枚＝1セクション。
+1. `route.py flow --plan <plan.json> --out-dir <plan.json のディレクトリ>` を叩く。
+   経路が組めなければ route.py の理由をそのまま出して止まる（manifest は書かない）。
+   組めたら route.py の標準出力（レビューの2段目になる操作列）をそのまま出す
+2. plan.json と、route.py が置いた index.json から manifest.json を組む。証跡1枚＝1セクション
 
-**どちらからも写さない。** 証跡の名前・画面・機械判定のID・フローのファイル名は
-`index.json` から、`title` / `expect` は `plan.json` から取る。項目を立てたのも経路を
-組んだのも手順0で、ここで LLM が散文から書き写すと、そこにずれる余地ができる。
+**1本で叩く。** route.py と manifest を別々に叩くと、plan を直したときに片方だけ
+叩き直す余地ができ、どちらの項目がどの証跡か決まらなくなる。
 
-`route.py flow --out-dir` は1回の実行ぶんのフロー一式を書くので、**マニフェストも1つ。**
+**どちらからも写さない。** 証跡の名前・撮った画面・機械判定のID・フローのファイル名は
+`index.json` から、`title` / `expect` / `from` は `plan.json` から取る。
 
-**plan の `items` と index の並びが一致しないなら止まる。** 片方だけ作り直した
-ということで、どちらの項目がどの証跡か決まらない。
+**ヘッダの題と meta（ブランチ・確認環境・実施日）は持たない。** レポートを組むときに
+`build_report.py` へ直に渡す。確認環境は撮影する端末を決めるまで決まらない。
 
 **`launch` をそのまま持ってくる。** そのフローが自分でアプリを起動するかどうかで、
 **鎖の切れ目**を表す（1本目と plan で `fresh` を付けた項目が `true`）。`run_flows.py` は
@@ -42,6 +43,7 @@ build_report.py が result の無いセクションを拒むため（判定し�
 直すなら plan を直して叩き直す。
 """
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -52,44 +54,55 @@ def read_json(path, what):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+# screen-map スキルの route.py。skills/ の下で隣り合っている（install.sh のリンクをたどっても同じ）
+ROUTE_PY = Path(__file__).resolve().parents[2] / "screen-map" / "scripts" / "route.py"
+
+
 def main():
     argv = sys.argv[1:]
     if len(argv) < 2:
         sys.exit(__doc__)
-    src, out_dir = Path(argv[0]), argv[1]
-    title, meta = "動作確認レポート", []
+    plan_path, out_dir = Path(argv[0]).expanduser(), argv[1]
+    mapdir = None
     i = 2
     while i < len(argv):
-        if argv[i] == "--title":
-            title = argv[i + 1]; i += 2
-        elif argv[i] == "--meta":
-            meta.append(argv[i + 1]); i += 2
+        if argv[i] == "--map":
+            mapdir = argv[i + 1]; i += 2
         else:
-            sys.exit("知らない引数: " + argv[i])
+            sys.exit("知らない引数: " + argv[i] + "（題と meta は build_report.py に渡す）")
 
-    plan = read_json(src / "plan.json", "テストケース（test-case-builder の plan.json）")
+    plan = read_json(plan_path, "テストケース（test-case-builder の plan.json）")
     items, explore = plan.get("items") or [], plan.get("explore") or []
-    # 経路が組めた項目が1つも無ければ route.py は叩かれず、一覧も無い
+    src = plan_path.parent
+
+    # 経路が組めた項目が1つも無ければ route.py は要らない（全部探索で撮る）
+    if items:
+        cmd = [sys.executable, str(ROUTE_PY), "flow", "--plan", str(plan_path),
+               "--out-dir", str(src)]
+        if mapdir:
+            cmd += ["--map", mapdir]
+        r = subprocess.run(cmd)
+        if r.returncode != 0:
+            sys.exit(r.returncode)
+        print()
     index = read_json(src / "index.json", "フローの一覧（route.py flow --out-dir の index.json）") \
         if items else []
 
     planned = [it.get("shot") for it in items]
     listed = [e["name"] for e in index]
     if planned != listed:
-        sys.exit("plan.json の items と index.json の並びが合わない。plan を直したなら "
-                 "route.py flow --plan を叩き直す\n"
+        sys.exit("plan.json の items と index.json の並びが合わない\n"
                  f"  plan:  {planned}\n  index: {listed}")
 
     out = Path(out_dir) / "manifest.json"
 
-    # 判定の欄は、作り直しても消さない
-    kept = {}
+    # 判定の欄は、作り直しても消さない。footer など判定側が足した欄も残す
+    kept, top = {}, {}
     if out.exists():
         try:
             old = json.loads(out.read_text(encoding="utf-8"))
             kept = {sec.get("name"): sec for sec in old.get("sections", []) if sec.get("name")}
-            title = old.get("title", title) if title == "動作確認レポート" else title
-            meta = meta or old.get("meta", [])
+            top = {k: v for k, v in old.items() if k not in ("sections", "title", "meta")}
         except Exception:
             pass
 
@@ -131,7 +144,7 @@ def main():
             "result": prev.get("result", "PENDING"),
         })
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps({"title": title, "meta": meta, "sections": sections},
+    out.write_text(json.dumps(dict(top, sections=sections),
                               ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     blank = sum(1 for s in sections if not s["flow"])
     empty = [s["name"] for s in sections if not s["title"] or not s["expect"]]

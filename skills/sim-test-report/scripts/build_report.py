@@ -2,15 +2,18 @@
 """スクリーンショット付き動作確認レポート（単一HTML）を生成する。
 
 使い方:
-    python3 build_report.py <manifest.json>
+    python3 build_report.py <manifest.json> [--title <題>] [--meta <行>]... [--width=<px>] [--no-png]
+
+    python3 build_report.py manifest.json \
+      --title "一覧からお気に入り登録できるようにする — 動作確認レポート" \
+      --meta "ブランチ: issues/123-favorite-from-list (a1b2c3d)" \
+      --meta "確認環境: iPhone 16 シミュレーター (iOS 26.0)" --meta "実施日: 2026-01-15"
+
+**題と meta はマニフェストに持たせず、ここで渡す。** どれもレポートを組む時点で決まるもので
+（確認環境は撮影する端末を決めるまで決まらない）、確認項目の中身ではない。
 
 マニフェスト形式:
 {
-  "title": "一覧からお気に入り登録できるようにする — 動作確認レポート",
-  "meta": [
-    "Issue: example-org/SampleApp-iOS#123",
-    "ブランチ: issues/123-favorite-from-list ／ 確認環境: iPhone 16 シミュレーター (iOS 26.0) ／ 実施日: 2026-01-15"
-  ],
   "sections": [
     {
       "title": "一覧のセルにお気に入りボタンが表示される",
@@ -28,7 +31,7 @@
   "output": "verification_report.html"
 }
 
-- meta の各行は「ラベル: 値」で書くと、ヘッダでラベルと値に分けて並ぶ。1行に「／」で
+- --meta の各行は「ラベル: 値」で書くと、ヘッダでラベルと値に分けて並ぶ。1行に「／」で
   区切って複数書いてもよい。コロンの無い行はそのまま1項目になる
 - **「実施日」だけは件数の行の右端に出す。** 他の項目（ブランチ、確認環境）は何で確かめたかで、
   いつの結果かはそれと性格が違う。他の項目は件数の行の下に1行ずつ並ぶ
@@ -176,7 +179,7 @@ def section_rows(section: dict) -> tuple[list[tuple[str, str]], str]:
     return top, (section.get("note") or "").strip()
 
 
-def build(manifest_path: pathlib.Path, width: int) -> pathlib.Path:
+def build(manifest_path: pathlib.Path, width: int, title: str, meta: list) -> pathlib.Path:
     manifest = json.loads(manifest_path.read_text())
     base_dir = manifest_path.parent
 
@@ -218,7 +221,7 @@ def build(manifest_path: pathlib.Path, width: int) -> pathlib.Path:
       {rows_html}
     </section>'''
 
-    items = meta_items(manifest.get("meta", []))
+    items = meta_items(meta)
     dates = [v for k, v in items if k == "実施日"]
     meta_lines = "".join(
         f'<p>{f"<span>{html.escape(k)}</span>" if k else ""}{html.escape(v)}</p>'
@@ -238,7 +241,7 @@ def build(manifest_path: pathlib.Path, width: int) -> pathlib.Path:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{html.escape(manifest["title"])}</title>
+<title>{html.escape(title)}</title>
 <style>
   :root {{
     color-scheme: light dark;
@@ -298,7 +301,7 @@ def build(manifest_path: pathlib.Path, width: int) -> pathlib.Path:
 <body>
 <div class="wrap">
   <header>
-    <h1>{html.escape(manifest["title"])}</h1>
+    <h1>{html.escape(title)}</h1>
     {summary}
     {meta_lines}
   </header>
@@ -373,16 +376,28 @@ def render_png(html_path: pathlib.Path) -> pathlib.Path | None:
 
 
 def main() -> None:
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    width = DEFAULT_WIDTH
-    make_png = "--no-png" not in sys.argv
-    for a in sys.argv[1:]:
-        if a.startswith("--width="):
-            width = int(a.split("=", 1)[1])
+    argv = sys.argv[1:]
+    args, width, make_png = [], DEFAULT_WIDTH, True
+    title, meta = "動作確認レポート", []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--title":
+            title = argv[i + 1]; i += 2
+        elif a == "--meta":
+            meta.append(argv[i + 1]); i += 2
+        elif a.startswith("--width="):
+            width = int(a.split("=", 1)[1]); i += 1
+        elif a == "--no-png":
+            make_png = False; i += 1
+        elif a.startswith("--"):
+            sys.exit("知らない引数: " + a)
+        else:
+            args.append(a); i += 1
     if len(args) != 1:
         print(__doc__)
         sys.exit(1)
-    out_path = build(pathlib.Path(args[0]), width)
+    out_path = build(pathlib.Path(args[0]), width, title, meta)
     size = out_path.stat().st_size
     print(f"{out_path} ({size / 1024 / 1024:.2f} MB)")
     if make_png:

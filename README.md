@@ -57,15 +57,16 @@ clone したディレクトリで `./install.sh` を実行する。`~/.claude/` 
 
 期待は値ではなく、証跡の中で確かめられる関係で書く。打つ文字のようにデータに依る値は、`do` に `"runtime": true` を添えて未定のまま残し、撮影時に画面を見て埋める。
 
-### 2. 経路を計算して Maestro のフローを書く（`route.py`）
+### 2. フローとテストの定義ファイルを作る（`manifest.py` → `route.py`）
 
-plan の各項目について、前の項目が終わった画面から `from` までの経路を画面マップから計算し、`do` の操作と撮影を繋いでMaestro のフローとして書き出す。
+plan から、Maestro のフローとテストの定義ファイル（`manifest.json`）を1本で作る。以降は定義ファイルだけで動く。
 
 ```bash
-python3 ~/.claude/skills/screen-map/scripts/route.py flow \
-  --plan ~/.claude/skills/sim-test-report/.work/flows/<slug>/plan.json \
-  --out-dir ~/.claude/skills/sim-test-report/.work/flows/<slug>
+python3 ~/.claude/skills/sim-test-report/scripts/manifest.py \
+  ~/.claude/skills/sim-test-report/.work/flows/<slug>/plan.json <出力先> --map <アプリのリポジトリ>
 ```
+
+中で `route.py flow --plan` を叩く。plan の各項目について、前の項目が終わった画面から `from` までの経路を画面マップから計算し、`do` の操作と撮影を繋いで、項目ごとのフローとして書き出す。
 
 ```yaml
 appId: tx-tem.AozoraReaderClient
@@ -85,14 +86,7 @@ env:
 
 画面マップが無いアプリでは、この手順を飛ばす。マップはあっても経路が組めない項目（未マップの画面、座標が要る操作）は理由つきで返り、plan の `explore` に移る。どちらも LLM（`sim-driver`）が画面を見ながら探索して撮る。
 
-### 3. テストの定義ファイルを作る（`manifest.py`）
-
-plan の項目と期待、手順2で書き出したフローの一覧を1つのファイルにまとめる。以降はこのファイルだけで動く。
-
-```bash
-python3 ~/.claude/skills/sim-test-report/scripts/manifest.py \
-  ~/.claude/skills/sim-test-report/.work/flows/<slug> <出力先> --title "…" --meta "ブランチ: …"
-```
+続けて、plan の項目と期待、書き出したフローの一覧を定義ファイルにまとめる。
 
 ```json
 {
@@ -114,9 +108,9 @@ python3 ~/.claude/skills/sim-test-report/scripts/manifest.py \
 
 経路が組めなかった項目（plan の `explore`）も、フローを持たないセクションとして同じファイルに並べる。
 
-このファイルを読み上げてレビューを受ける。直すところがあれば plan を直して手順2・3を叩き直し、合意してから撮影に入る。
+このファイルを読み上げてレビューを受ける。直すところがあれば plan を直して手順2を叩き直し、合意してから撮影に入る。
 
-### 4. フローを走らせる（`run_flows.py`）
+### 3. フローを走らせる（`run_flows.py`）
 
 フローを順に走らせ、証跡と同名のダンプを撮る。フローを持たない項目は LLM（`sim-driver`）が撮る。
 
@@ -125,17 +119,20 @@ python3 ~/.claude/skills/sim-test-report/scripts/run_flows.py \
   <出力先>/manifest.json ~/.claude/skills/sim-test-report/.work/flows/<slug> <UDID>
 ```
 
-### 5. 判定を書き込む（LLM / `evidence-judge`）
+### 4. 判定を書き込む（LLM / `evidence-judge`）
 
 撮影したスクリーンショットとダンプを見て、結果を記録する。渡すのは定義ファイルのパスだけで、確認項目も期待も証跡もそこに入っている。
 
 項目ごとに観測した事実（`desc`）と OK / NG（`result`）を書く。期待を訂正したときや、画像以外を根拠にしたときは、その項目の注記（`note`）に残す。
 
-### 6. レポートを組む（`build_report.py`）
+### 5. レポートを組む（`build_report.py`）
 
 ```bash
-python3 ~/.claude/skills/sim-test-report/scripts/build_report.py <出力先>/manifest.json
+python3 ~/.claude/skills/sim-test-report/scripts/build_report.py <出力先>/manifest.json \
+  --title "…" --meta "ブランチ: …" --meta "確認環境: …" --meta "実施日: …"
 ```
+
+ヘッダの題と meta はここで渡す。定義ファイルには持たせない。
 
 画像を base64 で埋め込んだ単一HTMLと、それを1枚に描画したPNGが出る。
 
