@@ -30,6 +30,8 @@
 
 - meta の各行は「ラベル: 値」で書くと、ヘッダでラベルと値に分けて並ぶ。1行に「／」で
   区切って複数書いてもよい。コロンの無い行はそのまま1項目になる
+- **「実施日」だけは件数の行の右端に出す。** 他の項目（ブランチ、確認環境）は何で確かめたかで、
+  いつの結果かはそれと性格が違う。他の項目は件数の行の下に1行ずつ並ぶ
 - 1セクションに複数の画像を並べられる。同じ確認項目をiPhoneとiPadで撮った場合など
 - images の要素は {"src": ..., "label": ...} か、ラベル不要なら文字列だけでもよい
 - 画像が1枚なら "image": "shots/01_foo.png" と書いてもよい（images 1件と等価）
@@ -216,13 +218,17 @@ def build(manifest_path: pathlib.Path, width: int) -> pathlib.Path:
       {rows_html}
     </section>'''
 
+    items = meta_items(manifest.get("meta", []))
+    dates = [v for k, v in items if k == "実施日"]
     meta_lines = "".join(
-        f'<div><dt>{html.escape(k)}</dt><dd>{html.escape(v)}</dd></div>'
-        for k, v in meta_items(manifest.get("meta", [])))
-    meta_lines = f'<dl class="meta">{meta_lines}</dl>' if meta_lines else ""
+        f'<p>{f"<span>{html.escape(k)}</span>" if k else ""}{html.escape(v)}</p>'
+        for k, v in items if k != "実施日")
+    meta_lines = f'<div class="meta">{meta_lines}</div>' if meta_lines else ""
     summary = (f'<div class="summary"><span class="ok">OK {counts["OK"]}</span>'
                f'<span class="ng">NG {counts["NG"]}</span>'
-               f'<span class="all">全 {counts["OK"] + counts["NG"]} 項目</span></div>')
+               f'<span class="all">全 {counts["OK"] + counts["NG"]} 項目</span>'
+               + "".join(f'<span class="date">実施日 {html.escape(d)}</span>' for d in dates)
+               + '</div>')
     footer = manifest.get("footer", "")
     footer_html = (f'<footer class="card"><h2>補足</h2><p>{html.escape(footer)}</p></footer>'
                    if footer else "")
@@ -248,15 +254,16 @@ def build(manifest_path: pathlib.Path, width: int) -> pathlib.Path:
   body {{ font-family: -apple-system, "Hiragino Sans", sans-serif; margin: 0; padding: 32px 24px; background: var(--bg); color: var(--text); line-height: 1.7; }}
   .wrap {{ max-width: 880px; margin: 0 auto; }}
   header h1 {{ font-size: 22px; line-height: 1.4; margin: 0 0 8px; }}
-  .meta {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 1px; margin: 12px 0 0; background: var(--line); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }}
-  .meta div {{ background: var(--card); padding: 8px 14px; }}
-  .meta dt {{ font-size: 11px; color: var(--faint); }}
-  .meta dd {{ margin: 0; font-size: 13px; word-break: keep-all; overflow-wrap: anywhere; }}
+  .meta {{ margin: 10px 0 0; font-size: 13px; color: var(--sub); }}
+  .meta p {{ margin: 0; }}
+  .meta span {{ color: var(--faint); margin-right: 10px; }}
   .summary {{ display: flex; gap: 8px; margin-top: 14px; font-size: 13px; font-weight: 600; }}
   .summary span {{ padding: 3px 12px; border-radius: 999px; }}
   .summary .ok {{ color: var(--ok); background: var(--ok-bg); }}
   .summary .ng {{ color: var(--ng); background: var(--ng-bg); }}
   .summary .all {{ color: var(--sub); background: var(--card); border: 1px solid var(--line); }}
+  .summary {{ align-items: center; flex-wrap: wrap; }}
+  .summary .date {{ margin-left: auto; padding: 0; color: var(--sub); font-weight: 400; }}
   .card {{ background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px 24px; margin-top: 16px; }}
   .card.ng {{ border-left: 4px solid var(--ng); }}
   .card h2 {{ font-size: 16px; line-height: 1.5; margin: 0; display: flex; align-items: flex-start; gap: 10px; }}
@@ -292,8 +299,8 @@ def build(manifest_path: pathlib.Path, width: int) -> pathlib.Path:
 <div class="wrap">
   <header>
     <h1>{html.escape(manifest["title"])}</h1>
-    {meta_lines}
     {summary}
+    {meta_lines}
   </header>
   {cards}
   {footer_html}
