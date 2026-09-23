@@ -274,19 +274,6 @@ python3 ~/.claude/skills/sim-test-report/scripts/manifest.py <plan.json> <出力
 plan:     ~/.claude/skills/sim-test-report/.work/flows/<slug>/plan.json
 manifest: ~/Desktop/sim-test-report-<slug>/manifest.json
 
-## 操作列（manifest.py の標準出力）
-
-  browse  起点                              ✓ browse が出ている
-          撮影 test_01
-  browse  text browse.searchField ""        ✓ browse.countLabel が出ている
-          撮影 test_02
-  browse  tap Search                        — 機械判定なし。証跡で見る
-          撮影 test_03
-  browse  tap browse.cell.* [index 0]       ✓ detail に着いたことを確認
-          撮影 test_04
-
-  機械判定 3件 / 証跡でしか見られない 1件
-
 未定の実行時入力:
 - test_02.yaml の env.BROWSE_SEARCHFIELD
 
@@ -315,13 +302,12 @@ manifest: ~/Desktop/sim-test-report-<slug>/manifest.json
 
 - 履歴画面（未マップ）— 今回の差分で追加された画面。経路が組めないので項目7は探索になる
 - root.bannerImage は in_tree: false で、promo へ経路が無い
-- browse の `tap Search` に expect が無く、押した結果が機械判定にならない
+- browse の `tap Search` に expect が無く、押した結果が自動確認にならない
 ```
 
 - **ここに書くのは、マップで画面が決まらなかったものだけ。** 画面が決まったうえで細部を確かめるために `files` を読むのは普通のことで、穴ではない。混ぜると穴の一次情報として使えなくなる
-- **「expect がマップに無い」の補足は、必ずここに載せる。** `expect` の無い操作は機械判定が付かず、証跡だけが根拠になる。足せばそのまま機械判定になる箇所が特定されている状態なので、捨てない
+- **「expect がマップに無い」の補足は、必ずここに載せる。** `expect` の無い操作は画面の自動確認が付かず、証跡だけが根拠になる。足せばそのまま自動確認が付く箇所が特定されている状態なので、捨てない
 
 - **確認項目を散文で並べ直さない。** 呼び出し元はマニフェストを読み上げてレビューに出す。ここに書いて plan に無いものは、どこにも残らない
-- **操作列は `manifest.py` の標準出力をそのまま載せる。** フローの YAML は貼らない。呼び出し元はそれをそのままレビューの2段目に出す
 - **未定の実行時入力はファイル名と `env` のキーで並べる。** 呼び出し元が撮影時に埋める箇所なので、落とさない
 - 判断に迷った箇所、`check` で見えた限界、マップと実装の食い違いは省かずに書く

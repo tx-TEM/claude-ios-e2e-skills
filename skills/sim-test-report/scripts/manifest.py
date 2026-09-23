@@ -58,7 +58,7 @@ plan.json の形。**項目1つ＝ from から do を順に叩いて、1枚撮�
 **1本で叩く。** フローとマニフェストを別々に作ると、plan を直したときに片方だけ
 作り直す余地ができ、どちらの項目がどの証跡か決まらなくなる。
 
-**写さない。** 証跡の名前・撮った画面・機械判定のID・フローのファイル名は経路を計算した
+**写さない。** 証跡の名前・撮った画面・自動確認のID・フローのファイル名は経路を計算した
 結果から、`title` / `expect` / `from` は plan から、どちらも write_flows() が1行にして返す。
 
 **ヘッダの題と meta（ブランチ・確認環境・実施日）は持たない。** レポートを組むときに
@@ -75,9 +75,9 @@ plan.json の形。**項目1つ＝ from から do を順に叩いて、1枚撮�
 がそこで止まる）。着いた画面を見ないと決まらないものなので、埋めるのは撮影する側。
 
 plan の `explore` は**経路が組めなかった項目**。`flow` を持たないので `run_flows.py` は
-飛ばし、sim-driver が探索で撮る。**末尾に並ぶ** — 機械判定の付かない項目がまとまる。
+飛ばし、sim-driver が探索で撮る。**末尾に並ぶ** — 自動確認の付かない項目がまとまる。
 
-なぜスクリプトなのか。一覧の中身（証跡の名前、画面、機械判定のID、フローの
+なぜスクリプトなのか。一覧の中身（証跡の名前、画面、自動確認のID、フローの
 ファイル名）は route.py が既に計算したもので、**手で写すとタイポの余地ができる。**
 撮影の名前と manifest の `src` がずれても、走らせるまで誰も気づかない。
 
@@ -156,6 +156,7 @@ def main():
     # フローのある行 ＋ 探索のぶん。探索は末尾に積む
     entries = list(rows) + [{"name": route.shot_name(len(items) + n),
                              "title": it.get("title", ""), "from": it.get("from"),
+                             "fresh": bool(it.get("fresh")), "do": it.get("do") or [],
                              "expect": it.get("expect", "")}
                             for n, it in enumerate(explore, 1)]
 
@@ -167,6 +168,8 @@ def main():
             "name": name,                      # 証跡・ダンプ・フローのファイル名。引き継ぎの鍵
             "title": e.get("title", ""),       # 確認項目。plan が正
             "from": e.get("from"),             # 操作を始める画面（plan）
+            "fresh": e.get("fresh", False),    # 起動し直した直後から始める（plan）
+            "do": e.get("do", []),             # 確かめる操作（plan）。レビューで読み上げる
             "screen": e.get("screen"),         # 撮った画面（経路の計算）。探索は撮るまで決まらない
             "expect": e.get("expect", ""),     # 証跡の中で何を確かめるか。plan が正
             "checked": e.get("checked"),       # None なら証跡だけが根拠
@@ -195,7 +198,7 @@ def main():
         print(f"  title か expect が空: {', '.join(empty)}。plan.json を埋めて叩き直す")
     nochk = sum(1 for s in sections if s["flow"] and not s["checked"])
     if nochk:
-        print(f"  {nochk}件はフローに機械判定が無い（証跡だけが根拠）")
+        print(f"  {nochk}件はフローに自動確認が無い（証跡だけが根拠）")
     if blank:
         print(f"  {blank}件はフローが無い（探索で撮る。sim-driver に渡す）")
 
