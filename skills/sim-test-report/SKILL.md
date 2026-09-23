@@ -82,8 +82,10 @@ description: iOSシミュレーターでの動作確認を、テストケース�
 
 ```bash
 python3 <このスキルのディレクトリ>/scripts/manifest.py .work/flows/<slug>/plan.json <出力先> \
-  --device <端末名> --map <アプリのリポジトリ>
+  --device <端末名>
 ```
+
+アプリのリポジトリで叩く。画面マップはカレントから上へ探す（別の場所なら `--map <アプリのリポジトリ>`）。
 
 中で `route.py` の `write_flows()` を呼んで項目ごとのフローを書き、返ってきた行から `manifest.json` を組む。**`title` / `expect` / `from` / `explore` は plan から、撮った画面・機械判定・フローは経路を計算した結果から取る。証跡の名前は並び順と端末名から振る**（`iphone_01`, `iphone_02`, …）。 経路が組めなければ route.py の理由を出して止まり、manifest は書かない。
 

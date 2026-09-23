@@ -38,7 +38,7 @@ tools: Read, Grep, Glob, Bash
 **どのファイルがどの画面のものかは、`which` で引ける。**
 
 ```bash
-git -C $M diff <ベース>...HEAD --name-only | python3 $R which - --map $M
+git -C $M diff <ベース>...HEAD --name-only | python3 $R which -
 ```
 
 ```
@@ -62,7 +62,7 @@ browse  — アイテムの一覧。キーワードで絞り込め、行をタ�
 「さがす画面を一通り」「お気に入り機能をテストして」「一覧と詳細の内容が一致するか」。**まず画面を探す。** マップは全画面の要約を持っているので、ソースを漁らずに絞れる。
 
 ```bash
-python3 $R screens --map $M              # 呼び名と summary で画面を絞る
+python3 $R screens                       # 呼び名と summary で画面を絞る
 cat $M/screen-map/screens/<画面id>.yaml  # 絞れたら中身を読む。files に読むべきソースが並んでいる
 ```
 
@@ -83,7 +83,7 @@ cat $M/screen-map/screens/<画面id>.yaml  # 絞れたら中身を読む。files
 **`files` に読むべきソースが並んでいる。** 候補を絞ったら、その画面のコードを読んで期待値を確かめる。
 
 ```bash
-python3 $R check --map $M    # 「実装のほうが新しい」と出た画面は特に、必ず読む
+python3 $R check    # 「実装のほうが新しい」と出た画面は特に、必ず読む
 ```
 
 - **`states` も見る。** 0件、エラー、権限なしなど、到着時点で表示が分かれるもの。`actions` には出てこないが確認項目にはなる。ただし現在のデータでは踏めないことが多いので「一時コードが要る」と書く
@@ -165,9 +165,11 @@ R=~/.claude/skills/sim-test-report/scripts/route.py
 M=<アプリのリポジトリ>
 
 python3 ~/.claude/skills/sim-test-report/scripts/manifest.py --help   # plan の形
-python3 $R screens --map $M     # 画面の一覧
-python3 $R check   --map $M     # 到達できない画面、切れている箇所、マップの鮮度
+python3 $R screens     # 画面の一覧
+python3 $R check       # 到達できない画面、切れている箇所、マップの鮮度
 ```
+
+**route.py も manifest.py も、アプリのリポジトリで叩く。** 画面マップ（`screen-map/`）はカレントから上へ探す。別の場所で叩くときだけ `--map $M` を付ける。
 
 **`manifest.py --help` を先に見る。** plan の形も、`from` `do` の意味も、`runtime` `input` の
 使い分けも、そこに書いてある。**route.py のソースを読みに行かない** — 1000行あり、
@@ -224,7 +226,7 @@ python3 $R check   --map $M     # 到達できない画面、切れている箇�
 ```
 
 ```bash
-python3 ~/.claude/skills/sim-test-report/scripts/manifest.py <plan.json> <出力先> --device iphone --map $M
+python3 ~/.claude/skills/sim-test-report/scripts/manifest.py <plan.json> <出力先> --device iphone
 ```
 
 `<出力先>` は証跡の出力先ディレクトリ（証跡は `<出力先>/shots/` に撮る）。フローは plan.json と同じディレクトリに書かれる。経路が組めなければ route.py の理由が出て止まる。

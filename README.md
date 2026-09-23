@@ -62,11 +62,10 @@ plan から、Maestro のフローとテストの定義ファイル（`manifest.
 
 ```bash
 python3 ~/.claude/skills/sim-test-report/scripts/manifest.py \
-  ~/.claude/skills/sim-test-report/.work/flows/<slug>/plan.json <出力先> \
-  --device iphone --map <アプリのリポジトリ>
+  ~/.claude/skills/sim-test-report/.work/flows/<slug>/plan.json <出力先> --device iphone
 ```
 
-中で `route.py` の経路計算を使う。plan の各項目について、前の項目が終わった画面から `from` までの経路を画面マップから計算し、`do` の操作と撮影を繋いで、項目ごとのフローとして書き出す。
+アプリのリポジトリで叩く（画面マップはカレントから上へ探す。別の場所なら `--map`）。中で `route.py` の経路計算を使う。plan の各項目について、前の項目が終わった画面から `from` までの経路を画面マップから計算し、`do` の操作と撮影を繋いで、項目ごとのフローとして書き出す。
 
 ```yaml
 appId: tx-tem.AozoraReaderClient
