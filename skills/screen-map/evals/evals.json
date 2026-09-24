@@ -1,0 +1,41 @@
+{
+  "skill_name": "screen-map",
+  "note": "手順4（IDを振ってyamlを書く）に来た状況を渡し、振るIDのコード変更と screens/*.yaml を書かせる。シミュレーターは要らない。SKILL.md を軽くする前後で同じシナリオを走らせ、ルールが守られ続けているかを比べる（#32）。",
+  "evals": [
+    {
+      "id": "assign-ids",
+      "prompt": "手順2のレビューは済み、手順3の棚卸しでは既存の accessibilityIdentifier は無かった。いま手順4で、画面 browse（さがす画面。作品を検索して一覧から開く）に ID を振って screens/browse.yaml を書くところ。遷移先の book_detail はまだ書かない画面。次のソースに入れる変更（差分）と、browse.yaml の中身を書く。実測（手順5）はまだしない。\n\n// Features/Browse/BrowseView.swift\nstruct BrowseView: View {\n    @State var model: BrowseModel\n    var body: some View {\n        NavigationStack {\n            VStack {\n                SearchBar(text: $model.keyword, onSubmit: model.submit)   // 共有コンポーネント（UIViewRepresentable で UISearchBar を包む）\n                if model.failed {\n                    ErrorView(message: \"読み込めませんでした\") { model.reload() }   // 共有コンポーネント。メッセージと再読み込みボタンを持つ\n                } else {\n                    List(model.books) { book in\n                        NavigationLink(value: book) {\n                            BookRow(book: book)   // 作品名 book.title と著者名 book.author を表示。book.id は画面に出ない\n                        }\n                    }\n                }\n            }\n            .navigationTitle(\"さがす\")\n            .navigationDestination(for: Book.self) { BookDetailView(book: $0) }\n        }\n    }\n}\n\n// Features/Browse/BrowseModel.swift\n// keyword が変わると 0.3 秒のデバウンスの後に検索を送る。onSubmit では即座に送る。\n\n// Shared/SearchBar.swift, Shared/ErrorView.swift, Features/Browse/BookRow.swift がある。",
+      "assertions": [
+        "anchor は画面自体（VStack などのコンテナ）に振り、値は画面idと同じ browse。画面内の要素（タイトルや検索欄）を借りていない",
+        "新しく振る ID の接頭辞は画面idから導いた browse. で揃っている",
+        "ID は完成した文字列のリテラルで書いている。接頭辞を引数で渡して中で組み立てる形（idPrefix など）にしていない",
+        "共有コンポーネント（SearchBar）には、まず呼び出し側の modifier で ID を振っている。届かないと予測してコンポーネントに ID の引数を先回りで足していない",
+        "ErrorView の中の再読み込みボタンに ID を渡す必要があるなら、それは実測で届かなかった場合の手段として扱っている（または呼び出し側 modifier で振って実測で確かめる旨）。ID の引数を足すなら String? で、空文字のデフォルトを置いていない",
+        "一覧の行の ID は表示テキスト（book.title）で補間している。book.id や index を ID に入れていない",
+        "yaml では行のタップをパターン（browse.bookRow.* のように末尾 *）で書き、select.index で選び、capture を入れている",
+        "行のタップは to: book_detail で、book_detail を stub として置く（anchor と、そこへ入る actions。push で入るので戻る操作は書いてよい）ことに触れている",
+        "入力（text: browse.searchField）と送信キー（tap: Search）を別のエントリにしている。Search は OS 提供の ID で、lint の例外として報告する旨がある",
+        "text の値（打つ文字）をマップに書いていない",
+        "expect は操作で変わるものを指している。絞り込みの expect に一覧の行（元からあるもの）を置いていない。全エントリが同じ expect になっていない",
+        "files に共有コンポーネント（Shared/SearchBar.swift, Shared/ErrorView.swift）を入れていない。ID を振った画面専用のファイル（BrowseView.swift、行に振ったなら BookRow.swift）は入れている",
+        "names（呼び名）と summary（できること1行）を分けて書いている。id フィールドを持たせていない",
+        "エラー表示の状態を states（expect と when）で書いている"
+      ]
+    },
+    {
+      "id": "sheet-and-back",
+      "prompt": "画面 book_detail（詳細画面）を書くところ。詳細画面には「本棚に追加」ボタンがあり、押すと .confirmationDialog で「お気に入り」「あとで読む」「キャンセル」の3択が出る。選ぶとシートが閉じ、ボタンの表示が「本棚にあり」に変わる。詳細画面へは さがす画面（browse）と 履歴画面（history）の両方から push で入る。ナビゲーションの戻るボタンはカスタムしていない。著者名をタップすると著者画面（author。今回は書かない）へ push する。本文の表示倍率はスライダーで変えられる。book_detail.yaml と、必要なら他の screens/*.yaml を書き、手順6で報告することがあれば挙げる。",
+      "assertions": [
+        "confirmationDialog（シート）を別の画面として扱い、kind: modal で to を張り、選択肢はそのシート画面の actions に書いている",
+        "キャンセルは kind: dismiss で書いている",
+        "シートの選択肢は ID で指せない可能性があるので、手順5で実測して駄目なら by: label を使う旨がある（または by: label で書いて理由を報告に挙げている）",
+        "戻るボタンは OS 提供の BackButton をそのまま tap に書き、kind: back にしている。lint の例外として報告に挙げている",
+        "複数の入口（browse と history）があるので kind: back の to が嘘になりうる点に触れている（to を見直す・route.py の補足に出る等）",
+        "著者画面（author）は stub で置き、anchor とそこへ入る actions（push で入るので戻る操作は書いてよい）に留めている。操作の網羅はしていない",
+        "スライダーは今のスキーマでは書けないので actions に載せず、手順6で「actions に載せられなかった操作」として報告している",
+        "本棚に追加の結果の expect は操作で変わるもの（ボタンの表示が変わること）を指している",
+        "各画面は「そこから行ける先」だけを書いており、詳細画面への入り口（browse → book_detail）を book_detail.yaml に書いていない"
+      ]
+    }
+  ]
+}

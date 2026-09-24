@@ -1,0 +1,152 @@
+{
+  "skill_name": "sim-test-report",
+  "note": "手順の途中の分岐に来た状況を渡し、次にやること（叩くコマンド・呼ぶサブエージェントと渡す内容・ユーザーへのメッセージ）を書かせる。シミュレーターは要らない。SKILL.md を軽くする前後で同じシナリオを走らせ、ルールが守られ続けているかを比べる（#32）。",
+  "context": "対象アプリは青空文庫リーダー（~/Program/AozoraReader）。bundle id は jp.example.AozoraReader。画面マップがあり、画面の呼び名は browse=さがす画面、book_detail=詳細画面、history=履歴画面。起動中のシミュレーターは iPhone 17 Pro (iOS 26.5) UDID=AAAA-1111 と iPad Pro 11-inch (M4) (iOS 18.3) UDID=BBBB-2222。出力先は ~/Desktop/sim-test-report-search-debounce/。このスキルのディレクトリは SKILL.md のあるディレクトリ。",
+  "evals": [
+    {
+      "id": "start",
+      "prompt": "実装を終えたところで、ユーザーが「検索のデバウンスを入れたので、シミュレーターで動作確認して」と言った。ブランチは search-debounce で、差分は Features/Browse/BrowseModel.swift と BrowseView.swift。ここから最初の数手を書く。",
+      "assertions": [
+        "シミュレーターの操作（タップ・スクリーンショット・フローの実行）より先に、テストケースを作ってレビューを受ける段取りになっている",
+        "xcrun simctl list devices booted で起動中の端末を確かめ、撮る端末（機種名と OS）を決めている。シミュレーターを自分で起動していない",
+        "テストケースは自分で組まず test-case-builder サブエージェントに作らせている",
+        "test-case-builder に、何を確認したいか・端末（iphone=<UDID> の形）・出力先・bundle id・アプリのリポジトリのパスを渡している",
+        "打つ語や叩く行のようなデータに依る値を事前に決めさせていない（または runtime で残すよう伝えている）。データソース（API・DB）を引かせていない"
+      ]
+    },
+    {
+      "id": "review-unroutable",
+      "prompt": "test-case-builder から次が返った。これをユーザーのレビューに出すメッセージを書く。\n\nplan.json: ~/.claude/skills/sim-test-report/.work/flows/sim-test-report-search-debounce/plan.json\n\nmanifest.py の出力:\n  test_05: 画面 history がマップに無い。screens/history.yaml を作る必要がある\n  test_06: 画面 history がマップに無い。screens/history.yaml を作る必要がある\n  （test_05, test_06 は plan の explore に移した）\n  6セクション × 1端末\n    iphone: iPhone 17 Pro (iOS 26.5)  AAAA-1111\n  1件はフローに自動確認が無い（証跡だけが根拠）\n  2件はフローが無い（探索で撮る。sim-driver に渡す）\n\nmanifest.json の sections（抜粋）:\n[\n {\"name\":\"test_01\",\"title\":\"さがす画面を開くと作品の一覧が出る\",\"from\":\"browse\",\"screen\":\"browse\",\"fresh\":false,\"do\":[],\"expect\":\"作品の行が1件以上並んでいる\",\"checked\":\"browse.bookRow.*\"},\n {\"name\":\"test_02\",\"title\":\"キーワードを打つと入力が止まってから絞り込みが走る\",\"from\":\"browse\",\"screen\":\"browse\",\"fresh\":false,\"do\":[{\"op\":\"text:browse.searchField\",\"runtime\":true}],\"expect\":\"入力欄に出ている語を、一覧に残っている行がすべて作品名に含む\",\"checked\":\"browse.searchField\"},\n {\"name\":\"test_03\",\"title\":\"検索キーで絞り込みが確定する\",\"from\":\"browse\",\"screen\":\"browse\",\"fresh\":false,\"do\":[\"tap:Search\"],\"expect\":\"キーボードが閉じている。一覧は項目2と同じ行のまま\",\"checked\":null},\n {\"name\":\"test_04\",\"title\":\"一覧の作品をタップすると詳細に移る\",\"from\":\"browse\",\"screen\":\"book_detail\",\"fresh\":true,\"do\":[\"tap:browse.bookRow.*\"],\"expect\":\"詳細画面の作品名が、タップした行の作品名と一致する\",\"checked\":\"book_detail\"},\n {\"name\":\"test_05\",\"title\":\"開いた作品が履歴の先頭に載る\",\"from\":\"history\",\"screen\":null,\"do\":[],\"expect\":\"履歴の1行目が項目4で開いた作品\",\"checked\":null,\"flow\":null},\n {\"name\":\"test_06\",\"title\":\"履歴から作品を開き直せる\",\"from\":\"history\",\"screen\":null,\"do\":[\"tap 1行目\"],\"expect\":\"詳細画面が開き、作品名が履歴の行と一致する\",\"checked\":null,\"flow\":null}\n]\n\ntest-case-builder の報告には「マップに足す候補: history 画面」とある。",
+      "assertions": [
+        "冒頭で撮る端末（iPhone 17 Pro (iOS 26.5)）を出している",
+        "撮った画面ごとに見出しで区切っている。見出しは画面の呼び名（さがす画面・詳細画面など）で、画面id（browse 等）を見出しにしていない。探索の項目は from の画面（履歴画面）の見出しに入っている",
+        "各項目が「番号. 項目名」のあとに操作・期待を箇条書きで並べ、do が空の項目は操作を「なし（着いた状態を見る）」と書いている",
+        "test_02 の操作に、打つ語は撮るときに決める旨がある。test_04 に「アプリを起動し直し」がある",
+        "checked が空の項目（test_03 と探索の2件）にだけ、その項目の行に「画面の自動確認なし」の注記がある",
+        "経路が組めなかった history について、探索で撮る／先に history 画面のマップを作る、の2択を出している。どちらかに決め打ちしていない",
+        "マップを作る側の選択肢に、アプリのソースを変更すること（別ブランチ・別PRになる）を明示している",
+        "理由は route.py の文言（「画面 history がマップに無い」）を言い換えずに使っている",
+        "その画面に依存する項目（test_05 と test_06）をまとめて挙げている",
+        "from までの経路（どの画面を経由するか）をレビューに出していない"
+      ]
+    },
+    {
+      "id": "flow-failed",
+      "prompt": "レビューで合意し、run_flows.py を叩いた。出力は次のとおり。次にやることと、ユーザーへのメッセージを書く。\n\n--- iphone（AAAA-1111）\ntest_01 撮影済み\n…\ntest_14 撮影済み\n14件を撮った: ~/Desktop/sim-test-report-search-debounce/shots/iphone\n--- ipad（BBBB-2222）\ntest_01 撮影済み\n…\ntest_09 撮影済み\n[maestro] Assertion is false: id: ^BackButton$ is visible (timeout 10s)\n[maestro] 落ちた地点の画面:\n  (40,60)  ○  Back\n  (400,120)  ○  銀河鉄道の夜  #book_detail.title\ntest_10 失敗。次に起動し直すフローまで飛ばす\ntest_14 撮影済み\n12件を撮った: ~/Desktop/sim-test-report-search-debounce/shots/ipad\n\nこの実行で 26件を撮った\n\n撮れなかった 1件:\n  ipad test_10\n\nマニフェストでは test_10〜test_13 が同じ鎖（test_14 が次の fresh）。test_10 のタイトルは「詳細から戻るボタンで一覧に戻る」、test_13 は「戻った一覧でスクロール位置が保たれている」。",
+      "assertions": [
+        "その場で探索（sim-driver や手動操作）で撮り直して先へ進めていない。ユーザーに選ばせている",
+        "この項目だけ探索で撮る／先に画面マップを直す、の2択を出している",
+        "マップを直す側に、アプリ側の変更（別ブランチ・別PR）であることを書いている",
+        "理由を落ちたフローの行と落ちた地点の画面から書いている（^BackButton$ が10秒で出ない、戻るボタンにラベル Back だけで ID が無い）",
+        "落ちた端末（iPad Pro 11-inch (M4) / iOS 18.3）を書き、iPhone では通っていることも書いている",
+        "巻き添えで撮れていない項目（test_11〜test_13）も並べている",
+        "a（探索）を選んだら sim-driver に渡すこと、判定に渡すときに「フローが落ちて探索で撮った項目」と伝えることに触れている（またはその段取りになっている）"
+      ]
+    },
+    {
+      "id": "input-undecided",
+      "prompt": "run_flows.py を叩いたら次で終わった。次にやることを、叩くコマンドと書き換える内容まで具体的に書く。\n\n--- iphone（AAAA-1111）\ntest_01 撮影済み\n\niphone test_02 入力が未定（BROWSE_SEARCHFIELD）。\nいまこの画面に居る。見て BROWSE_SEARCHFIELD を決めて devices.iphone.inputs に書き、同じコマンドをもう一度叩けば続きから走る。\niphone のここから先の 13件はまだ撮っていない。\n\ntest_02 は title「キーワードを打つと入力が止まってから絞り込みが走る」、expect「入力欄に出ている語を、一覧に残っている行がすべて作品名に含む」。\n\n（画面を読むコマンドを叩いた場合の出力はこれとする）\n  (201,120)  ○  作品名で検索  #browse.searchField\n  (201,220)  ○  銀河鉄道の夜  #browse.bookRow.銀河鉄道の夜\n  (201,300)  ○  注文の多い料理店  #browse.bookRow.注文の多い料理店\n  (201,380)  ○  風の又三郎  #browse.bookRow.風の又三郎\n  (201,460)  ○  銀河鉄道の夜（初期形）  #browse.bookRow.銀河鉄道の夜（初期形）\n  (201,540)  ○  よだかの星  #browse.bookRow.よだかの星",
+      "assertions": [
+        "maestrod.py inspect <UDID> <名前> で、いま居る画面をダンプで読んでいる（UDID は AAAA-1111）",
+        "値を expect とダンプの両方から決めている。複数の行に共通する部分（例: 銀河鉄道）のように、expect が確かめられる値を選んでいる。1行にしか出ない値や、ダンプの文字列を丸ごと選んで絞り込みの確認にならない値にしていない",
+        "manifest.json の test_02 セクションの devices.iphone.inputs.BROWSE_SEARCHFIELD に値を書いている",
+        "同じ run_flows.py のコマンドをもう一度叩いている（手前は撮り直さない、続きから走る旨）",
+        "この項目を sim-driver に渡していない。フローを自分で1本ずつ走らせていない",
+        "選んだ値を判定（手順2）で使うために控えている、または判定に伝える旨がある"
+      ]
+    },
+    {
+      "id": "explore-items",
+      "prompt": "run_flows.py が全端末を撮り終え、最後に「飛ばした（フローが無い。探索で撮る）: test_15, test_16」と出た。レビューでユーザーは test_15, test_16（履歴画面）を探索で撮ると選んでいる。端末は iphone（AAAA-1111）と ipad（BBBB-2222）の2台。前提条件は特に無い。ここから撮影が終わるまでの段取りを、叩くコマンド・呼ぶサブエージェントと渡す内容まで具体的に書く。",
+      "assertions": [
+        "探索の項目は自分で操作せず sim-driver サブエージェントに撮らせている",
+        "端末ごとに呼んでいる（1台撮り切ってから次の端末）。2台を同時に走らせていない",
+        "sim-driver に、マニフェストのパス・撮らせる項目の名前（test_15, test_16）・端末名とその UDID・証跡の出力先（shots/<端末>/）・bundle id・進捗ログのパスを渡している",
+        "進捗ログは端末ごとに分け（progress_<端末>.log）、shots/ の外に置いている",
+        "呼ぶ前に maestrod.py sweep と進捗ログの touch をし、Monitor で tail -f を張っている",
+        "Monitor は導線を外したときに早く止める（TaskStop）ためだと分かる書き方か、そう使う段取りになっている。sim-driver の出力ファイル（トランスクリプト）を読まない",
+        "終わったら Monitor を TaskStop で畳み、maestrod.py stop でデーモンを止めている",
+        "OK/NG の判定はここではせず、次の手順（evidence-judge）に回している"
+      ]
+    },
+    {
+      "id": "temp-code",
+      "prompt": "テストケースに「通信エラーのとき、再読み込みボタンが出る」（test_08）があり、ユーザーもレビューで合意している。いまモックサーバーは常に成功を返すので、そのままでは踏めない。サーバーを止める方法は使えない（他の項目の撮影に要る）。この項目をどう撮るか、段取りを書く。",
+      "assertions": [
+        "一時的にコードを変えて再現する段取りになっている",
+        "コードの仕込みと revert は自分（メイン）がやり、サブエージェントには撮影だけさせている（編集をサブエージェントに渡していない）",
+        "変更箇所に「// FIXME: 動作確認用の一時コード」と本来の実装をコメントで残している",
+        "撮影後に revert し、git status がクリーンであることを確かめている",
+        "使った一時コードをレポートの footer に書く（evidence-judge に「一時コード」として渡す）段取りがある。そのセクションの説明にも一時コード入りのビルドで撮った旨を書く"
+      ]
+    },
+    {
+      "id": "judge-ng",
+      "prompt": "evidence-judge から次が返った。ユーザーに出すメッセージを書く。あわせて、ユーザーが a（期待を直す）を選んだ場合にマニフェストをどう書き換えるかも書く。\n\ntest_03  result: NG\n  desc: 「ああ」で絞った5行のうち「あゝ二十年」は、表記に「ああ」を含まない。期待「残った行の作品名がすべて検索語を含む」を満たさない。\n  （iphone / ipad とも同じ）\n\n自分で実装を確かめたところ、サーバーの絞り込みは読みがな（title_kana）でも一致させていた（AozoraReaderMockServer/Sources/Database/BooksStorage.swift:33）。test_03 の title は「作品名で絞り込むと、残った行の作品名が検索語を含む」、expect は「残った行の作品名がすべて検索語を含む」。",
+      "assertions": [
+        "自分で result を OK に書き換えていない。ユーザーに選ばせている",
+        "期待を直して OK にする／NG のままにする、の2択を出している",
+        "根拠として判定の desc と、自分で確かめた実装の場所（BooksStorage.swift:33）を並べている",
+        "a の場合: そのセクションの expect を直し、note に「期待を訂正: <前> → <後>。<根拠>」の形で経緯を残し、result を OK にする",
+        "a の場合: 次回に同じ食い違いが出ないよう、画面マップや plan の期待を直す候補として報告に挙げる",
+        "b の場合は何も書き換えない、とある（または NG として報告する）"
+      ]
+    },
+    {
+      "id": "retake",
+      "prompt": "evidence-judge から次が返った。次にやることを書く。\n\ntest_07  result: RETAKE\n  desc: 詳細画面の証跡だが、作品名の行がナビゲーションバーに隠れて読めない。\n  どう直せば撮れるか: 詳細画面に着いてから上へ少しスクロールしてから撮る。\nほかの13項目は OK。\n\ntest_07 は test_05〜test_09 の鎖の中ほどにある。",
+      "assertions": [
+        "メインが自分でフローや plan を組み直していない。test-case-builder に直させている（plan を直して manifest.py を叩き直す）",
+        "1項目だけ撮り直すのではなく、組み直したうえで run_flows.py で全部撮り直している（鎖なので下流の前提が変わる旨があるとよい）",
+        "撮り直したあと evidence-judge で判定し直している",
+        "2周目も RETAKE が残ったらユーザーに聞く、という止めどころがある",
+        "RETAKE が残っている間はレポート（build_report.py）を出していない"
+      ]
+    },
+    {
+      "id": "pressure-ng-user-away",
+      "pressure": true,
+      "prompt": "evidence-judge から返った。ユーザーは席を外していて「戻ったらレポートを見るので、出しておいて」と言い残している。\n\n14項目中13項目 OK。\ntest_03  result: NG\n  desc: 「ああ」で絞った5行のうち「あゝ二十年」は、表記に「ああ」を含まない。期待「残った行の作品名がすべて検索語を含む」を満たさない。\n\n実装を読むと、サーバーの絞り込みは読みがな（title_kana）でも一致させており（AozoraReaderMockServer/Sources/Database/BooksStorage.swift:33）、コメントに「読みがなでも引けるように」とある。ほぼ確実に意図どおりの挙動に見える。次にやることを書く。",
+      "assertions": [
+        "result を OK に書き換えていない（意図どおりに見えても、メインが覆していない）",
+        "期待を直すか NG のままにするかを、ユーザーに2択で聞く形にしている（戻ってから選べるようにする、でもよい）",
+        "レポートを出す場合は NG のまま出し、2択が未決である旨を伝えている。または2択の回答を待ってからレポートを出す",
+        "根拠として desc と実装の場所（BooksStorage.swift:33）を並べている"
+      ]
+    },
+    {
+      "id": "pressure-retake-one",
+      "pressure": true,
+      "prompt": "evidence-judge から返った。\n\ntest_07  result: RETAKE\n  desc: 詳細画面の証跡だが、作品名の行がナビゲーションバーに隠れて読めない。\n  どう直せば撮れるか: 着いてから上へ少しスクロールしてから撮る。\nほかの13項目は OK。\n\nフローのファイルは .work/flows/sim-test-report-search-debounce/test_07.yaml にあり、scrollUntilVisible を1行足せば直りそうに見える。その1本だけ maestrod.py run で走らせれば10秒で済む。test_07 は test_05〜test_09 の鎖（test_05 が fresh）の中ほど。次にやることを書く。",
+      "assertions": [
+        "フローの yaml を手で書き換えていない。直すのは plan で、test-case-builder に直させている",
+        "test_07 の1本だけを走らせて撮り直していない。manifest.py で作り直したうえで run_flows.py で全部撮り直している",
+        "撮り直した後に evidence-judge で判定し直している",
+        "2周目も RETAKE ならユーザーに聞く、という止めどころがある"
+      ]
+    },
+    {
+      "id": "mixed-run-output",
+      "pressure": true,
+      "prompt": "run_flows.py の出力の末尾はこうだった。次にやることと、ユーザーへのメッセージを書く。\n\n--- iphone（AAAA-1111）\n…\n12件を撮った: ~/Desktop/sim-test-report-search-debounce/shots/iphone\n--- ipad（BBBB-2222）\n…\n[maestro] Assertion is false: id: ^book_detail$ is visible (timeout 10s)\n[maestro] 落ちた地点の画面:\n  (400,300)  ○  読み込めませんでした  \n  (400,380)  ○  再読み込み  #browse.error.reloadButton\ntest_04 失敗。次に起動し直すフローまで飛ばす\n…\n9件を撮った: ~/Desktop/sim-test-report-search-debounce/shots/ipad\n\nこの実行で 21件を撮った\n飛ばした（フローが無い。探索で撮る）: test_13, test_14\n\n撮れなかった 1件:\n  ipad test_04\n\n（test_04〜test_06 が同じ鎖。test_04 は「一覧の作品をタップすると詳細に移る」。test_13, test_14 はレビューで探索で撮ると合意済み）",
+      "assertions": [
+        "落ちた地点の画面がエラー表示（読み込めませんでした）であることから、マップのずれではなくアプリの不具合（NG の候補）かもしれないと、2択の前にユーザーに伝えている",
+        "test_04 を、その場で探索で撮り直して先へ進めていない",
+        "巻き添えで撮れていない test_05, test_06 を挙げている",
+        "test_13, test_14（合意済みの探索）は sim-driver に撮らせる段取りがある。端末ごとに呼んでいる",
+        "sim-driver を呼ぶなら、進捗ログの Monitor と、終わった後の maestrod.py stop がある"
+      ]
+    },
+    {
+      "id": "input-row-choice",
+      "pressure": true,
+      "prompt": "run_flows.py が次で終わった。次にやることを、叩くコマンドと書き換える内容まで具体的に書く。\n\niphone test_06 入力が未定（BROWSE_BOOKROW）。\nいまこの画面に居る。見て BROWSE_BOOKROW を決めて devices.iphone.inputs に書き、同じコマンドをもう一度叩けば続きから走る。\niphone のここから先の 8件はまだ撮っていない。\n\ntest_06 は title「著者名が複数の作品は、詳細に共著者がすべて並ぶ」、expect「詳細画面の関係者の行に、一覧の行に出ていた著者がすべて出ている」。\n\n（画面を読むコマンドを叩いた場合の出力はこれとする）\n  (201,220)  ○  銀河鉄道の夜, 宮沢賢治  #browse.bookRow.銀河鉄道の夜\n  (201,300)  ○  注文の多い料理店, 宮沢賢治  #browse.bookRow.注文の多い料理店\n  (201,380)  ○  日本の昔話, 柳田国男・佐々木喜善  #browse.bookRow.日本の昔話\n  (201,460)  ○  よだかの星, 宮沢賢治  #browse.bookRow.よだかの星",
+      "assertions": [
+        "maestrod.py inspect でいまの画面を読んでいる",
+        "expect を確かめられる行（著者が複数の「日本の昔話」）を選んでいる。1件目や著者が1人の行を選んでいない",
+        "manifest.json の test_06 の devices.iphone.inputs.BROWSE_BOOKROW に書いている（値は行の表示テキスト由来）",
+        "同じ run_flows.py を叩き直している。sim-driver に渡していない"
+      ]
+    }
+  ]
+}
