@@ -1,45 +1,66 @@
 {
   "skill_name": "sim-test-report",
+  "note": "手順を通しで走らせたときの成果物を見る評価。手順の途中の分岐は branches.json、スクリプト自体の挙動はリポジトリ直下の tests/ で見る。",
   "evals": [
     {
       "id": 0,
-      "prompt": "iOSシミュレーターでの動作確認が完了しており、スクリーンショット4枚（各画面の説明付き）と確認内容の情報（Issue番号・ブランチ・環境・変更概要・補足）がある。これを単一HTMLの動作確認レポートにまとめる。",
-      "expected_output": "画像がbase64で埋め込まれた自己完結の単一HTMLレポート。確認項目ごとにスクショ・説明・OK/NGが並び、ヘッダにIssue/ブランチ/環境/実施日、フッタに補足がある。",
+      "prompt": "iPhone でのシミュレーター動作確認が終わり、判定も済んでいる。manifest.json には4項目（OK 3 / NG 1）があり、footer には補足（並び順はAPI未対応のため確認をスキップした、テストデータを3件作成した）が入っている。証跡は shots/iphone/test_01.png〜test_04.png。これをレポートにまとめてユーザーに届ける。",
+      "expected_output": "build_report.py で出した、画像を base64 で埋め込んだ単一HTMLのレポートと、PRに貼る1枚PNG。確認項目ごとに期待・結果・証跡・判定が並び、ヘッダに確認環境と実施日、フッタに補足がある。HTMLはその場でプレビュー、PNGは添付で届く。",
       "files": [
-        "shots/01_list_favorite_button.png",
-        "shots/02_favorite_filled.png",
-        "shots/03_favorite_tab.png",
-        "shots/04_logged_out_disabled.png"
+        "manifest.json",
+        "shots/iphone/test_01.png",
+        "shots/iphone/test_02.png",
+        "shots/iphone/test_03.png",
+        "shots/iphone/test_04.png"
       ],
       "assertions": [
-        "単一のHTMLファイルが出力ディレクトリに生成されている",
-        "4枚のスクリーンショット全てがbase64のdata URIとして埋め込まれている（data:image/png;base64 が4回以上出現）",
-        "外部リソース参照がない（http/httpsを参照する <img src>・<script src>・<link href> が存在しない）",
-        "4つの確認項目すべてに対応する記述がある（一覧のボタン表示・登録後の星の塗りつぶし・お気に入りタブへの反映・未ログイン時の非活性）",
-        "メタ情報としてIssue番号(123)・ブランチ名・確認環境(iPhone 16 / iOS 26.0)・実施日が含まれる",
-        "補足（並び順はAPI未対応のため確認をスキップした旨、テストデータを3件作成した旨）がレポートに含まれる",
-        "ファイルサイズが3MB未満である"
+        "レポートは build_report.py に manifest.json と題（--title）だけを渡して出している。HTMLを手で組んでいない",
+        "単一のHTMLファイルが出力ディレクトリに生成され、4枚の証跡がすべて base64 の data URI として埋め込まれている（data:image/png;base64 が4回以上出現）",
+        "外部リソース参照がない（http/https を参照する <img src>・<script src>・<link href> が存在しない）",
+        "4つの確認項目それぞれに、期待・結果（desc）・証跡・判定（OK/NG）が並んでいる",
+        "ヘッダに確認環境（manifest.json の devices の機種名と OS）と実施日がある。ブランチやコミットは載せていない",
+        "フッタに補足（並び順の確認をスキップした旨、テストデータを3件作成した旨）がある",
+        "HTMLと同じ場所に、PRコメントに貼る1枚PNGが出ている",
+        "SendUserFile で HTML を display: render、PNG を display: attach で送り、デスクトップのフォルダパスも伝えている"
       ]
     },
     {
       "id": 1,
-      "prompt": "iPhoneとiPadの両方でシミュレーター動作確認を済ませており、同じ確認項目3件をそれぞれの端末で撮ったスクリーンショット6枚がある。うち1項目はiPadでのみ表示が崩れていた。これを単一HTMLの動作確認レポートにまとめる。",
-      "expected_output": "確認項目ごとに1セクションで、iPhoneとiPadのスクリーンショットが端末ラベル付きで横に並ぶHTMLレポート。iPadだけ崩れた項目はセクション全体がNGになっている。",
+      "prompt": "iPhone と iPad の両方でシミュレーター動作確認を済ませており、同じ確認項目3件をそれぞれの端末で撮った証跡が6枚ある。うち1項目は iPad でのみ表示が崩れていた。判定からレポートを出すまで進める。",
+      "expected_output": "確認項目ごとに1セクションで、iPhone と iPad の証跡が端末ラベル付きで横に並ぶHTMLレポート。iPad だけ崩れた項目はセクション全体が NG になっている。",
       "files": [
-        "shots/iphone_01_section.png",
-        "shots/ipad_01_section.png",
-        "shots/iphone_02_saved_state.png",
-        "shots/ipad_02_saved_state.png",
-        "shots/iphone_03_list_order.png",
-        "shots/ipad_03_list_order.png"
+        "manifest.json",
+        "shots/iphone/test_01.png",
+        "shots/ipad/test_01.png",
+        "shots/iphone/test_02.png",
+        "shots/ipad/test_02.png",
+        "shots/iphone/test_03.png",
+        "shots/ipad/test_03.png"
       ],
       "assertions": [
         "セクションが3つで、端末ごとに項目が重複していない（「iPad」で始まるセクションタイトルが存在しない）",
         "各セクションに2枚の画像が並び、iPhone と iPad のラベルが付いている",
-        "6枚のスクリーンショット全てがbase64のdata URIとして埋め込まれている（data:image/png;base64 が6回以上出現）",
-        "iPadでのみ崩れた項目のresultがNGになっている（片方がOKでもセクション全体をOKにしない）",
+        "6枚の証跡すべてが base64 の data URI として埋め込まれている（data:image/png;base64 が6回以上出現）",
+        "iPad でのみ崩れた項目の result が NG になっている（片方が OK でもセクション全体を OK にしない）",
         "そのセクションの説明に、どちらの端末で何が起きたかが書かれている",
-        "外部リソース参照がない（http/httpsを参照する <img src>・<script src>・<link href> が存在しない）"
+        "外部リソース参照がない（http/https を参照する <img src>・<script src>・<link href> が存在しない）"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "画面マップのあるアプリ（このリポジトリの tests/fixtures/app）で、一覧画面の検索を変えた。入力が止まると絞り込みが走り、検索キーを押すと確定してキーボードが閉じる。これを確認したい。テストケースを test-case-builder に作らせ、plan.json と manifest.json ができてレビューに出せる状態にする。撮る端末は起動中の iPhone 1台。",
+      "expected_output": "test-case-builder が書いた plan.json と、manifest.py がそこから作った manifest.json とフロー。項目は一覧画面の検索に噛み合っていて、打つ語は撮影時に決める形で残っている。",
+      "files": [
+        "tests/fixtures/app/screen-map/"
+      ],
+      "assertions": [
+        "plan.json の各項目に from / do / title / expect がある。from は画面マップの画面id（list）",
+        "do の操作idがマップの actions と完全一致している（text:list.searchField、tap:Search）",
+        "打つ語は plan に焼き込まず、{\"op\": \"text:list.searchField\", \"runtime\": true} で撮影時に決める形になっている",
+        "入力（text）と検索キー（tap:Search）が別の項目になっている。デバウンスと確定を分けて確かめている",
+        "期待は値ではなく関係で書かれている（「入力欄に出ている語を含む行だけが並ぶ」のように）。データソース（API・DB）を引いて期待を作っていない",
+        "manifest.py が経路を組めて manifest.json を書いている。sections の数が plan の items と explore の合計と一致し、runtime の項目の inputs が空のまま残っている",
+        "manifest.json とフローを手で書き換えていない。直すなら plan.json を直して manifest.py を叩き直している"
       ]
     }
   ]
