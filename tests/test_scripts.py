@@ -226,6 +226,47 @@ class Manifest(unittest.TestCase):
         self.assertIsNone(explore["flow"])
         self.assertEqual(explore["input_use"], {})
 
+    def test_inputs_are_kept_when_rebuilt(self):
+        work = Path(tempfile.mkdtemp())
+        plan = work / "plan.json"
+        out = work / "out"
+
+        def build(items):
+            plan.write_text(json.dumps({"app": "x", "items": items}), encoding="utf-8")
+            fake = types.ModuleType("simulators")
+            fake.lookup = lambda udid: {"model": "iPhone 17 Pro", "os": "iOS 26.5"}
+            argv, mods = sys.argv, dict(sys.modules)
+            sys.modules["simulators"] = fake
+            sys.argv = ["manifest.py", str(plan), str(out), "--repo", str(FIXTURE),
+                        "--device", "iphone=AAAA"]
+            try:
+                with contextlib.redirect_stdout(io.StringIO()) as o:
+                    runpy.run_path(str(SCRIPTS / "manifest.py"), run_name="__main__")
+            finally:
+                sys.argv = argv
+                sys.modules.clear()
+                sys.modules.update(mods)
+            return json.loads((out / "manifest.json").read_text(encoding="utf-8")), o.getvalue()
+
+        text = {"from": "list", "title": "a", "expect": "a",
+                "do": [{"op": "text:list.searchField", "runtime": True}]}
+        m, _ = build([text])
+        m["sections"][0]["devices"]["iphone"]["inputs"]["LIST_SEARCHFIELD"] = "牛乳(1L)"
+        (out / "manifest.json").write_text(json.dumps(m, ensure_ascii=False), encoding="utf-8")
+
+        # 同じ変数なら引き継ぎ、引き継いだことを出す
+        m, printed = build([dict(text, fresh=True)])
+        self.assertEqual(m["sections"][0]["devices"]["iphone"]["inputs"],
+                         {"LIST_SEARCHFIELD": "牛乳(1L)"})
+        self.assertIn("test_01 iphone: LIST_SEARCHFIELD=牛乳(1L)", printed)
+
+        # 変数が変わったら空に戻す
+        m, _ = build([{"from": "list", "title": "a", "expect": "a",
+                       "do": [{"op": "tap:list.row.*", "runtime": True}]}])
+        self.assertEqual(m["sections"][0]["devices"]["iphone"]["inputs"], {"LIST_ROW": ""})
+        shutil.rmtree(Path(m["flows"]), ignore_errors=True)
+        shutil.rmtree(work)
+
 
 if __name__ == "__main__":
     unittest.main()
