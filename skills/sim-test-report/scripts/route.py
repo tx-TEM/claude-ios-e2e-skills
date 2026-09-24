@@ -235,15 +235,30 @@ def build(mp, segments, start=None):
                                  "この画面にあるのは {}"
                                  .format(tag, at, value, known or "（無し）")))
                 break
+            if found.get("to") and found.get("kind") in ("back", "dismiss"):
+                # goto の途中の戻ると同じく、戻り先は歩いた履歴を採る。`to` は静的な
+                # 宣言で、**複数の入口を持つ画面では嘘になる**（お気に入りから詳細に
+                # 入ったなら、戻る先は一覧ではなくお気に入りの手前）
+                if len(stack) < 2:
+                    # 起点以外の画面には必ず歩いて入っているので、履歴が尽きるのは
+                    # 起点に居るときだけ。起動直後の画面に戻る先は無い
+                    problems.append(("map", "{}: 起点 {} に戻る操作「{}」が書いてある。"
+                                     "起動直後の画面から戻る先は無い"
+                                     .format(tag, at, label_of(found))))
+                    break
+                dest = stack[-2]
+                if found["to"] != dest:
+                    notes.append("{} の「{}」は to: {} と書いてあるが、"
+                                 "歩いてきた履歴では {} に戻る。履歴を採った"
+                                 .format(at, label_of(found), found["to"], dest))
+                steps.append({"screen": at, "action": found, "to": dest})
+                stack.pop()
+                at = dest
+                continue
             steps.append({"screen": at, "action": found, "to": found.get("to")})
             if found.get("to"):
-                if found.get("kind") in ("back", "dismiss"):
-                    if len(stack) > 1:
-                        stack.pop()
-                    at = found["to"]
-                else:
-                    at = found["to"]
-                    stack.append(at)
+                at = found["to"]
+                stack.append(at)
             continue
 
         # goto
