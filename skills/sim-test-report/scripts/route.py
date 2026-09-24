@@ -254,9 +254,11 @@ def build(mp, segments, start=None):
                                      .format(tag, at, label_of(found))))
                     break
                 dest = stack[-2]
+                st = {"screen": at, "action": found, "to": dest}
                 if found.get("to") and found["to"] != dest:
-                    notes.append(stale_back_to(at, found, dest))
-                steps.append({"screen": at, "action": found, "to": dest})
+                    st["note"] = stale_back_to(at, found, dest)
+                    notes.append(st["note"])
+                steps.append(st)
                 stack.pop()
                 at = dest
                 continue
@@ -320,9 +322,11 @@ def build(mp, segments, start=None):
                 break
             # 戻り先は歩いた履歴で決める（どこから来たかで変わるので、マップには書かない）
             dest = stack[-2]
+            st = {"screen": at, "action": a, "to": dest}
             if a.get("to") and a["to"] != dest:
-                notes.append(stale_back_to(at, a, dest))
-            steps.append({"screen": at, "action": a, "to": dest})
+                st["note"] = stale_back_to(at, a, dest)
+                notes.append(st["note"])
+            steps.append(st)
             stack.pop()
             at = dest
         if broke:
@@ -437,7 +441,12 @@ def step_comment(mp, st):
 
 def emit_flow(mp, steps, app, clear_state, notes=None, timeout=10000,
               start=None, launch=True):
-    """`launch=False` はアプリを起動し直さない。続きのフローを出すため。"""
+    """`launch=False` はアプリを起動し直さない。続きのフローを出すため。
+
+    **補足はこのフローのステップに関係するものだけ。** 経路全体の補足（build の
+    notes）を渡すと、どのフローにも全項目ぶんが付き、どれがこの項目の話か読めない。
+    build の補足はそのステップの `note` に付いているので、ここで拾う。
+    """
     notes = list(notes or [])
     start = start or mp.start
     # **実行時に決める値は env に未定のまま置く。** 値を焼き込むと、
@@ -483,6 +492,8 @@ def emit_flow(mp, steps, app, clear_state, notes=None, timeout=10000,
             out.append("- takeScreenshot: " + q("${" + SHOTS_VAR + "}/" + st["shot"]))
             continue
         a = st["action"]
+        if st.get("note"):
+            notes.append(st["note"])
         out.append(step_comment(mp, st))
         op, target = op_of(a)
         sel = a.get("select") or {}
@@ -530,6 +541,7 @@ def emit_flow(mp, steps, app, clear_state, notes=None, timeout=10000,
         else:
             notes.append("「{}」の結果を確かめる expect がマップに無い".format(label_of(a)))
 
+    notes = list(dict.fromkeys(notes))   # 同じ画面の anchor 無しなどが重ならないように
     if notes:
         out.append("")
         out.extend("# 補足: " + n for n in notes)
@@ -1008,13 +1020,13 @@ def write_flows(plan, out_dir, repo, timeout=10000):
         # 起動も前半に出す。値を決める前に止めたとき、起動していなければ画面は見えない
         pre_name = None
         if pre_steps or (lch and main_steps is not seg_steps):
-            pre, _ = emit_flow(mp, pre_steps, app, clear, notes, timeout,
+            pre, _ = emit_flow(mp, pre_steps, app, clear, None, timeout,
                                seg_start, launch=lch)
             pre_name = shot + ".pre.yaml"
             (d / pre_name).write_text(pre, encoding="utf-8")
 
         # 自分で起動するのは1本目と fresh の項目。他は居る場所から続ける
-        flow, _ = emit_flow(mp, main_steps, app, clear, notes, timeout,
+        flow, _ = emit_flow(mp, main_steps, app, clear, None, timeout,
                             resume_at, launch=lch and pre_name is None)
         name = shot + ".yaml"
         (d / name).write_text(flow, encoding="utf-8")
