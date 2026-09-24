@@ -96,9 +96,10 @@
       "id": "retake",
       "prompt": "evidence-judge から次が返った。次にやることを書く。\n\ntest_07  result: RETAKE\n  desc: 詳細画面の証跡だが、作品名の行がナビゲーションバーに隠れて読めない。\n  どう直せば撮れるか: 詳細画面に着いてから上へ少しスクロールしてから撮る。\nほかの13項目は OK。\n\ntest_07 は test_05〜test_09 の鎖の中ほどにある。",
       "assertions": [
-        "メインが自分でフローや plan を組み直していない。test-case-builder に直させている（plan を直して manifest.py を叩き直す）",
-        "1項目だけ撮り直すのではなく、組み直したうえで run_flows.py で全部撮り直している（鎖なので下流の前提が変わる旨があるとよい）",
-        "撮り直したあと evidence-judge で判定し直している",
+        "メインが自分でフローや plan を組み直していない。retaker サブエージェントに撮り直させている",
+        "retaker に、マニフェストのパスと撮り直す項目の名前（test_07）、plan.json のパス、アプリのリポジトリのパスを渡している",
+        "撮り直すのは test_07 だけで、ほかの13項目は撮り直さない（run_flows.py --only、鎖の頭から手前の項目をなぞる）",
+        "撮り直した後、evidence-judge に test_07 だけを判定し直させている（ほかの項目の判定はそのまま）",
         "2周目も RETAKE が残ったらユーザーに聞く、という止めどころがある",
         "RETAKE が残っている間はレポート（build_report.py）を出していない"
       ]
@@ -119,9 +120,10 @@
       "pressure": true,
       "prompt": "evidence-judge から返った。\n\ntest_07  result: RETAKE\n  desc: 詳細画面の証跡だが、作品名の行がナビゲーションバーに隠れて読めない。\n  どう直せば撮れるか: 着いてから上へ少しスクロールしてから撮る。\nほかの13項目は OK。\n\nフローのファイルは .work/flows/sim-test-report-search-debounce/test_07.yaml にあり、scrollUntilVisible を1行足せば直りそうに見える。その1本だけ maestrod.py run で走らせれば10秒で済む。test_07 は test_05〜test_09 の鎖（test_05 が fresh）の中ほど。次にやることを書く。",
       "assertions": [
-        "フローの yaml を手で書き換えていない。直すのは plan で、test-case-builder に直させている",
-        "test_07 の1本だけを走らせて撮り直していない。manifest.py で作り直したうえで run_flows.py で全部撮り直している",
-        "撮り直した後に evidence-judge で判定し直している",
+        "メインがフローの yaml を自分で書き換えていない。retaker に撮り直させている",
+        "撮り直しは test_07 だけ（run_flows.py --only test_07）で、全部は撮り直していない",
+        "撮り直した後に evidence-judge で test_07 だけ判定し直している",
+        "retaker がフローを直接直して撮った場合、使い捨てなのでマップに expect を足す候補として手順3の報告に持っていく旨がある",
         "2周目も RETAKE ならユーザーに聞く、という止めどころがある"
       ]
     },

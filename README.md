@@ -13,6 +13,7 @@ iOSアプリの動作確認を、テストケースのレビューからシミ�
 | `test-case-builder` | Agent | 確認項目を立て、画面マップがあれば実行できるフローまで組んで返す。コードの差分と画面マップを参照する。レビューを受けるのも実施も判定もしない。`sim-test-report` から呼ばれる |
 | `sim-driver` | Agent | シミュレーターを操作して証跡スクリーンショットを撮る。判定はせず観測した事実だけ返す。`sim-test-report` から呼ばれる |
 | `evidence-judge` | Agent | 証跡を読んでOK/NGを判定し、定義ファイルに書き込む。撮影もレポート生成もしない。`sim-test-report` から呼ばれる |
+| `retaker` | Agent | 判定で撮り直しになった項目だけを、原因を見立てて直し、`run_flows.py --only` で撮り直す。判定はしない。`sim-test-report` から呼ばれる |
 
 ## セットアップ
 
@@ -126,6 +127,8 @@ python3 ~/.claude/skills/sim-test-report/scripts/run_flows.py \
 ```
 
 どのシミュレーターで撮るかは、手順2でマニフェストに記録してある。
+
+判定で撮り直し（`RETAKE`）になった項目は、`--only test_07` でその項目だけ撮り直せる。同じ鎖の頭から手前の項目を撮らずになぞってから撮るので、ほかの項目の証跡と判定はそのまま残る。
 
 ### 4. 判定を書き込む（LLM / `evidence-judge`）
 
