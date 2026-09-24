@@ -2,12 +2,12 @@ anchor: list
 names: [一覧]
 summary: 作品を検索して開く
 actions:
-  - text: list.searchField
+  - text: list.search_field
     result: 入力が止まると絞り込む
-    expect: list.searchField
+    expect: list.search_field
   - tap: Search
     result: 絞り込みを確定し、キーボードを閉じる
-    expect: list.searchField
+    expect: list.search_field
   - scroll: list.footer
     result: 末尾まで読み込む
     expect: list.footer

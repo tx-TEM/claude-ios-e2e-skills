@@ -23,7 +23,7 @@ files:                     # 主要ファイル（VC / VM / View）＋IDを振�
 
 actions:                   # この画面でできる操作と、その結果
   # 遷移する操作。結果が「別画面に移る」なので to を書く
-  - tap: item_list.addButton
+  - tap: item_list.add_button
     to: item_new
 
   - tap: item_list.cell
@@ -32,39 +32,39 @@ actions:                   # この画面でできる操作と、その結果
       index: 0                      # 実行時の選び方。識別子ではない
       capture: itemTitle            # その行のテキストを後続で使う
 
-  - tap: item_list.backButton       # 戻る操作。to は書かない（戻り先は来た道で決まる）
+  - tap: item_list.back_button       # 戻る操作。to は書かない（戻り先は来た道で決まる）
     kind: back
 
   # 遷移しない操作。何が起きるかと、それを確かめる観測点
-  - tap: item_list.favoriteButton
+  - tap: item_list.favorite_button
     result: セルにお気に入りの印が付く
-    expect: item_list.cell.favoriteBadge
+    expect: item_list.cell.favorite_badge
 
-  - tap: item_list.deleteButton
+  - tap: item_list.delete_button
     result: 行が消え、件数の表示が1つ減る
-    expect: item_list.countLabel
+    expect: item_list.count_label
 
-  - tap: item_list.bannerImage
+  - tap: item_list.banner_image
     to: promo
     in_tree: false                  # ツリーに行が出ない。座標が要る＝フローが切れる
 
   # タップ以外の操作。キーは操作の種類
-  - text: item_list.searchField
+  - text: item_list.search_field
     # 入力が入ったことは確かめられる。一覧が絞られたかは件数が無いと確かめられない
     result: 入力が止まると絞り込みを送り、一覧が入れ替わる
-    expect: item_list.searchField
+    expect: item_list.search_field
 
   - scroll: down
     result: 末尾に近づくと次のページを取得して一覧に足す
-    expect: item_list.countLabel
+    expect: item_list.count_label
 
   - tap: Clear text                 # IDが無くラベルしかない要素
     by: label
     result: 入力が消え、絞り込みが解除される
-    expect: item_list.searchField
+    expect: item_list.search_field
 
 states:                    # データ条件で表示が分かれる画面だけ書く
-  - expect: item_list.emptyView
+  - expect: item_list.empty_view
     when: 0件のとき
 ```
 
@@ -96,7 +96,7 @@ states:                    # データ条件で表示が分かれる画面だけ
 | `in_tree: false` | ビュー階層に行が出ない要素。座標が要る ⇒ **ここでフローが切れる** |
 
 - **`expect` は「その操作で変わるもの」を指す。** 操作しても変わらない要素を指すと、**操作が効かなくても通る**。一覧の絞り込みで `一覧の行` を指すのが典型で、行は元からあるので何も確かめていない。`result` に書いた変化と `expect` が対応しているか読み返す
-- **要素の状態も観測点になる。** 選択・非活性・チェックはビュー階層に出るので（`#browse.targetPicker.author [選択]`）、セグメントやタブの切替は**その要素が選択状態になったこと**で確かめられる。値が変わる要素（入力欄のプレースホルダ、件数ラベル）も同様に使える
+- **要素の状態も観測点になる。** 選択・非活性・チェックはビュー階層に出るので（`#browse.target_picker.author [選択]`）、セグメントやタブの切替は**その要素が選択状態になったこと**で確かめられる。値が変わる要素（入力欄のプレースホルダ、件数ラベル）も同様に使える
 - **1つの操作の結果を「確かめられる／られない」で割る。** 全か無かにしない。絞り込みなら「入力が入った」は入力欄の値で確かめられるが、「一覧が絞られた」は件数も空表示も無ければ確かめられない。**確かめられる方を `expect` に置き、確かめられない部分を手順6で報告する。** まとめて「置けない」と結論すると、置ける観測点まで落ちる
 - **全エントリが同じ `expect` になっていたら間違っている。** 操作ごとに結果が違うのだから、観測点も違うはず。指せる要素が無いなら、それは**確かめられない操作**なので手順6で報告する
 - **`by: label` を使う前に、その要素にIDを振れないか確かめる。** 同じファイルの `Text` や `Button` なら `.accessibilityIdentifier()` を足すだけで済む。**逃げ先が表示名だと、ローカライズを差し替えるPRで死ぬ** — セレクタに文言を使わない理由そのもの。表示名と別に不変な識別子が必要なら、`enum` に `identifier` を足すなどして作る。`by: label` が正当なのはOS提供の要素（`Clear text` など）とIDを持たせられないシートの選択肢だけ
@@ -132,7 +132,7 @@ anchor: review_dialog
 names: [レビュー依頼]
 summary: 起動3回目以降にランダムで出る
 actions:
-  - tap: review_dialog.laterButton
+  - tap: review_dialog.later_button
     kind: dismiss
 ```
 
@@ -167,6 +167,6 @@ auto_shows: [review_dialog]
 anchor: settings
 stub: true
 actions:
-  - tap: settings.itemListCell
+  - tap: settings.item_list_cell
     to: item_list
 ```

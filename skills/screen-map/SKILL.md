@@ -46,11 +46,11 @@ grep -rnc "NavigationLink\|navigationDestination\|pushViewController\|present(\|
 
 | 画面id | ファイル | anchor | actions | stub |
 |---|---|---|---|---|
-| `item_list` | `ItemListViewController.swift` 他2件 | `item_list` | addButton → item_new / cell → item_detail / favoriteButton（遷移なし） | |
-| `settings` | `SettingsViewController.swift` | `settings` | itemListCell → item_list | ✓ |
+| `item_list` | `ItemListViewController.swift` 他2件 | `item_list` | add_button → item_new / cell → item_detail / favorite_button（遷移なし） | |
+| `settings` | `SettingsViewController.swift` | `settings` | item_list_cell → item_list | ✓ |
 
 - **今回書かない画面は `stub` にする。** `to` の先として必要なだけの画面は、最低限 `anchor` とそこへ入る `actions` を書いて中身は作らない。これが無いと `to` を辿るたびに次の画面を書く羽目になり、アプリ全体に引きずられる
-- 画面idは `snake_case` で、**そのままファイル名になる**（`item_list` → `screens/item_list.yaml`）。**anchor は画面idそのもの、新しく振るIDの接頭辞も画面idそのもの**（`item_list`、`item_list.addButton`）。変換しない — 画面id・ファイル名・anchor・接頭辞が同じ文字列なら、どれからでも残りが引ける。lintが接頭辞を検査できるようにするため、新規分はここを崩さない。既存IDを流用する場合は接頭辞が揃わないので、**手順6でその一覧を報告する**（lintの例外になる）
+- 画面idは `snake_case` で、**そのままファイル名になる**（`item_list` → `screens/item_list.yaml`）。**anchor は画面idそのもの、新しく振るIDの接頭辞も画面idそのもの**（`item_list`、`item_list.add_button`）。変換しない — 画面id・ファイル名・anchor・接頭辞が同じ文字列なら、どれからでも残りが引ける。**役割名もスネークケース**（`add_button`、`search_field`）。IDは Swift の識別子ではなくただの文字列なので、Swift の命名（lowerCamelCase）に合わせない — 1つのIDの中でスネークとキャメルが混ざらないように。OS が持つID（`BackButton`、`Search`）はそのまま使う。lintが接頭辞を検査できるようにするため、新規分はここを崩さない。既存IDを流用する場合は接頭辞が揃わないので、**手順6でその一覧を報告する**（lintの例外になる）
 
 ### 3. 既存のIDを棚卸しする
 

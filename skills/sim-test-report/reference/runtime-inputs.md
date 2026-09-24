@@ -3,8 +3,8 @@
 手順1で `run_flows.py` が「入力が未定」で実行を終えたときに読む。
 
 ```
-test_02 入力が未定（BROWSE_SEARCHFIELD, BROWSE_BOOKROW）。
-いまこの画面に居る。見て BROWSE_SEARCHFIELD, BROWSE_BOOKROW を決めて devices.iphone.inputs に書き、同じコマンドをもう一度叩けば続きから走る。
+test_02 入力が未定（BROWSE_SEARCH_FIELD, BROWSE_BOOK_ROW）。
+いまこの画面に居る。見て BROWSE_SEARCH_FIELD, BROWSE_BOOK_ROW を決めて devices.iphone.inputs に書き、同じコマンドをもう一度叩けば続きから走る。
 ここから先の 6件はまだ撮っていない。
 ```
 
@@ -25,7 +25,7 @@ expect: 条件に合う行の詳細が開く              →  その条件を�
 **ダンプに出ている文字列をそのまま使うとは限らない。** 上の1つ目は `牛乳, 1,000ml` と `低脂肪牛乳, 900ml` から `牛乳` を取り出している。決めたら、そのセクションの `devices.<端末>.inputs` に書く。**値は端末ごと** — その端末の画面を見て決める。**決めた値は、正規表現のエスケープをかけずに書く。** 叩く行のようにセレクタ（正規表現）に入る値は、`run_flows.py` がマニフェストの `input_use` を見てエスケープする。自分でもかけると二重になって当たらない。
 
 ```json
-"devices": { "iphone": { "inputs": { "BROWSE_SEARCHFIELD": "牛乳", "BROWSE_BOOKROW": "低脂肪牛乳" } } }
+"devices": { "iphone": { "inputs": { "BROWSE_SEARCH_FIELD": "牛乳", "BROWSE_BOOK_ROW": "低脂肪牛乳" } } }
 ```
 
 **同じコマンドをもう一度叩く。** 止まった地点はマニフェストに記録されているので、撮り終えた端末は飛ばし、止まった端末の続きから走る。**手前は撮り直さない。**

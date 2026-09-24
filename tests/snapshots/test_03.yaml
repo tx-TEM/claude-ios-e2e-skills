@@ -12,6 +12,6 @@ env:
     id: '^Search$'
 - extendedWaitUntil:
     visible:
-      id: '^list\.searchField$'
+      id: '^list\.search_field$'
     timeout: 10000
 - takeScreenshot: '${SHOTS}/test_03'

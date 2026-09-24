@@ -5,7 +5,7 @@
   "evals": [
     {
       "id": "too-early",
-      "prompt": "撮り直す項目: test_07\n\nマニフェストの test_07:\n  title: 「読む」を押すとリーダーで本文が開く\n  expect: 作品の本文が表示されている\n  fresh: false（test_05 から続く鎖の中）\n  result: RETAKE\n  desc: 画面は白く、本文が描画される前に撮っている。ダンプにも本文の行が無い。本文の行が出てから撮れば判定できる。\n\nフロー test_07.yaml（抜粋）:\n  - tapOn:\n      id: '^detail\\.readButton$'\n  - extendedWaitUntil:\n      visible:\n        id: '^reader$'\n      timeout: 10000\n  - takeScreenshot: '${SHOTS}/test_07'\n\nダンプ shots/iphone/test_07.txt:\n  画面: 【不明】ナビゲーションバーが無い。遷移したかの判定には使えない\n  (195,422)  ○  #reader\n\n画面マップ（~/Program/AozoraReader/screen-map/screens/）:\n  detail.yaml の actions:\n    - tap: detail.readButton\n      to: reader\n  reader.yaml:\n    anchor: reader\n    names: [リーダー]\n    （本文のビューには accessibilityIdentifier reader.body が振ってある。以前の回のダンプでは本文の各段落が #reader.body の下に並んでいた）",
+      "prompt": "撮り直す項目: test_07\n\nマニフェストの test_07:\n  title: 「読む」を押すとリーダーで本文が開く\n  expect: 作品の本文が表示されている\n  fresh: false（test_05 から続く鎖の中）\n  result: RETAKE\n  desc: 画面は白く、本文が描画される前に撮っている。ダンプにも本文の行が無い。本文の行が出てから撮れば判定できる。\n\nフロー test_07.yaml（抜粋）:\n  - tapOn:\n      id: '^detail\\.read_button$'\n  - extendedWaitUntil:\n      visible:\n        id: '^reader$'\n      timeout: 10000\n  - takeScreenshot: '${SHOTS}/test_07'\n\nダンプ shots/iphone/test_07.txt:\n  画面: 【不明】ナビゲーションバーが無い。遷移したかの判定には使えない\n  (195,422)  ○  #reader\n\n画面マップ（~/Program/AozoraReader/screen-map/screens/）:\n  detail.yaml の actions:\n    - tap: detail.read_button\n      to: reader\n  reader.yaml:\n    anchor: reader\n    names: [リーダー]\n    （本文のビューには accessibilityIdentifier reader.body が振ってある。以前の回のダンプでは本文の各段落が #reader.body の下に並んでいた）",
       "assertions": [
         "原因を「撮るのが早い」（待っている reader の anchor は本文の描画前から出る）と見立てている",
         "plan は直さず、test_07 のフローだけに、撮る直前に reader.body（見たい状態でしか出ない要素）を待つ extendedWaitUntil を足している",
@@ -18,7 +18,7 @@
     },
     {
       "id": "wrong-precondition",
-      "prompt": "撮り直す項目: test_15\n\nマニフェストの test_15:\n  title: 一覧の作品を開くと、図書カードのリンクが出る\n  expect: 詳細画面に「図書カード」のリンクがある\n  fresh: false（test_12 から続く鎖の中。test_14 はさがす画面の一覧を下までスクロールする項目）\n  result: RETAKE\n  desc: 詳細画面ではなく、さがす画面の一番上が写っている。詳細画面に着いていないので判定できない。\n\nフロー test_15.yaml（抜粋）:\n  # 続き: browse から\n  - tapOn:\n      id: '^browse\\.bookRow\\..*'\n      index: 0\n  - extendedWaitUntil:\n      visible:\n        id: '^detail$'\n      timeout: 10000\n  - takeScreenshot: '${SHOTS}/test_15'\n\nダンプ shots/iphone/test_15.txt（前の撮影のもの）:\n  画面: さがす\n  (201,41)   ×  銀河鉄道の夜  #browse.bookRow.銀河鉄道の夜\n  (201,120)  ○  作品名で検索  #browse.searchField\n  (201,220)  ○  注文の多い料理店  #browse.bookRow.注文の多い料理店\n\nplan の該当項目:\n  {\"from\": \"browse\", \"title\": \"一覧の作品を開くと、図書カードのリンクが出る\", \"expect\": \"詳細画面に「図書カード」のリンクがある\", \"do\": [\"tap:browse.bookRow.*\"]}",
+      "prompt": "撮り直す項目: test_15\n\nマニフェストの test_15:\n  title: 一覧の作品を開くと、図書カードのリンクが出る\n  expect: 詳細画面に「図書カード」のリンクがある\n  fresh: false（test_12 から続く鎖の中。test_14 はさがす画面の一覧を下までスクロールする項目）\n  result: RETAKE\n  desc: 詳細画面ではなく、さがす画面の一番上が写っている。詳細画面に着いていないので判定できない。\n\nフロー test_15.yaml（抜粋）:\n  # 続き: browse から\n  - tapOn:\n      id: '^browse\\.book_row\\..*'\n      index: 0\n  - extendedWaitUntil:\n      visible:\n        id: '^detail$'\n      timeout: 10000\n  - takeScreenshot: '${SHOTS}/test_15'\n\nダンプ shots/iphone/test_15.txt（前の撮影のもの）:\n  画面: さがす\n  (201,41)   ×  銀河鉄道の夜  #browse.book_row.銀河鉄道の夜\n  (201,120)  ○  作品名で検索  #browse.search_field\n  (201,220)  ○  注文の多い料理店  #browse.book_row.注文の多い料理店\n\nplan の該当項目:\n  {\"from\": \"browse\", \"title\": \"一覧の作品を開くと、図書カードのリンクが出る\", \"expect\": \"詳細画面に「図書カード」のリンクがある\", \"do\": [\"tap:browse.book_row.*\"]}",
       "assertions": [
         "原因を「前提が違う」（前の項目で一覧をスクロールしたままで、1件目の行が検索欄の裏に隠れていた）と見立てている",
         "フローを直接直さず、plan の test_15 に fresh: true を付けている（起動し直した一覧は一番上から始まる）",
@@ -31,7 +31,7 @@
     },
     {
       "id": "outside-app",
-      "prompt": "撮り直す項目: test_16\n\nマニフェストの test_16:\n  title: 図書カードのリンクをタップすると Safari で図書カードが開く\n  expect: Safari に作品の図書カードのページが表示されている\n  fresh: true\n  result: RETAKE\n  desc: Safari は開いているが、ページが読み込み中で白い。読み込み後のページが写っていれば判定できる。\n\nフロー test_16.yaml（抜粋）:\n  - tapOn:\n      id: '^detail\\.cardLink$'\n  - takeScreenshot: '${SHOTS}/test_16'\n\n画面マップの detail.yaml:\n  - tap: detail.cardLink\n    result: Safari で図書カードのページが開く\n    （expect は無い。Safari はマップの対象外）",
+      "prompt": "撮り直す項目: test_16\n\nマニフェストの test_16:\n  title: 図書カードのリンクをタップすると Safari で図書カードが開く\n  expect: Safari に作品の図書カードのページが表示されている\n  fresh: true\n  result: RETAKE\n  desc: Safari は開いているが、ページが読み込み中で白い。読み込み後のページが写っていれば判定できる。\n\nフロー test_16.yaml（抜粋）:\n  - tapOn:\n      id: '^detail\\.card_link$'\n  - takeScreenshot: '${SHOTS}/test_16'\n\n画面マップの detail.yaml:\n  - tap: detail.card_link\n    result: Safari で図書カードのページが開く\n    （expect は無い。Safari はマップの対象外）",
       "assertions": [
         "Safari はアプリの外で、画面マップにも待つ要素が無いことに触れている",
         "撮れるかを確かめないまま、待ちを足したことにして撮れたと報告していない。Safari の中の要素を待てるか分からないなら、そう書いている",
@@ -42,7 +42,7 @@
     },
     {
       "id": "looks-like-bug",
-      "prompt": "撮り直す項目: test_09\n\nマニフェストの test_09:\n  title: 目次から章を選ぶと、その章の本文に移る\n  expect: 選んだ章の見出しが本文の先頭に出ている\n  fresh: false\n  result: RETAKE\n  desc: 本文の位置に「読み込めませんでした」と再読み込みボタンが出ている。章の本文が出ていないので判定できない。\n\nダンプ shots/iphone/test_09.txt:\n  画面: 第三章\n  (195,400)  ○  読み込めませんでした\n  (195,460)  ○  再読み込み  #reader.error.reloadButton\n\nフロー test_09.yaml は目次の章をタップし、^reader$ を待って撮っている。モックサーバーは実データを返す設定で、ほかの章（test_08）は本文が出ている。",
+      "prompt": "撮り直す項目: test_09\n\nマニフェストの test_09:\n  title: 目次から章を選ぶと、その章の本文に移る\n  expect: 選んだ章の見出しが本文の先頭に出ている\n  fresh: false\n  result: RETAKE\n  desc: 本文の位置に「読み込めませんでした」と再読み込みボタンが出ている。章の本文が出ていないので判定できない。\n\nダンプ shots/iphone/test_09.txt:\n  画面: 第三章\n  (195,400)  ○  読み込めませんでした\n  (195,460)  ○  再読み込み  #reader.error.reload_button\n\nフロー test_09.yaml は目次の章をタップし、^reader$ を待って撮っている。モックサーバーは実データを返す設定で、ほかの章（test_08）は本文が出ている。",
       "assertions": [
         "撮るタイミングではなく、アプリがエラーを出している（アプリの挙動がおかしい）と読んでいる",
         "撮り直しで隠そうとしていない（再読み込みボタンを押してから撮る、などをしていない）",
