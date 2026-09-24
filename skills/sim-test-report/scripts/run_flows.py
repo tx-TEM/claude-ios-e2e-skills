@@ -2,6 +2,7 @@
 """マニフェストに載っているフローを順に走らせ、証跡と同名のダンプを撮る。
 
   run_flows.py <manifest.json>
+  run_flows.py <manifest.json> --only test_15[,test_07]   その項目だけ撮り直す
 
 **どのシミュレーターで撮るかはマニフェストの `devices` に、フローの置き場は `flows` に
 入っている**（手順0で manifest.py が書いたもの）。ここで渡し直さない。その UDID が起動していなければ止まる — 別の端末で代用しない。
@@ -22,6 +23,12 @@
 間にアプリの画面を動かすものが入ると次の到達判定が落ちる。ここが最後まで
 走り切ってから sim-driver に渡せば、そうならない。マニフェストの並びに探索の
 セクションが混ざっていてもよい（実行しないだけ）。
+
+**`--only` はその項目だけ撮り直す**（判定の `RETAKE` を撮り直すとき）。フローは鎖なので、
+その項目だけを走らせても前提の状態が無い。**同じ鎖の頭（起動し直すフロー）から走らせ、
+手前の項目は撮らずになぞる。** なぞった項目の証跡と判定には触らない（撮影先は作業用の
+置き場に逃がす）。撮り直した項目だけ判定を `PENDING` に戻す。手前の項目の実行時の値は
+マニフェストに残っているものを使う — そこが空なら走らせられないので止まる。
 
 やることは1セクションにつき2つだけ。
 
@@ -131,17 +138,48 @@ def save(manifest_path, manifest):
                              encoding="utf-8")
 
 
-def run_device(manifest, manifest_path, flow_dir, device, udid, resume):
+def retake_runs(sections, only):
+    """`--only` で走らせるセクションと、その扱い。[(セクション, "shot" / "replay"), ...]。
+
+    撮り直す項目ごとに、**同じ鎖の頭（`launch` が真のフロー）からその項目まで**を走らせる。
+    手前の項目は `replay`（なぞるだけで撮らない）。同じ鎖に撮り直す項目が2つあれば、
+    鎖は1回だけ走らせる。
+    """
+    flows = [s for s in sections if s.get("flow")]
+    names = [s["name"] for s in flows]
+    for n in only:
+        if n not in names:
+            sec = next((s for s in sections if s.get("name") == n), None)
+            sys.exit(f"{n} はフローを持たない（探索で撮る項目）。sim-driver に渡す" if sec
+                     else f"{n} というセクションが無い。ある名前: {', '.join(names)}")
+    run = set()
+    for n in only:
+        t = names.index(n)
+        head = max(j for j in range(t + 1) if flows[j].get("launch") or j == 0)
+        run.update(range(head, t + 1))
+    return [(flows[j], "shot" if flows[j]["name"] in only else "replay") for j in sorted(run)]
+
+
+def run_device(manifest, manifest_path, flow_dir, device, udid, resume, only=None):
     """1台ぶんのフローを走らせる。(止まったか, 撮った数, 撮れなかった行) を返す。
 
     入力が未定で止まったら、その項目の名前を返す（呼ぶ側が再開位置に書く）。
+    `only` を渡すと、その項目だけ撮り直す（`retake_runs()`）。
     """
     out = manifest_path.parent
     shots, log = out / "shots" / device, out / f"progress_{device}.log"
     shots.mkdir(parents=True, exist_ok=True)
+    # なぞる項目の撮影先。証跡を上書きしないように、作業用の置き場に逃がす
+    scratch = HERE.parent / ".work" / "replay" / out.resolve().name / device
+    scratch.mkdir(parents=True, exist_ok=True)
 
     targets = [(i, s) for i, s in enumerate(manifest["sections"], 1) if s.get("flow")]
-    if resume:
+    mode = {}
+    if only:
+        runs = retake_runs(manifest["sections"], only)
+        mode = {s["name"]: m for s, m in runs}
+        targets = [(i, s) for i, s in targets if s["name"] in mode]
+    elif resume:
         names = [s["name"] for _, s in targets]
         if resume not in names:
             sys.exit(f"再開先 {resume} が見つからない。ある名前: {', '.join(names)}")
@@ -152,6 +190,8 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume):
     for i, sec in targets:
         name = sec["name"]
         line = name
+        replay = mode.get(name) == "replay"
+        dest = scratch if replay else shots
         if sec.get("launch"):
             broken = False          # ここから鎖が切り替わる
         if broken:
@@ -165,7 +205,7 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume):
             pre = flow_dir / sec["pre_flow"]
             if not pre.exists():
                 sys.exit(f"{name} 前半のフローが無い: {pre}")
-            if sh(["run", udid, "@" + str(pre), name + ".pre", str(shots)], quiet=False) != 0:
+            if sh(["run", udid, "@" + str(pre), name + ".pre", str(dest)], quiet=False) != 0:
                 broken = True
                 lost.append(f"{device} {line}")
                 with log.open("a", encoding="utf-8") as f:
@@ -179,11 +219,16 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume):
         body = flow.read_text(encoding="utf-8")
         need = required_env(body)
         # 撮影先は端末で決まる。決めるのはそれ以外の値
-        inputs = dict(sec["devices"][device].get("inputs") or {}, SHOTS=str(shots.resolve()))
+        inputs = dict(sec["devices"][device].get("inputs") or {}, SHOTS=str(dest.resolve()))
         # **未定ならそこで止まる。** 落ちたときは次の鎖へ進むが、こちらは進めない。
         # 先へ走らせると画面が変わってしまい、値を決めるために見ることができない。
         # **止まった時点でアプリはその画面に居る。** 値を埋めて叩き直せば続きから走る。
         undecided = [k for k in need if not inputs.get(k)]
+        if undecided and replay:
+            # なぞる項目の値は、前に撮ったときに決めてあるはず。ここで決めさせると、
+            # 撮り直しのたびに手前の項目の判断をやり直すことになる
+            sys.exit(f"{device} {name} の値が未定（{', '.join(undecided)}）。撮り直しは手前の項目を"
+                     f"なぞるので、devices.{device}.inputs に前に撮ったときの値が要る")
         if undecided:
             with log.open("a", encoding="utf-8") as f:
                 f.write(f"{line} 撮影せず 入力が未定（{', '.join(undecided)}）\n")
@@ -203,12 +248,16 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume):
             target = fill_env(body, need, inputs, uses or {})
 
         # 落ちたら、その run をもう一度は走らせない。1回目の出力をそのまま見せる
-        if sh(["run", udid, target, name, str(shots)], quiet=False) != 0:
+        if sh(["run", udid, target, name, str(dest)], quiet=False) != 0:
             broken = True
-            lost.append(f"{device} {line}")
+            lost.append(f"{device} {line}" + ("（なぞる途中で落ちた）" if replay else ""))
             with log.open("a", encoding="utf-8") as f:
                 f.write(f"{line} 撮影できず フローが失敗\n")
             print(f"{line} 失敗。次に起動し直すフローまで飛ばす", file=sys.stderr)
+            continue
+        if replay:
+            with log.open("a", encoding="utf-8") as f:
+                f.write(f"{line} なぞった（撮り直しの前提）\n")
             continue
         sh(["inspect", udid, name, str(shots)])   # 出力は捨てる
         sec["desc"], sec["note"], sec["result"] = "", "", "PENDING"   # 証跡が入れ替わったので判定も捨てる
@@ -229,6 +278,13 @@ def main():
     if "--help" in argv or "-h" in argv:
         print(__doc__)
         sys.exit(0)
+    only = None
+    if "--only" in argv:
+        i = argv.index("--only")
+        if i + 1 >= len(argv):
+            sys.exit("--only には撮り直す項目の名前を渡す（test_15 か test_07,test_15）")
+        only = [n for n in argv[i + 1].split(",") if n]
+        del argv[i:i + 2]
     unknown = [a for a in argv if a.startswith("--")]
     if unknown:
         sys.exit("知らない引数: " + ", ".join(unknown) + "（どの端末で撮るかはマニフェストに入っている）")
@@ -252,6 +308,25 @@ def main():
 
     if not any(s.get("flow") for s in manifest["sections"]):
         sys.exit("flow を持つセクションが無い。全部探索なので sim-driver に渡す。")
+
+    # 撮り直しは再開の状態を使わない。止まったら、同じコマンドでまた鎖の頭から走らせる
+    if only:
+        total, lost_all = 0, []
+        for d, u in pairs:
+            stopped, done, lost = run_device(manifest, manifest_path, flow_dir, d, u, None, only)
+            total += done
+            lost_all += lost
+            save(manifest_path, manifest)
+            if stopped:
+                print("値を埋めたら、同じコマンド（--only 付き）をもう一度叩く。鎖の頭からなぞり直す。")
+                sys.exit(1)
+        print(f"\nこの実行で {total}件を撮り直した（{', '.join(only)}）")
+        if lost_all:
+            print(f"\n撮れなかった {len(lost_all)}件:", file=sys.stderr)
+            for line in lost_all:
+                print("  " + line, file=sys.stderr)
+            sys.exit(1)
+        return
 
     # 前の実行が未定で止まっていれば、撮り終えた端末は飛ばし、止まった端末の続きから走る
     state = manifest.get("resume") or {}

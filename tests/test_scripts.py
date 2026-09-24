@@ -226,6 +226,193 @@ class Manifest(unittest.TestCase):
         self.assertIsNone(explore["flow"])
         self.assertEqual(explore["input_use"], {})
 
+    def test_inputs_are_kept_when_rebuilt(self):
+        work = Path(tempfile.mkdtemp())
+        plan = work / "plan.json"
+        out = work / "out"
+
+        def build(items):
+            plan.write_text(json.dumps({"app": "x", "items": items}), encoding="utf-8")
+            fake = types.ModuleType("simulators")
+            fake.lookup = lambda udid: {"model": "iPhone 17 Pro", "os": "iOS 26.5"}
+            argv, mods = sys.argv, dict(sys.modules)
+            sys.modules["simulators"] = fake
+            sys.argv = ["manifest.py", str(plan), str(out), "--repo", str(FIXTURE),
+                        "--device", "iphone=AAAA"]
+            try:
+                with contextlib.redirect_stdout(io.StringIO()) as o:
+                    runpy.run_path(str(SCRIPTS / "manifest.py"), run_name="__main__")
+            finally:
+                sys.argv = argv
+                sys.modules.clear()
+                sys.modules.update(mods)
+            return json.loads((out / "manifest.json").read_text(encoding="utf-8")), o.getvalue()
+
+        text = {"from": "list", "title": "a", "expect": "a",
+                "do": [{"op": "text:list.searchField", "runtime": True}]}
+        m, _ = build([text])
+        m["sections"][0]["devices"]["iphone"]["inputs"]["LIST_SEARCHFIELD"] = "牛乳(1L)"
+        (out / "manifest.json").write_text(json.dumps(m, ensure_ascii=False), encoding="utf-8")
+
+        # 同じ変数なら引き継ぎ、引き継いだことを出す
+        m, printed = build([dict(text, fresh=True)])
+        self.assertEqual(m["sections"][0]["devices"]["iphone"]["inputs"],
+                         {"LIST_SEARCHFIELD": "牛乳(1L)"})
+        self.assertIn("test_01 iphone: LIST_SEARCHFIELD=牛乳(1L)", printed)
+
+        # 変数が変わったら空に戻す
+        m, _ = build([{"from": "list", "title": "a", "expect": "a",
+                       "do": [{"op": "tap:list.row.*", "runtime": True}]}])
+        self.assertEqual(m["sections"][0]["devices"]["iphone"]["inputs"], {"LIST_ROW": ""})
+        shutil.rmtree(Path(m["flows"]), ignore_errors=True)
+        shutil.rmtree(work)
+
+
+class RetakeRuns(unittest.TestCase):
+    """#24: 撮り直す項目だけを、同じ鎖の頭からなぞって撮る。"""
+
+    SECTIONS = [
+        {"name": "test_01", "flow": "test_01.yaml", "launch": True},
+        {"name": "test_02", "flow": "test_02.yaml", "launch": False},
+        {"name": "test_03", "flow": "test_03.yaml", "launch": False},
+        {"name": "test_04", "flow": "test_04.yaml", "launch": True},    # fresh
+        {"name": "test_05", "flow": "test_05.yaml", "launch": False},
+        {"name": "test_06", "flow": None},                             # explore
+    ]
+
+    def runs(self, only):
+        return [(s["name"], m) for s, m in RF["retake_runs"](self.SECTIONS, only)]
+
+    def test_fresh_item_runs_alone(self):
+        self.assertEqual(self.runs(["test_04"]), [("test_04", "shot")])
+
+    def test_item_in_chain_replays_from_head(self):
+        self.assertEqual(self.runs(["test_03"]),
+                         [("test_01", "replay"), ("test_02", "replay"), ("test_03", "shot")])
+
+    def test_chain_runs_once_for_two_items(self):
+        self.assertEqual(self.runs(["test_02", "test_05"]),
+                         [("test_01", "replay"), ("test_02", "shot"),
+                          ("test_04", "replay"), ("test_05", "shot")])
+
+    def test_explore_item_is_refused(self):
+        with self.assertRaises(SystemExit) as cm:
+            self.runs(["test_06"])
+        self.assertIn("sim-driver", str(cm.exception.code))
+
+
+class RetakeRun(unittest.TestCase):
+    """#24: run_flows.py --only が実際に何を走らせ、どこへ撮り、何を書き換えるか。
+
+    Maestro は叩かない。`sh` を差し替えて、呼ばれた順と撮影先を記録する。
+    """
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.out = self.tmp / "out"
+        self.flows = self.tmp / "flows"
+        self.flows.mkdir(parents=True)
+        self.out.mkdir()
+        # 鎖は test_01〜03 と test_04〜05。test_02 は実行時の値 X を使う
+        env = {"test_02": ["X"]}
+        self.sections = []
+        for n, launch in [("test_01", True), ("test_02", False), ("test_03", False),
+                          ("test_04", True), ("test_05", False)]:
+            names = ["SHOTS"] + env.get(n, [])
+            (self.flows / f"{n}.yaml").write_text(
+                "appId: x\nenv:\n" + "".join(f"  {k}: ''\n" for k in names)
+                + "---\n- takeScreenshot: '${SHOTS}/" + n + "'\n", encoding="utf-8")
+            self.sections.append({
+                "name": n, "flow": f"{n}.yaml", "launch": launch, "pre_flow": None,
+                "input_use": {k: "text" for k in env.get(n, [])},
+                "devices": {"iphone": {"inputs": {k: "" for k in env.get(n, [])}}},
+                "desc": f"{n} の前の判定", "note": "", "result": "OK"})
+        self.sections[1]["devices"]["iphone"]["inputs"]["X"] = "牛乳"
+        self.calls, self.failing = [], set()
+        self.saved = {k: RF[k] for k in ("sh", "HERE")}
+        RF["HERE"] = self.tmp / "scripts"
+
+        def fake_sh(args, quiet=True):
+            # run <UDID> <フロー> <名前> <撮影先> / inspect <UDID> <名前> <撮影先>
+            cmd = args[0]
+            name, dest = (args[3], args[4]) if cmd == "run" else (args[2], args[3])
+            body = args[2] if cmd == "run" else ""
+            self.calls.append((cmd, name, Path(dest).name, body))
+            return 1 if (cmd == "run" and name in self.failing) else 0
+        RF["sh"] = fake_sh
+
+    def tearDown(self):
+        RF.update(self.saved)
+        shutil.rmtree(self.tmp)
+
+    def run_device(self, only):
+        manifest = {"sections": self.sections}
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            return RF["run_device"](manifest, self.out / "manifest.json", self.flows,
+                                    "iphone", "AAAA", None, only)
+
+    def sec(self, name):
+        return next(s for s in self.sections if s["name"] == name)
+
+    def test_replays_head_and_shoots_only_target(self):
+        stopped, done, lost = self.run_device(["test_03"])
+        self.assertEqual((stopped, done, lost), (None, 1, []))
+        runs = [(c, n, d) for c, n, d, _ in self.calls]
+        # 手前の2本は作業用の置き場（replay の下の端末名）に撮り、ダンプは取らない
+        self.assertEqual(runs, [("run", "test_01", "iphone"), ("run", "test_02", "iphone"),
+                                ("run", "test_03", "iphone"), ("inspect", "test_03", "iphone")])
+        replay_dest = self.tmp / ".work" / "replay" / "out" / "iphone"
+        self.assertTrue(replay_dest.is_dir())
+        shots = self.out / "shots" / "iphone"
+        self.assertTrue(shots.is_dir())
+        # なぞった項目の判定はそのまま。撮った項目だけ PENDING
+        self.assertEqual(self.sec("test_01")["result"], "OK")
+        self.assertEqual(self.sec("test_02")["desc"], "test_02 の前の判定")
+        self.assertEqual(self.sec("test_03")["result"], "PENDING")
+        self.assertEqual(self.sec("test_04")["result"], "OK")
+        # なぞる項目にも実行時の値が入る
+        self.assertIn("X: '牛乳'", self.calls[1][3])
+        log = (self.out / "progress_iphone.log").read_text(encoding="utf-8")
+        self.assertIn("test_01 なぞった", log)
+        self.assertIn("test_03 撮影済み", log)
+
+    def test_replay_writes_to_scratch_not_shots(self):
+        self.run_device(["test_02"])
+        body = self.calls[0][3]
+        # test_01 は SHOTS を作業用の置き場に向けて走る
+        self.assertIn(str((self.tmp / ".work" / "replay" / "out" / "iphone").resolve()), body)
+        self.assertNotIn(str((self.out / "shots").resolve()), body)
+
+    def test_fresh_target_runs_alone(self):
+        self.run_device(["test_04"])
+        self.assertEqual([(c, n) for c, n, _, _ in self.calls],
+                         [("run", "test_04"), ("inspect", "test_04")])
+
+    def test_replay_without_value_stops(self):
+        self.sec("test_02")["devices"]["iphone"]["inputs"]["X"] = ""
+        with self.assertRaises(SystemExit) as cm:
+            self.run_device(["test_03"])
+        self.assertIn("test_02 の値が未定", str(cm.exception.code))
+        self.assertIn("前に撮ったときの値が要る", str(cm.exception.code))
+
+    def test_failure_while_replaying_loses_target(self):
+        self.failing.add("test_02")
+        stopped, done, lost = self.run_device(["test_03"])
+        self.assertEqual(done, 0)
+        self.assertEqual(lost, ["iphone test_02（なぞる途中で落ちた）", "iphone test_03"])
+        # 撮れていないので、前の判定（RETAKE を出した判定）はそのまま
+        self.assertEqual(self.sec("test_03")["result"], "OK")
+        self.assertNotIn(("inspect", "test_03"), [(c, n) for c, n, _, _ in self.calls])
+
+    def test_other_chain_is_not_touched(self):
+        self.run_device(["test_05"])
+        self.assertEqual([n for c, n, _, _ in self.calls if c == "run"], ["test_04", "test_05"])
+
+    def test_full_run_is_unchanged(self):
+        stopped, done, lost = self.run_device(None)
+        self.assertEqual(done, 5)
+        self.assertTrue(all(s["result"] == "PENDING" for s in self.sections))
+
 
 if __name__ == "__main__":
     unittest.main()

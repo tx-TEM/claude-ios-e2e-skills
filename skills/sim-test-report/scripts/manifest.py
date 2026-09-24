@@ -92,6 +92,12 @@ build_report.py が result の無いセクションを拒むため（判定し�
 **同じ場所に既にマニフェストがあれば、判定の欄（`desc` / `note` / `result`）を
 引き継ぐ。** 引き継ぎのキーは証跡の名前。`title` / `expect` は plan が正で、
 直すなら plan を直して叩き直す。
+
+**実行時に決めた値（`inputs`）も、同じ変数名のものは引き継ぐ。** 撮り直し
+（`run_flows.py --only`）は手前の項目をなぞるので、前に撮ったときの値が要る。
+消すと、手前の項目の判断を撮り直しのたびにやり直すことになる。plan を直して
+変数が変わった（別の入力欄になった）ものは空に戻す。引き継いだものは出力に出す
+— データが変わっていれば古い値で走るので、見て直せるように。
 """
 import json
 import sys
@@ -190,7 +196,10 @@ def main():
             # これを見て、セレクタに入る値だけ正規表現としてエスケープする
             "input_use": dict(e.get("input_use") or {}),
             # 実行時に決める値は端末ごと（その端末の画面を見て決める）
-            "devices": {d: {"inputs": dict(e.get("inputs") or {})} for d in devices},
+            "devices": {d: {"inputs": {k: ((prev.get("devices") or {}).get(d) or {})
+                                           .get("inputs", {}).get(k, "")
+                                       for k in (e.get("inputs") or {})}}
+                        for d in devices},
             # 証跡は端末ごとに1枚。ダンプは同名の .txt
             "images": [{"src": f"shots/{d}/{name}.png", "label": LABELS.get(d, d)}
                        for d in devices],
@@ -201,6 +210,13 @@ def main():
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(dict(top, devices=info, flows=str(flows), sections=sections),
                               ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    carried = []
+    for sec in sections:
+        for d, dev in sec["devices"].items():
+            kept_inputs = {k: v for k, v in dev["inputs"].items() if v}
+            if kept_inputs:
+                carried.append("{} {}: {}".format(
+                    sec["name"], d, ", ".join(f"{k}={v}" for k, v in kept_inputs.items())))
     blank = sum(1 for s in sections if not s["flow"])
     empty = [s["name"] for s in sections if not s["title"] or not s["expect"]]
     print(out)
@@ -209,6 +225,10 @@ def main():
         print(f"    {n}: {info[n]['model']} ({info[n]['os']})  {info[n]['udid']}")
     if empty:
         print(f"  title か expect が空: {', '.join(empty)}。plan.json を埋めて叩き直す")
+    if carried:
+        print("  前のマニフェストから引き継いだ実行時の値（データが変わっていれば直す）:")
+        for c in carried:
+            print("    " + c)
     nochk = sum(1 for s in sections if s["flow"] and not s["checked"])
     if nochk:
         print(f"  {nochk}件はフローに自動確認が無い（証跡だけが根拠）")
