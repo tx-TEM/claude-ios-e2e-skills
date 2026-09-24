@@ -46,11 +46,11 @@ grep -rnc "NavigationLink\|navigationDestination\|pushViewController\|present(\|
 
 | 画面id | ファイル | anchor | actions | stub |
 |---|---|---|---|---|
-| `item_list` | `ItemListViewController.swift` 他2件 | `itemList.title` | addButton → item_new / cell → item_detail / favoriteButton（遷移なし） | |
-| `settings` | `SettingsViewController.swift` | `settings.title` | itemListCell → item_list | ✓ |
+| `item_list` | `ItemListViewController.swift` 他2件 | `item_list` | addButton → item_new / cell → item_detail / favoriteButton（遷移なし） | |
+| `settings` | `SettingsViewController.swift` | `settings` | itemListCell → item_list | ✓ |
 
 - **今回書かない画面は `stub` にする。** `to` の先として必要なだけの画面は、最低限 `anchor` とそこへ入る `actions` を書いて中身は作らない。これが無いと `to` を辿るたびに次の画面を書く羽目になり、アプリ全体に引きずられる
-- 画面idは `snake_case` で、**そのままファイル名になる**（`item_list` → `screens/item_list.yaml`）。**新しく振るIDの接頭辞も画面idから機械的に導く**（→ `itemList`）。lintが接頭辞を検査できるようにするため、新規分はここを崩さない。既存IDを流用する場合は接頭辞が揃わないので、**手順6でその一覧を報告する**（lintの例外になる）
+- 画面idは `snake_case` で、**そのままファイル名になる**（`item_list` → `screens/item_list.yaml`）。**anchor は画面idそのもの、新しく振るIDの接頭辞も画面idそのもの**（`item_list`、`item_list.addButton`）。変換しない — 画面id・ファイル名・anchor・接頭辞が同じ文字列なら、どれからでも残りが引ける。lintが接頭辞を検査できるようにするため、新規分はここを崩さない。既存IDを流用する場合は接頭辞が揃わないので、**手順6でその一覧を報告する**（lintの例外になる）
 
 ### 3. 既存のIDを棚卸しする
 
@@ -84,7 +84,7 @@ grep -rn "accessibilityIdentifier" --include="*.swift" . | head -50
 - **コードに書いた時点では未確定として扱う。** ビュー階層に出るかは手順5の実測で決まる
 - **共有コンポーネントには、まず呼び出し側の modifier で振る。届かないと実測で分かったときだけ、**コンポーネントがIDを受け取る形にする（`String?` で、空文字のデフォルトを置かない）。**予測でパラメータを足さない** — 実測すると届くことがある。どちらの形でもリテラルは画面のファイル側に置く
 - **`ForEach` の要素のIDは、画面側で `switch` して完成形を返す** — ドメインの型に持たせると、別画面で他画面のIDが振られる
-- **動的な一覧の行は表示テキスト（データ由来の文言）で補間する。`item.id` も index も入れない** — 画面にもダンプにも正しさを確かめる材料が無く、ずれても黙って別の行を叩いて通る。同名は `select.index` で選ぶ。マップ側はパターン（`itemList.cell.*`）で書き、名指しするときだけ表示テキストまで書く
+- **動的な一覧の行は表示テキスト（データ由来の文言）で補間する。`item.id` も index も入れない** — 画面にもダンプにも正しさを確かめる材料が無く、ずれても黙って別の行を叩いて通る。同名は `select.index` で選ぶ。マップ側はパターン（`item_list.cell.*`）で書き、名指しするときだけ表示テキストまで書く
 
 ### 5. 実測のビュー階層で検証する
 

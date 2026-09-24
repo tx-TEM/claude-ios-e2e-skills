@@ -9,7 +9,7 @@ start: root                # 起動直後の画面
 
 ```yaml
 # screens/item_list.yaml — ファイル名が画面id（item_list）
-anchor: itemList.title     # この画面にいることを証明するID
+anchor: item_list          # この画面にいることを証明するID。画面idそのもの
 
 names: [アイテム一覧, 一覧画面, 記録一覧]   # この画面の呼び名。社内での通称も入れる
 
@@ -23,48 +23,48 @@ files:                     # 主要ファイル（VC / VM / View）＋IDを振�
 
 actions:                   # この画面でできる操作と、その結果
   # 遷移する操作。結果が「別画面に移る」なので to を書く
-  - tap: itemList.addButton
+  - tap: item_list.addButton
     to: item_new
 
-  - tap: itemList.cell
+  - tap: item_list.cell
     to: item_detail
     select:
       index: 0                      # 実行時の選び方。識別子ではない
       capture: itemTitle            # その行のテキストを後続で使う
 
-  - tap: itemList.backButton       # 戻る操作。to は書かない（戻り先は来た道で決まる）
+  - tap: item_list.backButton       # 戻る操作。to は書かない（戻り先は来た道で決まる）
     kind: back
 
   # 遷移しない操作。何が起きるかと、それを確かめる観測点
-  - tap: itemList.favoriteButton
+  - tap: item_list.favoriteButton
     result: セルにお気に入りの印が付く
-    expect: itemList.cell.favoriteBadge
+    expect: item_list.cell.favoriteBadge
 
-  - tap: itemList.deleteButton
+  - tap: item_list.deleteButton
     result: 行が消え、件数の表示が1つ減る
-    expect: itemList.countLabel
+    expect: item_list.countLabel
 
-  - tap: itemList.bannerImage
+  - tap: item_list.bannerImage
     to: promo
     in_tree: false                  # ツリーに行が出ない。座標が要る＝フローが切れる
 
   # タップ以外の操作。キーは操作の種類
-  - text: itemList.searchField
+  - text: item_list.searchField
     # 入力が入ったことは確かめられる。一覧が絞られたかは件数が無いと確かめられない
     result: 入力が止まると絞り込みを送り、一覧が入れ替わる
-    expect: itemList.searchField
+    expect: item_list.searchField
 
   - scroll: down
     result: 末尾に近づくと次のページを取得して一覧に足す
-    expect: itemList.countLabel
+    expect: item_list.countLabel
 
   - tap: Clear text                 # IDが無くラベルしかない要素
     by: label
     result: 入力が消え、絞り込みが解除される
-    expect: itemList.searchField
+    expect: item_list.searchField
 
 states:                    # データ条件で表示が分かれる画面だけ書く
-  - expect: itemList.emptyView
+  - expect: item_list.emptyView
     when: 0件のとき
 ```
 
@@ -84,7 +84,7 @@ states:                    # データ条件で表示が分かれる画面だけ
 
 | | 意味 |
 |---|---|
-| `tap` | タップする要素のaccessibilityIdentifier。フローの `tapOn` になる。補間で組まれるIDは末尾に `*` を付けてパターンで書く（`itemList.cell.*`）。**特定の行を名指しするときは表示テキストまで書く**（`itemList.cell.牛乳`） |
+| `tap` | タップする要素のaccessibilityIdentifier。フローの `tapOn` になる。補間で組まれるIDは末尾に `*` を付けてパターンで書く（`item_list.cell.*`）。**特定の行を名指しするときは表示テキストまで書く**（`item_list.cell.牛乳`） |
 | `text` | **文字を打つ操作。** 値は入力欄のID。打つ文字はマップに書かない（テストケース側が決める）。フローでは前の文字を消してから打つ。ピッカーやスライダーのような値の指定はこれではない |
 | `scroll` | スクロールで起きる操作。値が要素のIDならそれが見えるまで（`scrollUntilVisible`）、`down` / `up` なら方向だけ。**ページネーションのように目標をIDで指せない操作はこちら。** 回数はデータ次第なので、結果は `expect` で確かめる |
 | `by: label` | **IDが無く、ラベルでしか指せない要素のとき。** `tap` の値をIDではなくラベル文字列として扱う（`tapOn: { text: }`）。ローカライズで壊れるので、自分で振れるならIDを振る。OS提供の要素（検索キーのクリアボタン等）だけの逃げ道 |
@@ -126,7 +126,7 @@ states:                    # データ条件で表示が分かれる画面だけ
 
 ```yaml
 # screens/settings.yaml
-anchor: settings.title
+anchor: settings
 stub: true
 actions:
   - tap: settings.itemListCell
