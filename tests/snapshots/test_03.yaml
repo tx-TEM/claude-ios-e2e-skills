@@ -1,0 +1,17 @@
+appId: jp.example.App
+env:
+  SHOTS: ''
+---
+# 続き: list から
+- extendedWaitUntil:
+    visible:
+      id: '^list$'
+    timeout: 10000
+# list: tap Search — 絞り込みを確定し、キーボードを閉じる
+- tapOn:
+    id: '^Search$'
+- extendedWaitUntil:
+    visible:
+      id: '^list\.searchField$'
+    timeout: 10000
+- takeScreenshot: '${SHOTS}/test_03'

@@ -1,0 +1,19 @@
+appId: jp.example.App
+env:
+  SHOTS: ''
+---
+- stopApp
+- launchApp
+# 起点: home
+- extendedWaitUntil:
+    visible:
+      id: '^home$'
+    timeout: 10000
+# home: tap home.list → list
+- tapOn:
+    id: '^home\.list$'
+- extendedWaitUntil:
+    visible:
+      id: '^list$'
+    timeout: 10000
+- takeScreenshot: '${SHOTS}/test_01'

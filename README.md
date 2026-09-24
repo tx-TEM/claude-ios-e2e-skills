@@ -98,6 +98,7 @@ env:
   "checked": "browse.searchField",
   "launch": false,
   "flow": "test_02.yaml",
+  "input_use": { "BROWSE_SEARCHFIELD": "text" },
   "devices": {
     "iphone": { "inputs": { "BROWSE_SEARCHFIELD": "" } },
     "ipad":   { "inputs": { "BROWSE_SEARCHFIELD": "" } }
@@ -130,7 +131,7 @@ python3 ~/.claude/skills/sim-test-report/scripts/run_flows.py \
 
 撮影したスクリーンショットとダンプを見て、結果を記録する。渡すのは定義ファイルのパスだけで、確認項目も期待も証跡もそこに入っている。
 
-項目ごとに観測した事実（`desc`）と OK / NG（`result`）を書く。期待を訂正したときや、画像以外を根拠にしたときは、その項目の注記（`note`）に残す。
+項目ごとに観測した事実（`desc`）と OK / NG（`result`）を書く。画像以外を根拠にしたときは、その項目の注記（`note`）に残す。期待のほうが狭かったと思えても期待は直さず NG のまま返し、期待を直すかはユーザーが選ぶ。
 
 ### 5. レポートを組む（`build_report.py`）
 
@@ -148,3 +149,15 @@ python3 ~/.claude/skills/sim-test-report/scripts/build_report.py <出力先>/man
 ![動作確認レポートの先頭部分](docs/report-example.png)
 
 スキルを経由せずここだけ使ってもよく、定義ファイルの形式は `build_report.py` 冒頭のdocstringを参照。
+
+## テスト
+
+スクリプト（`route.py` / `manifest.py` / `run_flows.py`）のテストは `tests/` にある。シミュレーターも Maestro も要らない。
+
+```bash
+python3 -m unittest discover tests
+```
+
+`tests/fixtures/app` の画面マップと plan から書かれるフローを、`tests/snapshots/` と比べる。フローの書き方を変えたときは `UPDATE_SNAPSHOTS=1` を付けて書き直し、差分を読んでから入れる。
+
+スキル（LLM の振る舞い）の評価は `skills/*/evals/` にある。

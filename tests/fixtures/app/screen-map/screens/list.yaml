@@ -1,0 +1,19 @@
+anchor: list
+names: [一覧]
+summary: 作品を検索して開く
+actions:
+  - text: list.searchField
+    result: 入力が止まると絞り込む
+    expect: list.searchField
+  - tap: Search
+    result: 絞り込みを確定し、キーボードを閉じる
+    expect: list.searchField
+  - scroll: list.footer
+    result: 末尾まで読み込む
+    expect: list.footer
+  - tap: list.row.*
+    to: detail
+    select:
+      index: 0
+  - tap: BackButton
+    kind: back

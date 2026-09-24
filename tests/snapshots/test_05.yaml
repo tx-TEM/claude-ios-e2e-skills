@@ -1,0 +1,19 @@
+appId: jp.example.App
+env:
+  SHOTS: ''
+  LIST_ROW: ''
+---
+# 続き: list から
+- extendedWaitUntil:
+    visible:
+      id: '^list$'
+    timeout: 10000
+# list: tap list.row.* [index 0] → detail
+- tapOn:
+    id: '^list\.row\.${LIST_ROW}$'
+    index: 0
+- extendedWaitUntil:
+    visible:
+      id: '^detail$'
+    timeout: 10000
+- takeScreenshot: '${SHOTS}/test_05'
