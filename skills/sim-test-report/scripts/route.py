@@ -397,8 +397,8 @@ def build(mp, segments, start=None):
 # ---------- 出す ----------
 
 def var_name(target):
-    """操作のidから env の変数名を作る。`browse.searchField` → `BROWSE_SEARCHFIELD`。
-    末尾のパターン記号（`browse.bookRow.*`）は落とす。
+    """操作のidから env の変数名を作る。`browse.search_field` → `BROWSE_SEARCH_FIELD`。
+    末尾のパターン記号（`browse.book_row.*`）は落とす。
 
     **呼ぶ側に名前を決めさせない。** idから決まるので、フローと索引と
     マニフェストで同じ名前になり、突き合わせに手が要らない。
@@ -429,7 +429,7 @@ def sel_id(value):
 
     Maestro の id は正規表現なので、そのまま渡すと `.` が任意の1文字になり、
     `browse` が `browsex` にも当たる。**当たってほしいものにだけ当てる。**
-    末尾 `*` はマップのパターン記法（`browse.bookRow.*`）で、前方一致の意味。
+    末尾 `*` はマップのパターン記法（`browse.book_row.*`）で、前方一致の意味。
     """
     if value.endswith("*"):
         return "^" + re.escape(value[:-1]) + ".*"

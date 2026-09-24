@@ -1,20 +1,20 @@
 appId: jp.example.App
 env:
   SHOTS: ''
-  LIST_SEARCHFIELD: ''
+  LIST_SEARCH_FIELD: ''
 ---
 # 続き: list から
 - extendedWaitUntil:
     visible:
       id: '^list$'
     timeout: 10000
-# list: text list.searchField — 入力が止まると絞り込む
+# list: text list.search_field — 入力が止まると絞り込む
 - tapOn:
-    id: '^list\.searchField$'
+    id: '^list\.search_field$'
 - eraseText
-- inputText: ${LIST_SEARCHFIELD}
+- inputText: ${LIST_SEARCH_FIELD}
 - extendedWaitUntil:
     visible:
-      id: '^list\.searchField$'
+      id: '^list\.search_field$'
     timeout: 10000
 - takeScreenshot: '${SHOTS}/test_02'

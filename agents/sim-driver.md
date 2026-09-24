@@ -142,7 +142,7 @@ python3 $M run <UDID> 'appId: <bundle id>
 4. **前後の画面識別子を突き合わせ、遷移したかまで出す**
 
 ```
-タップ (327,784) 「#settings.tabButton」 → ItemFeature.ItemListView から 設定 へ
+タップ (327,784) 「#settings.tab_button」 → ItemFeature.ItemListView から 設定 へ
 ```
 
 **`「〜」` に出るラベルは、叩いた対象の証明ではない。** 拾っているのは40pt以内でいちばん近い要素なので、**座標がずれていても隣の要素のラベルが出る。** 当たったように見えるだけのことがある。

@@ -22,7 +22,7 @@ SwiftUIのコンテナに振ったIDは要素として出る（実測で確認�
 **IDはリテラルで1箇所に書く。接頭辞と役割名を分けて合成しない。** 合成すると、完成したIDがソースのどこにも文字列として存在しなくなり、**ID生存チェックのgrepが生きているIDを `dead` と誤判定する。**
 
 ```swift
-// 悪い: "browse.error.reloadButton" がどこにも literal で無い
+// 悪い: "browse.error.reload_button" がどこにも literal で無い
 ErrorView(idPrefix: "browse.error") { ... }
 ```
 
@@ -42,7 +42,7 @@ ErrorView(idPrefix: "browse.error") { ... }
 
 ```swift
 SearchBar(text: $model.keyword, ...)
-    .accessibilityIdentifier("browse.searchField")
+    .accessibilityIdentifier("browse.search_field")
 ```
 
 **振ってから実測で確かめる。届かないことがある。**
@@ -56,7 +56,7 @@ SearchBar(text: $model.keyword, ...)
 **届かなかった場合だけ、コンポーネントがIDを受け取る形にする。** 順序を逆にしない。**「このコンポーネントは届かないだろう」と予測してパラメータを足さない** — 実測すると届くことがある。
 
 ```swift
-ErrorView(reloadIdentifier: "browse.error.reloadButton") { ... }
+ErrorView(reloadIdentifier: "browse.error.reload_button") { ... }
 ```
 
 **渡すIDは最小限にする。** タップ対象にだけ渡し、状態の観測はそのIDで兼ねる（再読み込みボタンが見えていればエラー状態なので、メッセージ用のIDは要らない）。役割ごとに配るとパラメータが増えるだけになる。
@@ -84,20 +84,20 @@ if let reloadIdentifier {
 extension FilterTarget {
     var identifier: String {
         switch self {
-        case .title: "browse.targetPicker.title"
+        case .title: "browse.target_picker.title"
 ```
 
 ```swift
-// 悪い: 合成なので "browse.targetPicker.title" が literal で無い
-.accessibilityIdentifier("browse.targetPicker.\(target.identifier)")
+// 悪い: 合成なので "browse.target_picker.title" が literal で無い
+.accessibilityIdentifier("browse.target_picker.\(target.identifier)")
 ```
 
 ```swift
 // 良い: 画面のファイルで switch して完成形を返す
 private func identifier(for target: FilterTarget) -> String {
     switch target {
-    case .title: "browse.targetPicker.title"
-    case .author: "browse.targetPicker.author"
+    case .title: "browse.target_picker.title"
+    case .author: "browse.target_picker.author"
     }
 }
 ```

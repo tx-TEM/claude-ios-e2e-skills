@@ -44,7 +44,7 @@ clone したディレクトリで `./install.sh` を実行する。`~/.claude/` 
      "expect": "絞り込み無しの一覧が出て、作品の行が複数並んでいる"},
     {"from": "browse",
      "title": "キーワード入力でデバウンス絞り込みが走る",
-     "do": [{"op": "text:browse.searchField", "runtime": true}],
+     "do": [{"op": "text:browse.search_field", "runtime": true}],
      "expect": "入力欄に出ている語を、一覧に残っている行がすべて作品名に含む"},
     {"from": "browse", "fresh": true,
      "title": "一覧をスクロールすると次のページが読み込まれる",
@@ -72,15 +72,15 @@ python3 ~/.claude/skills/sim-test-report/scripts/manifest.py \
 ```yaml
 appId: tx-tem.AozoraReaderClient
 env:
-  BROWSE_SEARCHFIELD: ''
+  BROWSE_SEARCH_FIELD: ''
 ---
 - tapOn:
-    id: '^browse\.searchField$'
+    id: '^browse\.search_field$'
 - eraseText
-- inputText: ${BROWSE_SEARCHFIELD}
+- inputText: ${BROWSE_SEARCH_FIELD}
 - extendedWaitUntil:
     visible:
-      id: '^browse\.searchField$'
+      id: '^browse\.search_field$'
     timeout: 10000
 - takeScreenshot: '<出力先>/shots/iphone/test_02'
 ```
@@ -96,13 +96,13 @@ env:
   "from": "browse",
   "screen": "browse",
   "expect": "入力欄に出ている語を、一覧に残っている行がすべて作品名に含む",
-  "checked": "browse.searchField",
+  "checked": "browse.search_field",
   "launch": false,
   "flow": "test_02.yaml",
-  "input_use": { "BROWSE_SEARCHFIELD": "text" },
+  "input_use": { "BROWSE_SEARCH_FIELD": "text" },
   "devices": {
-    "iphone": { "inputs": { "BROWSE_SEARCHFIELD": "" } },
-    "ipad":   { "inputs": { "BROWSE_SEARCHFIELD": "" } }
+    "iphone": { "inputs": { "BROWSE_SEARCH_FIELD": "" } },
+    "ipad":   { "inputs": { "BROWSE_SEARCH_FIELD": "" } }
   },
   "images": [
     { "src": "shots/iphone/test_02.png", "label": "iPhone" },
