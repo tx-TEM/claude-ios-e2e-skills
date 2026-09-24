@@ -405,6 +405,9 @@ def q(s):
     return "'" + s.replace("'", "''") + "'"
 
 
+SCROLL_TIMEOUT = 60000   # scrollUntilVisible の上限。理由は emit_flow の scroll の箇所
+
+
 def wait_for(selector, value, timeout):
     """要素が出るまで待つ。出なければ落ちる。
 
@@ -526,8 +529,13 @@ def emit_flow(mp, steps, app, clear_state, notes=None, timeout=10000,
             elif target == "up":
                 out.append("- swipe:\n    direction: DOWN")   # 内容を下へ＝上へ戻る
             else:
+                # **ここだけ要素を待つ時間（wait_for）より長い。** wait_for はその場に出るのを
+                # 待つだけだが、scrollUntilVisible はその間スクロールを繰り返す。スクロール
+                # 1回は実測5〜8秒（maestrod.py の実測）で、60秒でも8〜12回ぶんにしかならない。
+                # 短くすると、一覧の下の方にある要素が見つかる前に落ちる。見つからない要素で
+                # 1分持っていかれるのは、スクロールを伴う項目だけの代償として受け入れる
                 out.append("- scrollUntilVisible:\n    element:\n      id: {}\n"
-                           "    direction: DOWN\n    timeout: 60000".format(q(sel_id(target))))
+                           "    direction: DOWN\n    timeout: {}".format(q(sel_id(target)), SCROLL_TIMEOUT))
         else:
             notes.append("種類の分からない操作を飛ばした: {}".format(a))
             continue
