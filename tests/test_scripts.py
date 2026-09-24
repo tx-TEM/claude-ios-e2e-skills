@@ -268,5 +268,38 @@ class Manifest(unittest.TestCase):
         shutil.rmtree(work)
 
 
+class RetakeRuns(unittest.TestCase):
+    """#24: 撮り直す項目だけを、同じ鎖の頭からなぞって撮る。"""
+
+    SECTIONS = [
+        {"name": "test_01", "flow": "test_01.yaml", "launch": True},
+        {"name": "test_02", "flow": "test_02.yaml", "launch": False},
+        {"name": "test_03", "flow": "test_03.yaml", "launch": False},
+        {"name": "test_04", "flow": "test_04.yaml", "launch": True},    # fresh
+        {"name": "test_05", "flow": "test_05.yaml", "launch": False},
+        {"name": "test_06", "flow": None},                             # explore
+    ]
+
+    def runs(self, only):
+        return [(s["name"], m) for s, m in RF["retake_runs"](self.SECTIONS, only)]
+
+    def test_fresh_item_runs_alone(self):
+        self.assertEqual(self.runs(["test_04"]), [("test_04", "shot")])
+
+    def test_item_in_chain_replays_from_head(self):
+        self.assertEqual(self.runs(["test_03"]),
+                         [("test_01", "replay"), ("test_02", "replay"), ("test_03", "shot")])
+
+    def test_chain_runs_once_for_two_items(self):
+        self.assertEqual(self.runs(["test_02", "test_05"]),
+                         [("test_01", "replay"), ("test_02", "shot"),
+                          ("test_04", "replay"), ("test_05", "shot")])
+
+    def test_explore_item_is_refused(self):
+        with self.assertRaises(SystemExit) as cm:
+            self.runs(["test_06"])
+        self.assertIn("sim-driver", str(cm.exception.code))
+
+
 if __name__ == "__main__":
     unittest.main()
