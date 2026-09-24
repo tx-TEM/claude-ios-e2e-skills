@@ -41,6 +41,9 @@
 画面まで運び、後半が値を使う。**前半を走らせてから止まる** — 着いていないと、
 値を決めるために画面を見ることができない。再開のときは前半を飛ばす（もうそこに居る）。
 
+**セレクタに入る値だけ正規表現としてエスケープする**（`fill_env()`）。どれがそうかは
+マニフェストの `input_use` を見る。inputs に書く側はエスケープをかけない。
+
 **値はフローに書き戻さない。** マニフェストの `devices.<端末>.inputs` を走らせる直前に env へ
 入れる。フローに残すと、次の実行で「もう埋まっている」ことになり、データが
 変わっても古い値で走る。
@@ -89,6 +92,24 @@ def required_env(body):
 def yaml_quote(v):
     """env の値をシングルクォートで包む。正規表現の `\\` を素通しするため。"""
     return "'" + str(v).replace("'", "''") + "'"
+
+
+def fill_env(body, need, inputs, uses):
+    """フローの env: ブロックに値を埋める。`uses` は変数名 → `selector` / `text`。
+
+    **セレクタに入る値は正規表現としてエスケープする。** tapOn の id / text は
+    正規表現で、表示テキストには `(` や `+` や `.` が普通に入る。そのまま入れると
+    `牛乳(1L)` に当たらず、`a.b` が `aXb` にも当たる。inputText に入る値は
+    打つ文字そのものなので触らない。どちらに入るかは route.py がマニフェストに書いている。
+    """
+    for k in need:
+        v = str(inputs[k])
+        if uses.get(k) == "selector":
+            v = re.escape(v)
+        body = re.sub(r"^(\s*{}:\s*).*$".format(re.escape(k)),
+                      lambda m, v=v: m.group(1) + yaml_quote(v),
+                      body, count=1, flags=re.M)
+    return body
 
 
 def sh(args, quiet=True):
@@ -174,11 +195,12 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume):
             return name, done, lost
 
         target = "@" + str(flow)
-        for k in need:
-            body = re.sub(r"^(\s*{}:\s*).*$".format(re.escape(k)),
-                          lambda m, v=inputs[k]: m.group(1) + yaml_quote(v),
-                          body, count=1, flags=re.M)
-            target = body
+        if need:
+            uses = sec.get("input_use")
+            if uses is None and any(k != "SHOTS" for k in need):
+                sys.exit(f"{name} に input_use が無い（古いマニフェスト）。"
+                         "manifest.py で作り直す")
+            target = fill_env(body, need, inputs, uses or {})
 
         # 落ちたら、その run をもう一度は走らせない。1回目の出力をそのまま見せる
         if sh(["run", udid, target, name, str(shots)], quiet=False) != 0:

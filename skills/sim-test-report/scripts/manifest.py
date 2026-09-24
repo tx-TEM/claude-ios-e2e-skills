@@ -75,6 +75,8 @@ plan.json の形。**項目1つ＝ from から do を順に叩いて、1枚撮�
 **`inputs` は実行時に決める値。** plan で `runtime` を書いた項目に付く。打つ文字
 にも、どの行を叩くかにも付く。値が空のうちはフローを走らせられない（`run_flows.py`
 がそこで止まる）。着いた画面を見ないと決まらないものなので、埋めるのは撮影する側。
+**埋める側は正規表現のエスケープをかけない。** 各値がセレクタ（正規表現）に入るか
+inputText に入るかは `input_use` に書いてあり、エスケープは run_flows.py がする。
 
 plan の `explore` は**経路が組めなかった項目**。`flow` を持たないので `run_flows.py` は
 飛ばし、sim-driver が探索で撮る。**末尾に並ぶ** — 自動確認の付かない項目がまとまる。
@@ -184,6 +186,9 @@ def main():
             "launch": e.get("launch"),         # true なら、ここでアプリを起動し直す
             "pre_flow": e.get("pre_flow"),     # 値を決める操作の手前まで。先に走らせる
             "flow": e.get("flow"),             # 全端末で同じフロー
+            # 実行時に決める値の入る先（selector / text）。端末によらない。run_flows.py が
+            # これを見て、セレクタに入る値だけ正規表現としてエスケープする
+            "input_use": dict(e.get("input_use") or {}),
             # 実行時に決める値は端末ごと（その端末の画面を見て決める）
             "devices": {d: {"inputs": dict(e.get("inputs") or {})} for d in devices},
             # 証跡は端末ごとに1枚。ダンプは同名の .txt
