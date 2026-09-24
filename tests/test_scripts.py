@@ -536,5 +536,37 @@ class Interrupts(unittest.TestCase):
         self.assertIn("anchor と閉じる操作（kind: dismiss）の両方が要る", out)
 
 
+class ReportShape(unittest.TestCase):
+    """判定の欄は LLM が書くので形が揺れる。build_report.py --check で書いた直後に止める。"""
+
+    def problems(self, manifest):
+        ns = runpy.run_path(str(SCRIPTS / "build_report.py"), run_name="build_report")
+        return ns["shape_problems"](manifest)
+
+    def test_footer_must_be_text(self):
+        out = self.problems({"sections": [], "footer": {"確認していないこと": "エラー系"}})
+        self.assertEqual(len(out), 1)
+        self.assertIn("footer が文字列ではない（dict）", out[0])
+
+    def test_section_fields_must_be_text(self):
+        out = self.problems({"sections": [
+            {"name": "test_01", "title": "a", "desc": ["x"], "note": {"a": 1}, "result": "OK"}]})
+        self.assertEqual(len(out), 2)
+        self.assertIn("test_01 の desc が文字列ではない（list）", out[0])
+        self.assertIn("test_01 の note が文字列ではない（dict）", out[1])
+
+    def test_pending_is_reported_but_retake_passes(self):
+        out = self.problems({"sections": [
+            {"name": "test_01", "title": "a", "result": "PENDING"},
+            {"name": "test_02", "title": "b", "result": "RETAKE"}]})
+        self.assertEqual(len(out), 1)
+        self.assertIn("test_01 の result が 'PENDING'", out[0])
+
+    def test_text_footer_passes(self):
+        self.assertEqual(self.problems({"sections": [
+            {"name": "test_01", "title": "a", "desc": "x", "result": "NG"}],
+            "footer": "確認していないこと: エラー系\n作成したデータ: 無し"}), [])
+
+
 if __name__ == "__main__":
     unittest.main()
