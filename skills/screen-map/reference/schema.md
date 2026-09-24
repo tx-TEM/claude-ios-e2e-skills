@@ -9,7 +9,7 @@ start: root                # 起動直後の画面
 
 ```yaml
 # screens/item_list.yaml — ファイル名が画面id（item_list）
-anchor: itemList.title     # この画面にいることを証明するID
+anchor: item_list          # この画面にいることを証明するID。画面idそのもの
 
 names: [アイテム一覧, 一覧画面, 記録一覧]   # この画面の呼び名。社内での通称も入れる
 
@@ -23,48 +23,48 @@ files:                     # 主要ファイル（VC / VM / View）＋IDを振�
 
 actions:                   # この画面でできる操作と、その結果
   # 遷移する操作。結果が「別画面に移る」なので to を書く
-  - tap: itemList.addButton
+  - tap: item_list.addButton
     to: item_new
 
-  - tap: itemList.cell
+  - tap: item_list.cell
     to: item_detail
     select:
       index: 0                      # 実行時の選び方。識別子ではない
       capture: itemTitle            # その行のテキストを後続で使う
 
-  - tap: itemList.backButton       # 戻る操作。to は書かない（戻り先は来た道で決まる）
+  - tap: item_list.backButton       # 戻る操作。to は書かない（戻り先は来た道で決まる）
     kind: back
 
   # 遷移しない操作。何が起きるかと、それを確かめる観測点
-  - tap: itemList.favoriteButton
+  - tap: item_list.favoriteButton
     result: セルにお気に入りの印が付く
-    expect: itemList.cell.favoriteBadge
+    expect: item_list.cell.favoriteBadge
 
-  - tap: itemList.deleteButton
+  - tap: item_list.deleteButton
     result: 行が消え、件数の表示が1つ減る
-    expect: itemList.countLabel
+    expect: item_list.countLabel
 
-  - tap: itemList.bannerImage
+  - tap: item_list.bannerImage
     to: promo
     in_tree: false                  # ツリーに行が出ない。座標が要る＝フローが切れる
 
   # タップ以外の操作。キーは操作の種類
-  - text: itemList.searchField
+  - text: item_list.searchField
     # 入力が入ったことは確かめられる。一覧が絞られたかは件数が無いと確かめられない
     result: 入力が止まると絞り込みを送り、一覧が入れ替わる
-    expect: itemList.searchField
+    expect: item_list.searchField
 
   - scroll: down
     result: 末尾に近づくと次のページを取得して一覧に足す
-    expect: itemList.countLabel
+    expect: item_list.countLabel
 
   - tap: Clear text                 # IDが無くラベルしかない要素
     by: label
     result: 入力が消え、絞り込みが解除される
-    expect: itemList.searchField
+    expect: item_list.searchField
 
 states:                    # データ条件で表示が分かれる画面だけ書く
-  - expect: itemList.emptyView
+  - expect: item_list.emptyView
     when: 0件のとき
 ```
 
@@ -84,7 +84,7 @@ states:                    # データ条件で表示が分かれる画面だけ
 
 | | 意味 |
 |---|---|
-| `tap` | タップする要素のaccessibilityIdentifier。フローの `tapOn` になる。補間で組まれるIDは末尾に `*` を付けてパターンで書く（`itemList.cell.*`）。**特定の行を名指しするときは表示テキストまで書く**（`itemList.cell.牛乳`） |
+| `tap` | タップする要素のaccessibilityIdentifier。フローの `tapOn` になる。補間で組まれるIDは末尾に `*` を付けてパターンで書く（`item_list.cell.*`）。**特定の行を名指しするときは表示テキストまで書く**（`item_list.cell.牛乳`） |
 | `text` | **文字を打つ操作。** 値は入力欄のID。打つ文字はマップに書かない（テストケース側が決める）。フローでは前の文字を消してから打つ。ピッカーやスライダーのような値の指定はこれではない |
 | `scroll` | スクロールで起きる操作。値が要素のIDならそれが見えるまで（`scrollUntilVisible`）、`down` / `up` なら方向だけ。**ページネーションのように目標をIDで指せない操作はこちら。** 回数はデータ次第なので、結果は `expect` で確かめる |
 | `by: label` | **IDが無く、ラベルでしか指せない要素のとき。** `tap` の値をIDではなくラベル文字列として扱う（`tapOn: { text: }`）。ローカライズで壊れるので、自分で振れるならIDを振る。OS提供の要素（検索キーのクリアボタン等）だけの逃げ道 |
@@ -120,13 +120,51 @@ states:                    # データ条件で表示が分かれる画面だけ
 | `expect` | その状態で出る要素のID |
 | `when` | どういうデータ条件のときか。人が読む |
 
+## auto_shows
+
+**その画面に着くと、こちらの操作と関係なく自動で出ることがある画面**（レビュー依頼、お知らせ、キャンペーンのダイアログ）。出るかどうかは起動回数・データ・サーバーの応答で決まる。
+
+**自動表示も画面として書く。** 1つのダイアログに1ファイル。`anchor` をダイアログそのものに振り、閉じる操作を `kind: dismiss` で書く。命名・IDの振り方・実測・`check` が、ほかの画面と同じルールで効く。
+
+```yaml
+# screens/review_dialog.yaml — 自動で出るダイアログ
+anchor: review_dialog
+names: [レビュー依頼]
+summary: 起動3回目以降にランダムで出る
+actions:
+  - tap: review_dialog.laterButton
+    kind: dismiss
+```
+
+出ることがある画面の側に、その画面idを並べる。
+
+```yaml
+# screens/detail.yaml
+auto_shows: [review_dialog]
+```
+
+**マップが持つのは「出ることがある」という事実だけ。** 邪魔か確かめたいかはテストケースが決める。
+
+| 項目 | フローがすること |
+|---|---|
+| ふつうの項目 | `detail` に入るたびに、`detail` の anchor を待つ**前に**「`review_dialog` が出ていたら、その `kind: dismiss` の操作を叩く」 |
+| `from: review_dialog` の項目（自動表示そのものを確かめる） | `detail` まで行き、閉じずに `review_dialog` が出るまで待つ（`detail` の anchor は待たない）。以降はほかの画面と同じで、閉じる操作も `do` で確かめられる |
+
+**自動表示が出ている間、下の画面はアクセシビリティのツリーから隠れる**（シートやダイアログがモーダルで前に出るため。AozoraReader で実測）。だから先に閉じてから下の画面の anchor を待つ。自動表示を確かめる項目では、下の画面の anchor は見えないので待たない。
+
+- **並べるのは、実際に出る画面だけ。** 出ていないときの確認に1つあたり約7秒かかる（Maestro が「無い」と決めるまで待つ）。並べた画面に入るたびに払うので、念のために全画面へ並べない。戻る操作で戻ったときは確かめない
+- **同じダイアログが複数の画面で出るなら、ファイルは1つで、それぞれの画面に並べる**
+- **操作で開くシートやアラートとは別物。** そちらはこちらの操作で開くので、開く操作から `kind: modal` で `to` を張る（`actions` の節）。自動表示は、こちらが何もしなくても出るので `to` を張る操作が無い。`auto_shows` がその代わりになる
+- **閉じる操作に ID が振れないとき**（`UIAlertAction` のボタンなど）は、ほかの操作と同じく `by: label`。ただし**ダイアログ自体には anchor の ID が要る**
+- **OS のダイアログ（通知やトラッキングの許可）は書けない。** アプリの外のもので anchor を振れない。手順6で報告する
+
 ## stub
 
 **まだ書いていない画面。** `to` の先として必要なので置く。最低限 `anchor` と、そこへ入る `actions`。他のフィールドは書いても書かなくてよい。`stub: true` の意味は **`actions` が網羅ではない**ということだけで、読む側はこの画面の操作一覧として扱わない。次にこの画面を書くときの対象リストにもなる。
 
 ```yaml
 # screens/settings.yaml
-anchor: settings.title
+anchor: settings
 stub: true
 actions:
   - tap: settings.itemListCell

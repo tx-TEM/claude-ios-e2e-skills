@@ -118,6 +118,14 @@ class ScreenMap(object):
                 queue.append(nxt)
         return None
 
+    def auto_shows(self, sid):
+        """その画面に着くと、自動で出ることがある画面（マップの `auto_shows`）。"""
+        return [i for i in (self.screens.get(sid) or {}).get("auto_shows") or []]
+
+    def auto_hosts(self, sid):
+        """sid を自動で出すことがある画面（被さる先）。"""
+        return sorted(h for h in self.screens if sid in self.auto_shows(h))
+
     def back_action(self, sid):
         """その画面の「戻る」操作。無ければ None。**`to` は見ない** — 戻り先は歩いた履歴で決まる。"""
         for a in self.actions(sid):
@@ -190,6 +198,10 @@ def build(mp, segments, start=None):
     （複数の入口を持つ画面では、どれを書いても嘘になる）。古いマップに `to` が
     書いてあって履歴と食い違えば、補足として出す。
 
+    **自動表示の画面（どこかの `auto_shows` に並んでいる画面）への goto は、被さる先へ
+    行って、閉じずに出るまで待つ**（`await` のステップ）。遷移で入る画面ではないので、
+    `to` の辺では辿れない。被さる先が複数あれば、起点から近いほうを採って補足に出す。
+
     `start` を渡すとそこから歩き始める。**フローを途中で切って続きを出す
     ため**で、切った地点でダンプを取っても歩き直しにならない。
 
@@ -215,6 +227,24 @@ def build(mp, segments, start=None):
             elif "input" in ctx:
                 st["input"] = ctx["input"]
 
+    # 自動表示の画面への goto を、被さる先への goto と、そこで待つ await に割る
+    split = []
+    for seg in segments:
+        hosts = mp.auto_hosts(seg[1]) if seg[0] == "goto" else []
+        if not hosts:
+            split.append(seg)
+            continue
+        dist = {h: len(mp.path_from(mp.start, h) or []) if h != mp.start else 0
+                for h in hosts if h == mp.start or mp.path_from(mp.start, h) is not None}
+        host = min(dist, key=lambda h: (dist[h], h)) if dist else hosts[0]
+        if len(hosts) > 1:
+            notes.append("{} は {} で自動表示される。{} で待つ".format(
+                seg[1], " / ".join(hosts), host))
+        ctx = seg[2] if len(seg) > 2 else {}
+        split.append(("goto", host, dict(ctx, for_await=seg[1])))
+        split.append(("await", seg[1], ctx))
+    segments = split
+
     marked, ctx = 0, {}
     for n, seg in enumerate(segments, 1):
         mark(marked, ctx)
@@ -222,6 +252,17 @@ def build(mp, segments, start=None):
         what, value = seg[0], seg[1]
         ctx = seg[2] if len(seg) > 2 else {}
         tag = "[{}] {} {}".format(n, what, value).rstrip()
+
+        if what == "await":
+            if at == value:
+                continue            # もう出ている（前の項目がそこで終わった）
+            # 閉じずに出るまで待つ。閉じる操作（kind: dismiss）は履歴で被さる先に戻る
+            steps.append({"screen": at, "await": True, "to": value})
+            stack.append(value)
+            at = value
+            continue
+        if what == "goto" and ctx.get("for_await") and at == ctx["for_await"]:
+            continue                # 待つ画面にもう居る。被さる先へ戻ると閉じてしまう
 
         if what == "restart":
             # 起動し直すので、居る場所も歩いた履歴も捨てて起点に戻る
@@ -341,7 +382,7 @@ def build(mp, segments, start=None):
 
     # text は値が要る。マップは値を持たない（テストケース側が決める）
     for st in steps:
-        if "shot" in st or st.get("restart"):
+        if "shot" in st or st.get("restart") or st.get("await"):
             continue
         op, target = op_of(st["action"])
         if op == "text" and "input" not in st and not st.get("runtime"):
@@ -407,6 +448,53 @@ def q(s):
 
 SCROLL_TIMEOUT = 60000   # scrollUntilVisible の上限。理由は emit_flow の scroll の箇所
 
+def auto_of(mp, iid):
+    """自動表示の画面から (anchor, 閉じる操作) を引く。どちらか無ければ None。
+
+    自動表示（レビュー依頼、お知らせなど、こちらの操作と関係なく被さる画面）も
+    **画面として書く**（`screens/<id>.yaml`）。anchor が「出ているか」の目印、
+    `kind: dismiss`（か `back`）の操作が閉じ方。命名も ID の振り方も実測も
+    画面と同じルールで効くので、専用の決まりを持たない。
+    """
+    scr = mp.screens.get(iid) or {}
+    close = next((a for a in mp.actions(iid) if a.get("kind") in ("dismiss", "back")), None)
+    if not scr.get("anchor") or close is None:
+        return None
+    return scr["anchor"], close
+
+
+def auto_checks(mp, sid, keep=None):
+    """その画面の `auto_shows`（自動で出ることがある画面）が出ていたら閉じる。
+
+    **閉じるのは既定の扱い。** マップは「出ることがある」という事実だけを持ち、
+    邪魔か確かめたいかはテストケースが決める。確かめたい項目（`from` にその画面）
+    では、`keep` に渡した画面は閉じずに待つ（`build()` の `await`）。
+
+
+    **出ていないときに1つあたり約7秒かかる**（Maestro が「無い」と決めるまで
+    `optionalLookupTimeoutMs` の既定7秒を待つ。下げる設定は無い）。だから
+    `auto_shows` を書いた画面に着いたときだけ積む。書いていない画面はコストゼロ。
+
+    **閉じたことは残さない。** 閉じる項目にとって、それは確かめたいアプリの
+    挙動と関係が無い。
+    """
+    out = []
+    for iid in mp.auto_shows(sid):
+        if iid == keep:
+            continue
+        found = auto_of(mp, iid)
+        if found is None:
+            continue            # 書き間違いは check が出す
+        anchor, close = found
+        op, target = op_of(close)
+        key = "text" if close.get("by") == "label" else "id"
+        dismiss = sel_text(target) if key == "text" else sel_id(target)
+        summary = (mp.screens.get(iid) or {}).get("summary")
+        out.append("# 自動表示: {}{}（出ていたら閉じる）".format(iid, " — " + summary if summary else ""))
+        out.append("- runFlow:\n    when:\n      visible:\n        id: {}\n    commands:\n"
+                   "      - tapOn:\n          {}: {}".format(q(sel_id(anchor)), key, q(dismiss)))
+    return out
+
 
 def wait_for(selector, value, timeout):
     """要素が出るまで待つ。出なければ落ちる。
@@ -468,13 +556,34 @@ def emit_flow(mp, steps, app, clear_state, notes=None, timeout=10000,
             out.append("  {}: ''".format(v))
     out.append("---")
 
-    def relaunch(at):
+    def awaited_after(i):
+        """steps[i] の次が自動表示を待つステップなら、その画面（着いた画面で閉じない）。"""
+        nxt = next((st for st in steps[i:] if "shot" not in st), None)
+        return nxt["to"] if nxt and nxt.get("await") else None
+
+    def relaunch(at, i=0):
         # 起点に戻してから始める。launchApp だけでは前の項目の画面に居座ることがある。
         # clearState はログイン状態まで消えるので、要ると言われたときだけ。
         out.append("- stopApp")
         out.append("- launchApp:\n    clearState: true" if clear_state else "- launchApp")
         out.append("# 起点: " + at)
-        a = anchor_of(mp, at, notes)
+        arrive(at, i)
+
+    def arrive(sid, i):
+        """sid に入ったときの確認。自動表示を閉じてから anchor を待つ。
+
+        **順番が逆だと落ちる。** シートやダイアログがモーダルで出ている間、下の画面は
+        アクセシビリティのツリーから隠れる（実測）。先に anchor を待つと、自動表示が
+        出た回は anchor が見えないまま時間切れになる。`when: visible` は無いと決める
+        まで約7秒待つので、その間に出てくる自動表示もここで捕まえられる。
+
+        次のステップが自動表示を待つなら、anchor は待たない（見えないので）。
+        """
+        keep = awaited_after(i)
+        out.extend(auto_checks(mp, sid, keep))
+        if keep:
+            return
+        a = anchor_of(mp, sid, notes)
         if a:
             out.append(wait_for("id", sel_id(a), timeout))
 
@@ -486,10 +595,19 @@ def emit_flow(mp, steps, app, clear_state, notes=None, timeout=10000,
         if start_anchor:
             out.append(wait_for("id", sel_id(start_anchor), timeout))
 
-    for st in steps:
+    for i, st in enumerate(steps):
         if st.get("restart"):
             out.append("# ここで起動し直す（前の状態から次の前提に行けないため）")
-            relaunch(mp.start)
+            relaunch(mp.start, i + 1)
+            continue
+        if st.get("await"):
+            # 自動表示を確かめる項目。閉じずに、出るまで待つ（出なければ落ちる）
+            summary = (mp.screens.get(st["to"]) or {}).get("summary")
+            out.append("# {}: 自動表示 {} を待つ{}".format(
+                st["screen"], st["to"], " — " + summary if summary else ""))
+            dest = anchor_of(mp, st["to"], notes)
+            if dest:
+                out.append(wait_for("id", sel_id(dest), timeout))
             continue
         if "shot" in st:
             out.append("- takeScreenshot: " + q("${" + SHOTS_VAR + "}/" + st["shot"]))
@@ -541,9 +659,14 @@ def emit_flow(mp, steps, app, clear_state, notes=None, timeout=10000,
             continue
 
         if st.get("to"):
-            dest = anchor_of(mp, st["to"], notes)
-            if dest:
-                out.append(wait_for("id", sel_id(dest), timeout))
+            if a.get("kind") in ("back", "dismiss"):
+                # 戻る操作で戻った画面では自動表示を確かめない。画面に入ったときに出るもので、
+                # 戻るたびに確かめると、出ていないときの約7秒を往復ぶん払うことになる
+                dest = anchor_of(mp, st["to"], notes)
+                if dest:
+                    out.append(wait_for("id", sel_id(dest), timeout))
+            else:
+                arrive(st["to"], i + 1)
         elif a.get("expect"):
             out.append(wait_for("id", sel_id(a["expect"]), timeout))
         else:
@@ -571,12 +694,11 @@ def shot_context(mp, seg_start, seg_steps):
             continue
         if "shot" in st:
             continue
-        a = st["action"]
         if st.get("to"):
             at = st["to"]
             checked = (mp.screens.get(at) or {}).get("anchor")
         else:
-            checked = a.get("expect")
+            checked = st["action"].get("expect")
     return at, checked
 
 
@@ -676,11 +798,21 @@ def emit_path(mp, steps, notes, start=None):
             # 撮影行は絶対パスで長い。右カラムを持たないので、桁揃えの計算から外す
             rows.append(("  {}  撮影 {}".format("".ljust(w), os.path.basename(st["shot"])), None))
             continue
+        if st.get("await"):
+            dest = (mp.screens.get(st["to"]) or {}).get("anchor")
+            rows.append(("  {}  自動表示 {} を待つ".format(st["screen"].ljust(w), st["to"]),
+                         "✓ {} が出ている".format(dest) if dest else "— {} に anchor が無い".format(st["to"])))
+            checked += 1 if dest else 0
+            unchecked += 0 if dest else 1
+            continue
         a = st["action"]
         op, target = op_of(a)
         extra = ' "{}"'.format(st.get("input", "")) if op == "text" else ""
         left = "  {}  {}{}".format(st["screen"].ljust(w), label_of(a), extra)
-        if st.get("to"):
+        nxt = next((x for x in steps[steps.index(st) + 1:] if "shot" not in x), None)
+        if st.get("to") and nxt and nxt.get("await"):
+            right = "（{} が被さって隠れるので、次の自動表示で確かめる）".format(st["to"])
+        elif st.get("to"):
             dest = (mp.screens.get(st["to"]) or {}).get("anchor")
             right = "✓ {} に着いたことを確認".format(st["to"]) if dest else "— {} に anchor が無い".format(st["to"])
         elif a.get("expect"):
@@ -819,6 +951,9 @@ def cmd_check(mp):
     if mp.start not in mp.screens:
         bad.append("起点 {} のファイルが無い".format(mp.start))
     reach = mp.reachable()
+    # 割り込みの画面は遷移で入らない（こちらの操作と関係なく被さる）。被さる先の画面に
+    # 着けるなら、出会いうる画面として数える
+    reach |= {i for sid in reach for i in mp.auto_shows(sid) if i in mp.screens}
     print("起点: {}".format(mp.start))
     print("到達できる: {}".format(" ".join(sorted(reach))))
     lost = sorted(set(mp.screens) - reach)
@@ -841,6 +976,16 @@ def cmd_check(mp):
                 breaks.append("{}: 「{}」は in_tree: false（座標が要る）".format(sid, label_of(a)))
             if a.get("by") == "label":
                 breaks.append("{}: 「{}」はラベル指定（ローカライズで壊れる）".format(sid, label_of(a)))
+        for iid in mp.auto_shows(sid):
+            # 欠けていると、確かめも閉じもせずに黙って飛ばす（auto_checks）
+            if iid not in mp.screens:
+                bad.append("{}: 自動表示 {} のファイルが無い（screens/{}.yaml）".format(sid, iid, iid))
+            elif auto_of(mp, iid) is None:
+                bad.append("{}: 自動表示 {} に anchor と閉じる操作（kind: dismiss）の両方が要る"
+                           .format(sid, iid))
+            else:
+                breaks.append("{}: 自動表示 {} を着くたびに確かめる（出ていないとき約7秒）"
+                              .format(sid, iid))
 
     stale = staleness(mp)
     if stale is None:

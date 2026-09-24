@@ -106,14 +106,14 @@ private func identifier(for target: FilterTarget) -> String {
 
 ```swift
 // 悪い: 画面に出ていない値。正しいかを画面から確かめられない
-.accessibilityIdentifier("itemList.cell.\(item.id)")
+.accessibilityIdentifier("item_list.cell.\(item.id)")
 
 // 良い: ダンプの中だけで対応が取れる
-.accessibilityIdentifier("itemList.cell.\(item.title)")
+.accessibilityIdentifier("item_list.cell.\(item.title)")
 ```
 
 ```
-(201,707)  ○  牛乳, 1,000ml  #itemList.cell.牛乳
+(201,707)  ○  牛乳, 1,000ml  #item_list.cell.牛乳
 ```
 
 **ここでの「表示テキスト」はデータ由来の文言**（商品名、ユーザー名、件名）。ボタンやラベルのような**ローカライズされるUI文言とは別物**で、そちらは従来どおり静的な役割名を振る。
@@ -127,7 +127,7 @@ private func identifier(for target: FilterTarget) -> String {
 表示テキストならそうならない。テストケースが「牛乳で絞り込んでタップ」と書く時点で、`牛乳` は分かっている。
 
 ```yaml
-- tap: itemList.cell.牛乳     # データソースを引かずに書ける
+- tap: item_list.cell.牛乳     # データソースを引かずに書ける
 ```
 
 `index: 0` より強い。**一覧が想定と違えばそこで落ちる。** `item.id` だと黙って別の行を叩いて通る。
@@ -137,7 +137,7 @@ private func identifier(for target: FilterTarget) -> String {
 一意にはならない。同じ名前の項目は普通にある。**絞ったうえで `select.index` で選ぶ。**
 
 ```yaml
-- tap: itemList.cell.牛乳
+- tap: item_list.cell.牛乳
   select:
     index: 0
 ```
@@ -149,21 +149,21 @@ private func identifier(for target: FilterTarget) -> String {
 ### index を焼き込まない
 
 ```swift
-.accessibilityIdentifier("itemList.cell.\(index)")   // 悪い
+.accessibilityIdentifier("item_list.cell.\(index)")   // 悪い
 ```
 
 並び替えや上への1件挿入で全部ずれ、**「IDはデータで動かない」という前提が崩れる。** ダンプは上から順に並んでいるので何番目かは数えれば分かり、識別子に入れても同じ情報が二重になるだけで、**食い違う余地が増える**（2行目に `cell.5` が付いていても、画面からは正誤を決められない）。
 
 | 軸 | 振るもの | 例 |
 |---|---|---|
-| どの行か | **表示テキスト。** 絞りきれないぶんは `select.index` | `itemList.cell.<表示名>` |
-| 行の中のどの要素か | 静的な役割名 | `itemList.cell.title` / `.subtitle` |
+| どの行か | **表示テキスト。** 絞りきれないぶんは `select.index` | `item_list.cell.<表示名>` |
+| 行の中のどの要素か | 静的な役割名 | `item_list.cell.title` / `.subtitle` |
 
 マップ側は、**どの行でもよいならパターンで書く。**
 
 ```yaml
 actions:
-  - tap: itemList.cell.*
+  - tap: item_list.cell.*
     to: item_detail
     select:
       index: 0
@@ -172,7 +172,7 @@ actions:
 **特定の行を名指しするときは、表示テキストまで書く。**
 
 ```yaml
-  - tap: itemList.cell.牛乳
+  - tap: item_list.cell.牛乳
 ```
 
-末尾の `*` がパターンの印。接頭辞（`itemList.cell.`）は静的なので、それでlintの存在確認ができる。**接頭辞を補間の中に散らさない。**
+末尾の `*` がパターンの印。接頭辞（`item_list.cell.`）は静的なので、それでlintの存在確認ができる。**接頭辞を補間の中に散らさない。**

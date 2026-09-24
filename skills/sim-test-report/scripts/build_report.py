@@ -3,6 +3,12 @@
 
 使い方:
     python3 build_report.py <manifest.json> [--title <題>] [--width=<px>] [--no-png]
+    python3 build_report.py <manifest.json> --check     形だけ確かめる（レポートは作らない）
+
+**`--check` は判定を書き終えた側（evidence-judge）が叩く。** 判定の欄は LLM が書くので、
+形が揺れる（footer を見出しごとの辞書で書く、など）。レポートを作る段で止まると、
+直すのが判定を書いた本人ではなくなる。書いた直後に確かめて、その場で直させる。
+`RETAKE` はここでは通す（撮り直しを待っている項目で、判定の書き忘れではない）。
 
     python3 build_report.py manifest.json \
       --title "一覧からお気に入り登録できるようにする — 動作確認レポート"
@@ -182,9 +188,39 @@ def section_rows(section: dict) -> tuple[list[tuple[str, str]], str]:
     return top, (section.get("note") or "").strip()
 
 
+TEXT_FIELDS = ("title", "expect", "desc", "note")
+
+
+def shape_problems(manifest: dict) -> list:
+    """判定の欄の形の崩れ。[説明, ...]。**文字列で書く欄に、文字列以外が入っていないか。**
+
+    footer も desc も、レポートにはそのまま文として出す。辞書や配列で書かれると
+    出しようがない（見出しを付けたいなら、文字列の中に改行で書く）。
+    """
+    out = []
+    footer = manifest.get("footer", "")
+    if not isinstance(footer, str):
+        out.append(f"footer が文字列ではない（{type(footer).__name__}）。"
+                   "見出しごとに改行した1つの文字列で書く（例: \"確認していないこと: …\\n作成したデータ: 無し\"）")
+    for i, section in enumerate(manifest.get("sections") or [], start=1):
+        for key in TEXT_FIELDS:
+            v = section.get(key, "")
+            if v is not None and not isinstance(v, str):
+                out.append(f"sections[{i}] {section.get('name', '')} の {key} が文字列ではない"
+                           f"（{type(v).__name__}）。1つの文字列で書く")
+        if section.get("result") not in ("OK", "NG", "RETAKE"):
+            out.append(f"sections[{i}] {section.get('name', '')} の result が "
+                       f"{section.get('result')!r}。OK / NG / RETAKE のどれかを書く")
+    return out
+
+
 def build(manifest_path: pathlib.Path, width: int, title: str, meta: list) -> pathlib.Path:
     manifest = json.loads(manifest_path.read_text())
     base_dir = manifest_path.parent
+    # 形の崩れはここでも止める（--check を通さずに叩かれたとき）。result の未判定は下で見る
+    bad = [p for p in shape_problems(manifest) if "の result が" not in p]
+    if bad:
+        raise SystemExit("マニフェストの形が崩れている:\n  " + "\n  ".join(bad))
 
     cards = ""
     counts = {"OK": 0, "NG": 0}
@@ -380,7 +416,7 @@ def render_png(html_path: pathlib.Path) -> pathlib.Path | None:
 
 def main() -> None:
     argv = sys.argv[1:]
-    args, width, make_png = [], DEFAULT_WIDTH, True
+    args, width, make_png, check = [], DEFAULT_WIDTH, True, False
     title = "動作確認レポート"
     i = 0
     while i < len(argv):
@@ -391,6 +427,8 @@ def main() -> None:
             width = int(a.split("=", 1)[1]); i += 1
         elif a == "--no-png":
             make_png = False; i += 1
+        elif a == "--check":
+            check = True; i += 1
         elif a.startswith("--"):
             sys.exit("知らない引数: " + a)
         else:
@@ -399,6 +437,15 @@ def main() -> None:
         print(__doc__)
         sys.exit(1)
     manifest_path = pathlib.Path(args[0])
+    if check:
+        bad = shape_problems(json.loads(manifest_path.read_text()))
+        if bad:
+            print("形が崩れている。直してからもう一度 --check を叩く:")
+            for p in bad:
+                print("  " + p)
+            sys.exit(1)
+        print("形は揃っている")
+        return
     devices = json.loads(manifest_path.read_text()).get("devices") or {}
     envs = "、".join(f"{v['model']} シミュレーター ({v['os']})" for v in devices.values())
     meta = ([f"確認環境: {envs}"] if envs else []) + [f"実施日: {date.today().isoformat()}"]
