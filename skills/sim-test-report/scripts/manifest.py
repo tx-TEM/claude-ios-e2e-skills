@@ -27,11 +27,11 @@ plan.json の形。**項目1つ＝ from から do を順に叩いて、1枚撮�
      "items": [
        {"from": "browse"},
        {"from": "browse",
-        "do": [{"op": "text:browse.searchField", "runtime": true}]},
+        "do": [{"op": "text:browse.search_field", "runtime": true}]},
        {"from": "browse",
-        "do": [{"op": "text:browse.searchField", "input": "zzzz"}]},
+        "do": [{"op": "text:browse.search_field", "input": "zzzz"}]},
        {"from": "browse", "fresh": true,
-        "do": ["tap:browse.bookRow.*"]}]}
+        "do": ["tap:browse.book_row.*"]}]}
   from      その項目の操作を始める画面。**項目は経路を持たない** —
             前の項目が終わった画面から from までは、ここで計算して
             繋ぐ（すでに居れば何もしない）

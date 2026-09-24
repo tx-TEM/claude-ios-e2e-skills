@@ -76,7 +76,7 @@ cat $M/screen-map/screens/<画面id>.yaml  # 絞れたら中身を読む。files
 **`actions` は見取り図として使い、期待値はコードから決める。**
 
 ```yaml
-- text: browse.searchField
+- text: browse.search_field
   result: 入力が 300ms 止まるか変換が確定すると絞り込みを送り、一覧が入れ替わる
 - tap: Search
   result: デバウンスを待たずに絞り込みを送り、キーボードが閉じる
@@ -118,8 +118,8 @@ python3 $R check --repo $M    # 「実装のほうが新しい」と出た画面
 | **データに依る** | 実在する値で絞る、条件に合う行を選ぶ、作ったものを探す | **`do` の操作に `"runtime": true`。例外なし** |
 
 ```bash
-"do": [{"op": "text:browse.searchField", "runtime": true}]   // 打つ文字を実行時に決める
-"do": [{"op": "tap:browse.bookRow.*", "runtime": true}]      // どの行を叩くかを実行時に決める
+"do": [{"op": "text:browse.search_field", "runtime": true}]   // 打つ文字を実行時に決める
+"do": [{"op": "tap:browse.book_row.*", "runtime": true}]      // どの行を叩くかを実行時に決める
 ```
 
 値はフローに焼き込まれず、撮影のときに呼び出し元が画面を見て埋める。焼き込むと、データが変わったときに**古い値で黙って走る。**
@@ -191,11 +191,11 @@ python3 $R check   --repo $M     # 到達できない画面、切れている箇
      "title": "一覧画面が初期表示で一覧を出す",
      "expect": "さがす画面が出て、行が複数並んでいる"},
     {"from": "browse",
-     "do": [{"op": "text:browse.searchField", "runtime": true}],
+     "do": [{"op": "text:browse.search_field", "runtime": true}],
      "title": "キーワードを打つと入力が止まってから絞り込みが走る",
      "expect": "入力欄に出ている語を、一覧に残っている行がすべて品名に含む"},
     {"from": "browse", "fresh": true,
-     "do": ["tap:browse.bookRow.*"],
+     "do": ["tap:browse.book_row.*"],
      "title": "行をタップすると詳細に移る",
      "expect": "詳細が開き、品名がタップした行と一致する"},
     {"from": "detail",
@@ -218,7 +218,7 @@ python3 ~/.claude/skills/sim-test-report/scripts/manifest.py <plan.json> <出力
 `<出力先>` は証跡の出力先ディレクトリ（証跡は `<出力先>/shots/<端末>/` に撮る）。フローはスキル側の `.work/flows/<出力先の名前>/` に、端末によらず1組書かれる（撮影先だけを撮るときに端末に合わせて埋める）。経路が組めなければ route.py の理由が出て止まる。
 
 - **1項目＝ `from` から `do` を順に叩いて1枚。** 項目が持つのは**どこから何を確かめるか**だけで、**そこまでの経路は書かない。** 前の項目が終わった画面から `from` までは route.py が計算して繋ぐ（すでに居れば何もしない）
-- **`from` は操作を始める画面。** 撮る画面ではない。「行をタップすると詳細に移る」なら `from` は `browse` で、`do` が `tap:browse.bookRow.*`
+- **`from` は操作を始める画面。** 撮る画面ではない。「行をタップすると詳細に移る」なら `from` は `browse` で、`do` が `tap:browse.book_row.*`
 - **自動で出るダイアログそのものを確かめるなら、`from` にその画面を書く。** 画面マップでどこかの画面の `auto_shows` に並んでいる画面（レビュー依頼、お知らせ）。route.py は出る先の画面まで行って、閉じずに出るまで待つ。ふつうの項目では、同じダイアログは出ていたら閉じられる。**出る条件はテストケースの前提。** 起動回数やデータで出るものは、待っても出ないと落ちる。`fresh` / `clear_state` で作れなければ「一時コードが要る」と書いて返す
 - **`do` は確かめる操作だけ。** `title` が言っている操作と同じものを書く。遷移する操作もここに書く（行き先はマップの `to` で追う）。**確かめたい操作を経路計算に任せない** — 「戻るボタンで戻る」を確かめたいのに `from` を戻り先にすると、どの操作で戻ったかが route.py の選択になる
 - **着いた状態を見るだけの項目は `do` を空にする**（「一覧が出る」など）
@@ -276,12 +276,12 @@ plan:     ~/.claude/skills/sim-test-report/.work/flows/<slug>/plan.json
 manifest: ~/Desktop/sim-test-report-<slug>/manifest.json
 
 未定の実行時入力:
-- test_02.yaml の env.BROWSE_SEARCHFIELD
+- test_02.yaml の env.BROWSE_SEARCH_FIELD
 
 ## 経路が組めなかった項目
 
 5. 通信エラーの表示
-   route.py: [1] (test_05) goto browse ... browse.error.reloadButton は states にあるが、
+   route.py: [1] (test_05) goto browse ... browse.error.reload_button は states にあるが、
    現在のデータでは踏めない。一時コードが要る。
 
 7, 8, 9. 履歴からの導線  [history]
@@ -302,7 +302,7 @@ manifest: ~/Desktop/sim-test-report-<slug>/manifest.json
 ## マップに足す候補
 
 - 履歴画面（未マップ）— 今回の差分で追加された画面。経路が組めないので項目7は探索になる
-- root.bannerImage は in_tree: false で、promo へ経路が無い
+- root.banner_image は in_tree: false で、promo へ経路が無い
 - browse の `tap Search` に expect が無く、押した結果が自動確認にならない
 ```
 

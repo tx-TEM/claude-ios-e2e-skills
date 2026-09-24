@@ -66,7 +66,7 @@ class Snapshot(unittest.TestCase):
         rows, flows = write_flows([
             {"from": "list", "title": "一覧が出る", "expect": "行が並ぶ"},
             {"from": "list", "title": "入力で絞り込む", "expect": "入力した語を含む行だけ",
-             "do": [{"op": "text:list.searchField", "runtime": True}]},
+             "do": [{"op": "text:list.search_field", "runtime": True}]},
             {"from": "list", "title": "検索キーで確定", "expect": "キーボードが閉じる",
              "do": ["tap:Search"]},
             {"from": "list", "title": "末尾まで読む", "expect": "フッターが出る",
@@ -150,14 +150,14 @@ class RuntimeInputs(unittest.TestCase):
     def rows(self):
         rows, flows = write_flows([
             {"from": "list", "title": "a", "expect": "a",
-             "do": [{"op": "text:list.searchField", "runtime": True}]},
+             "do": [{"op": "text:list.search_field", "runtime": True}]},
             {"from": "list", "fresh": True, "title": "b", "expect": "b",
              "do": [{"op": "tap:list.row.*", "runtime": True}]}])
         return rows, flows
 
     def test_input_use_is_recorded(self):
         rows, _ = self.rows()
-        self.assertEqual(rows[0]["input_use"], {"LIST_SEARCHFIELD": "text"})
+        self.assertEqual(rows[0]["input_use"], {"LIST_SEARCH_FIELD": "text"})
         self.assertEqual(rows[1]["input_use"], {"LIST_ROW": "selector"})
 
     def fill(self, flow, var, value, use):
@@ -181,7 +181,7 @@ class RuntimeInputs(unittest.TestCase):
     def test_text_values_are_not_escaped(self):
         rows, flows = self.rows()
         flow = flows[rows[0]["flow"]]
-        self.assertEqual(self.fill(flow, "LIST_SEARCHFIELD", "牛乳(1L)", "text"), "牛乳(1L)")
+        self.assertEqual(self.fill(flow, "LIST_SEARCH_FIELD", "牛乳(1L)", "text"), "牛乳(1L)")
 
 
 class Manifest(unittest.TestCase):
@@ -249,16 +249,16 @@ class Manifest(unittest.TestCase):
             return json.loads((out / "manifest.json").read_text(encoding="utf-8")), o.getvalue()
 
         text = {"from": "list", "title": "a", "expect": "a",
-                "do": [{"op": "text:list.searchField", "runtime": True}]}
+                "do": [{"op": "text:list.search_field", "runtime": True}]}
         m, _ = build([text])
-        m["sections"][0]["devices"]["iphone"]["inputs"]["LIST_SEARCHFIELD"] = "牛乳(1L)"
+        m["sections"][0]["devices"]["iphone"]["inputs"]["LIST_SEARCH_FIELD"] = "牛乳(1L)"
         (out / "manifest.json").write_text(json.dumps(m, ensure_ascii=False), encoding="utf-8")
 
         # 同じ変数なら引き継ぎ、引き継いだことを出す
         m, printed = build([dict(text, fresh=True)])
         self.assertEqual(m["sections"][0]["devices"]["iphone"]["inputs"],
-                         {"LIST_SEARCHFIELD": "牛乳(1L)"})
-        self.assertIn("test_01 iphone: LIST_SEARCHFIELD=牛乳(1L)", printed)
+                         {"LIST_SEARCH_FIELD": "牛乳(1L)"})
+        self.assertIn("test_01 iphone: LIST_SEARCH_FIELD=牛乳(1L)", printed)
 
         # 変数が変わったら空に戻す
         m, _ = build([{"from": "list", "title": "a", "expect": "a",
@@ -427,7 +427,7 @@ class Interrupts(unittest.TestCase):
             "names: [レビュー依頼]\n"
             "summary: 起動3回目以降にランダムで出る\n"
             "actions:\n"
-            "  - tap: review_dialog.laterButton\n"
+            "  - tap: review_dialog.later_button\n"
             "    kind: dismiss\n", encoding="utf-8")
         detail = screens / "detail.yaml"
         detail.write_text(detail.read_text(encoding="utf-8") + "auto_shows: [review_dialog]\n",
@@ -450,7 +450,7 @@ class Interrupts(unittest.TestCase):
         block = flow[flow.index("id: '^home\\.fav$'"):]
         self.assertIn("# 自動表示: review_dialog — 起動3回目以降にランダムで出る（出ていたら閉じる）", block)
         self.assertIn("- runFlow:\n    when:\n      visible:\n        id: '^review_dialog$'\n"
-                      "    commands:\n      - tapOn:\n          id: '^review_dialog\\.laterButton$'", block)
+                      "    commands:\n      - tapOn:\n          id: '^review_dialog\\.later_button$'", block)
         self.assertLess(block.index("runFlow"), block.index("id: '^detail$'"))
         self.assertLess(block.index("id: '^detail$'"), block.index("takeScreenshot"))
 
@@ -473,13 +473,13 @@ class Interrupts(unittest.TestCase):
         rows, flows = write_flows([
             {"from": "list", "title": "a", "expect": "a",
              "do": ["tap:list.row.*", "tap:BackButton",
-                    {"op": "text:list.searchField", "runtime": True}]}], self.repo)
+                    {"op": "text:list.search_field", "runtime": True}]}], self.repo)
         self.assertIn("runFlow", flows[rows[0]["pre_flow"]])
 
     def test_label_dismiss(self):
         # 閉じるボタンに ID が振れない（UIAlertAction など）ときは、ほかの操作と同じく by: label
         self.dialog.write_text(self.dialog.read_text(encoding="utf-8").replace(
-            "  - tap: review_dialog.laterButton\n    kind: dismiss\n",
+            "  - tap: review_dialog.later_button\n    kind: dismiss\n",
             "  - tap: 後で\n    by: label\n    kind: dismiss\n"), encoding="utf-8")
         rows, flows = write_flows([{"from": "detail", "title": "a", "expect": "a"}], self.repo)
         self.assertIn("tapOn:\n          text: '.*後で.*'", flows["test_01.yaml"])
@@ -503,7 +503,7 @@ class Interrupts(unittest.TestCase):
         rows, flows = write_flows([
             {"from": "review_dialog", "fresh": True, "title": "後でで閉じる",
              "expect": "詳細画面に戻っている",
-             "do": ["tap:review_dialog.laterButton"]}], self.repo)
+             "do": ["tap:review_dialog.later_button"]}], self.repo)
         flow = flows["test_01.yaml"]
         self.assertEqual(waits(flow)[-3:], ["^home$", "^review_dialog$", "^detail$"])
         self.assertEqual(rows[0]["screen"], "detail")

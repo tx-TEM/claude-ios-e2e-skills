@@ -29,11 +29,11 @@ tools: Read, Bash
   "name": "test_02",
   "title": "キーワードを打つと入力が止まってから絞り込みが走る",
   "expect": "入力欄に出ている語を、一覧に残っている行がすべて作品名に含む",
-  "checked": "browse.searchField",
+  "checked": "browse.search_field",
   "flow": "test_02.yaml",
   "devices": {
-    "iphone": { "inputs": { "BROWSE_SEARCHFIELD": "春" } },
-    "ipad":   { "inputs": { "BROWSE_SEARCHFIELD": "春" } }
+    "iphone": { "inputs": { "BROWSE_SEARCH_FIELD": "春" } },
+    "ipad":   { "inputs": { "BROWSE_SEARCH_FIELD": "春" } }
   },
   "images": [
     { "src": "shots/iphone/test_02.png", "label": "iPhone" },

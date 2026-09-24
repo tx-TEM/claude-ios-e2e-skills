@@ -108,7 +108,7 @@ test_07  撮れた
   原因: 撮るのが早い。フローは画面の anchor（^reader$）を待って撮っていて、本文の描画前だった
   直したこと: test_07.yaml の撮る直前に ^reader\.body$ を待つ1行を足した（使い捨て）
   撮った後のダンプ: 本文の行が画面内に出ている（「ある日の暮方の事である。…」）
-  マップに足す候補: detail の「読む」（tap detail.readButton）に expect: reader.body
+  マップに足す候補: detail の「読む」（tap detail.read_button）に expect: reader.body
 
 test_15  撮れない
   原因: アプリの外（Safari）。撮ったのはページの読み込み前だった
