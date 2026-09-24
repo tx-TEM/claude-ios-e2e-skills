@@ -1,0 +1,17 @@
+appId: jp.example.App
+env:
+  SHOTS: ''
+---
+# 続き: detail から
+- extendedWaitUntil:
+    visible:
+      id: '^detail$'
+    timeout: 10000
+# detail: tap BackButton → list
+- tapOn:
+    id: '^BackButton$'
+- extendedWaitUntil:
+    visible:
+      id: '^list$'
+    timeout: 10000
+- takeScreenshot: '${SHOTS}/test_06'

@@ -1,0 +1,20 @@
+appId: jp.example.App
+env:
+  SHOTS: ''
+---
+# 続き: list から
+- extendedWaitUntil:
+    visible:
+      id: '^list$'
+    timeout: 10000
+# list: scroll list.footer — 末尾まで読み込む
+- scrollUntilVisible:
+    element:
+      id: '^list\.footer$'
+    direction: DOWN
+    timeout: 60000
+- extendedWaitUntil:
+    visible:
+      id: '^list\.footer$'
+    timeout: 10000
+- takeScreenshot: '${SHOTS}/test_04'

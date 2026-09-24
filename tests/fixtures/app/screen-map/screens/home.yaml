@@ -1,0 +1,8 @@
+anchor: home
+names: [ホーム]
+summary: 一覧とお気に入りへの入口
+actions:
+  - tap: home.list
+    to: list
+  - tap: home.fav
+    to: detail
