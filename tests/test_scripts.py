@@ -445,12 +445,24 @@ class Interrupts(unittest.TestCase):
     def test_checked_after_arriving(self):
         rows, flows = write_flows([{"from": "detail", "title": "a", "expect": "a"}], self.repo)
         flow = flows["test_01.yaml"]
-        # 詳細の anchor を待った直後に、割り込みの anchor が出ていたら閉じる。撮るのはその後
-        block = flow[flow.index("id: '^detail$'"):]
+        # 詳細に入ったら、先に自動表示を閉じてから詳細の anchor を待つ。
+        # 自動表示が出ている間は、下の画面の anchor がツリーから隠れるので、逆だと落ちる
+        block = flow[flow.index("id: '^home\\.fav$'"):]
         self.assertIn("# 自動表示: review_dialog — 起動3回目以降にランダムで出る（出ていたら閉じる）", block)
         self.assertIn("- runFlow:\n    when:\n      visible:\n        id: '^review_dialog$'\n"
                       "    commands:\n      - tapOn:\n          id: '^review_dialog\\.laterButton$'", block)
-        self.assertLess(block.index("runFlow"), block.index("takeScreenshot"))
+        self.assertLess(block.index("runFlow"), block.index("id: '^detail$'"))
+        self.assertLess(block.index("id: '^detail$'"), block.index("takeScreenshot"))
+
+    def test_start_screen_auto_show_is_closed_before_waiting(self):
+        # 起点の画面に自動表示がある（起動直後に被さる）。起点の anchor より先に閉じる
+        home = self.repo / "screen-map" / "screens" / "home.yaml"
+        home.write_text(home.read_text(encoding="utf-8") + "auto_shows: [review_dialog]\n",
+                        encoding="utf-8")
+        rows, flows = write_flows([{"from": "home", "title": "a", "expect": "a"}], self.repo)
+        flow = flows["test_01.yaml"]
+        self.assertLess(flow.index("- launchApp"), flow.index("runFlow"))
+        self.assertLess(flow.index("runFlow"), flow.index("id: '^home$'"))
 
     def test_not_checked_on_other_screens(self):
         rows, flows = write_flows([{"from": "list", "title": "a", "expect": "a"}], self.repo)
@@ -480,7 +492,9 @@ class Interrupts(unittest.TestCase):
         flow = flows["test_01.yaml"]
         self.assertNotIn("runFlow", flow)
         self.assertIn("# detail: 自動表示 review_dialog を待つ", flow)
-        self.assertEqual(waits(flow)[-2:], ["^detail$", "^review_dialog$"])
+        # 出る先（detail）の anchor は待たない。自動表示が被さって隠れるので
+        self.assertNotIn("id: '^detail$'", flow)
+        self.assertEqual(waits(flow)[-2:], ["^home$", "^review_dialog$"])
         self.assertEqual(rows[0]["screen"], "review_dialog")
         self.assertEqual(rows[0]["checked"], "review_dialog")
 
@@ -491,7 +505,7 @@ class Interrupts(unittest.TestCase):
              "expect": "詳細画面に戻っている",
              "do": ["tap:review_dialog.laterButton"]}], self.repo)
         flow = flows["test_01.yaml"]
-        self.assertEqual(waits(flow)[-3:], ["^detail$", "^review_dialog$", "^detail$"])
+        self.assertEqual(waits(flow)[-3:], ["^home$", "^review_dialog$", "^detail$"])
         self.assertEqual(rows[0]["screen"], "detail")
         # 戻る操作で戻った画面では、自動表示を確かめない（入ったときに出るもの）
         self.assertNotIn("runFlow", flow)

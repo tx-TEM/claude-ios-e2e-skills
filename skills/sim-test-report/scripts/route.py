@@ -567,10 +567,25 @@ def emit_flow(mp, steps, app, clear_state, notes=None, timeout=10000,
         out.append("- stopApp")
         out.append("- launchApp:\n    clearState: true" if clear_state else "- launchApp")
         out.append("# 起点: " + at)
-        a = anchor_of(mp, at, notes)
+        arrive(at, i)
+
+    def arrive(sid, i):
+        """sid に入ったときの確認。自動表示を閉じてから anchor を待つ。
+
+        **順番が逆だと落ちる。** シートやダイアログがモーダルで出ている間、下の画面は
+        アクセシビリティのツリーから隠れる（実測）。先に anchor を待つと、自動表示が
+        出た回は anchor が見えないまま時間切れになる。`when: visible` は無いと決める
+        まで約7秒待つので、その間に出てくる自動表示もここで捕まえられる。
+
+        次のステップが自動表示を待つなら、anchor は待たない（見えないので）。
+        """
+        keep = awaited_after(i)
+        out.extend(auto_checks(mp, sid, keep))
+        if keep:
+            return
+        a = anchor_of(mp, sid, notes)
         if a:
             out.append(wait_for("id", sel_id(a), timeout))
-        out.extend(auto_checks(mp, at, awaited_after(i)))
 
     if launch:
         relaunch(start)
@@ -644,13 +659,14 @@ def emit_flow(mp, steps, app, clear_state, notes=None, timeout=10000,
             continue
 
         if st.get("to"):
-            dest = anchor_of(mp, st["to"], notes)
-            if dest:
-                out.append(wait_for("id", sel_id(dest), timeout))
-            # 戻る操作で戻った画面では確かめない。自動表示は画面に入ったときに出るもので、
-            # 戻るたびに確かめると、出ていないときの約7秒を往復ぶん払うことになる
-            if a.get("kind") not in ("back", "dismiss"):
-                out.extend(auto_checks(mp, st["to"], awaited_after(i + 1)))
+            if a.get("kind") in ("back", "dismiss"):
+                # 戻る操作で戻った画面では自動表示を確かめない。画面に入ったときに出るもので、
+                # 戻るたびに確かめると、出ていないときの約7秒を往復ぶん払うことになる
+                dest = anchor_of(mp, st["to"], notes)
+                if dest:
+                    out.append(wait_for("id", sel_id(dest), timeout))
+            else:
+                arrive(st["to"], i + 1)
         elif a.get("expect"):
             out.append(wait_for("id", sel_id(a["expect"]), timeout))
         else:
@@ -793,7 +809,10 @@ def emit_path(mp, steps, notes, start=None):
         op, target = op_of(a)
         extra = ' "{}"'.format(st.get("input", "")) if op == "text" else ""
         left = "  {}  {}{}".format(st["screen"].ljust(w), label_of(a), extra)
-        if st.get("to"):
+        nxt = next((x for x in steps[steps.index(st) + 1:] if "shot" not in x), None)
+        if st.get("to") and nxt and nxt.get("await"):
+            right = "（{} が被さって隠れるので、次の自動表示で確かめる）".format(st["to"])
+        elif st.get("to"):
             dest = (mp.screens.get(st["to"]) or {}).get("anchor")
             right = "✓ {} に着いたことを確認".format(st["to"]) if dest else "— {} に anchor が無い".format(st["to"])
         elif a.get("expect"):
