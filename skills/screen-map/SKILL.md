@@ -74,6 +74,7 @@ grep -rn "accessibilityIdentifier" --include="*.swift" . | head -50
 | `actions[].tap` | 操作する要素のぶん | フローの `tapOn` |
 | `actions[].expect` | 遷移しない操作のぶん | 操作の結果を確かめる観測点 |
 | `states[].expect` | 表示が分岐する画面だけ | どちらの状態で着いたかの判定 |
+| 自動表示の画面の `anchor` と閉じる操作 | 自動で出るダイアログがある画面だけ | 出ていたら閉じる／確かめる項目では出るまで待つ。自動表示も画面として書く（`reference/schema.md` の auto_shows） |
 
 **振る前に `reference/ids.md` を、yaml を書く前に `reference/schema.md` と `reference/route.md`（経路として効いてくる書き方: 戻る操作、複数の入口、`result` の書き方）を読む。** 書き方の実例と、下の規則の理由はそちらにある。規則だけ先に並べる。
 
