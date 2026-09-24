@@ -75,10 +75,10 @@ class ScreenMap(object):
 
     def blocked(self, action):
         """往路の辺として使えない理由。使えるなら None。"""
-        if not action.get("to"):
-            return "遷移しない"
         if action.get("kind") in ("back", "dismiss"):
             return "復路"
+        if not action.get("to"):
+            return "遷移しない"
         if action.get("in_tree") is False:
             return "in_tree: false（座標が要る）"
         if action.get("to") not in self.screens:
@@ -119,9 +119,9 @@ class ScreenMap(object):
         return None
 
     def back_action(self, sid):
-        """その画面の「戻る」操作。無ければ None。"""
+        """その画面の「戻る」操作。無ければ None。**`to` は見ない** — 戻り先は歩いた履歴で決まる。"""
         for a in self.actions(sid):
-            if a.get("kind") in ("back", "dismiss") and a.get("to"):
+            if a.get("kind") in ("back", "dismiss"):
                 return a
         return None
 
@@ -151,6 +151,13 @@ def find_map(repo):
 
 # ---------- 経路を組む ----------
 
+def stale_back_to(at, action, dest):
+    """戻る操作に書かれた `to` が、歩いた履歴と食い違ったときの補足。"""
+    return ("{} の「{}」に to: {} と書いてあるが、歩いてきた履歴では {} に戻る。"
+            "戻り先は履歴で決まるので、戻る操作の to は消してよい"
+            .format(at, label_of(action), action["to"], dest))
+
+
 def resolve(mp, at, wanted):
     """その画面の操作を1つ選ぶ。`tap:<id>` のように種類を頭に付けて指せる。
 
@@ -178,10 +185,10 @@ def build(mp, segments, start=None):
     区間に割れば、どの区間が切れているかもそこで言える。
 
     歩きながら**ナビゲーションのスタックを持つ**。`goto` の行き先が既に
-    積まれていれば、往路を探さずに戻る。マップの `kind: back` は `to` を
-    静的に宣言しているが、**複数の入口を持つ画面ではその宣言が嘘になる**
-    （どこから来たかで戻り先が変わる）。歩いた履歴の方が正しいので、
-    そちらを使い、食い違いは補足として出す。
+    積まれていれば、往路を探さずに戻る。**戻る操作（`kind: back` / `dismiss`）の
+    戻り先はこの履歴で決める。** どこから来たかで変わるので、マップには書かない
+    （複数の入口を持つ画面では、どれを書いても嘘になる）。古いマップに `to` が
+    書いてあって履歴と食い違えば、補足として出す。
 
     `start` を渡すとそこから歩き始める。**フローを途中で切って続きを出す
     ため**で、切った地点でダンプを取っても歩き直しにならない。
@@ -235,15 +242,28 @@ def build(mp, segments, start=None):
                                  "この画面にあるのは {}"
                                  .format(tag, at, value, known or "（無し）")))
                 break
+            if found.get("kind") in ("back", "dismiss"):
+                # goto の途中の戻ると同じく、戻り先は歩いた履歴で決める。どこから
+                # 来たかで変わる（お気に入りから詳細に入ったなら、戻る先は一覧では
+                # なくお気に入りの手前）ので、マップには書かない
+                if len(stack) < 2:
+                    # 起点以外の画面には必ず歩いて入っているので、履歴が尽きるのは
+                    # 起点に居るときだけ。起動直後の画面に戻る先は無い
+                    problems.append(("map", "{}: 起点 {} に戻る操作「{}」が書いてある。"
+                                     "起動直後の画面から戻る先は無い"
+                                     .format(tag, at, label_of(found))))
+                    break
+                dest = stack[-2]
+                if found.get("to") and found["to"] != dest:
+                    notes.append(stale_back_to(at, found, dest))
+                steps.append({"screen": at, "action": found, "to": dest})
+                stack.pop()
+                at = dest
+                continue
             steps.append({"screen": at, "action": found, "to": found.get("to")})
             if found.get("to"):
-                if found.get("kind") in ("back", "dismiss"):
-                    if len(stack) > 1:
-                        stack.pop()
-                    at = found["to"]
-                else:
-                    at = found["to"]
-                    stack.append(at)
+                at = found["to"]
+                stack.append(at)
             continue
 
         # goto
@@ -298,13 +318,10 @@ def build(mp, segments, start=None):
                                  "マップに無いので、{} へ向かえない".format(tag, at, value)))
                 broke = True
                 break
-            # 戻り先はマップの `to` ではなく歩いた履歴を採る。`kind: back` の `to` は
-            # 静的な宣言で、**複数の入口を持つ画面では嘘になる**
+            # 戻り先は歩いた履歴で決める（どこから来たかで変わるので、マップには書かない）
             dest = stack[-2]
-            if a["to"] != dest:
-                notes.append("{} の「{}」は to: {} と書いてあるが、"
-                             "歩いてきた履歴では {} に戻る。履歴を採った"
-                             .format(at, label_of(a), a["to"], dest))
+            if a.get("to") and a["to"] != dest:
+                notes.append(stale_back_to(at, a, dest))
             steps.append({"screen": at, "action": a, "to": dest})
             stack.pop()
             at = dest
