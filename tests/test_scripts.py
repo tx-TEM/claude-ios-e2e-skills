@@ -414,5 +414,113 @@ class RetakeRun(unittest.TestCase):
         self.assertTrue(all(s["result"] == "PENDING" for s in self.sections))
 
 
+class Interrupts(unittest.TestCase):
+    """#33: 自動表示は画面として書き、auto_shows に並べた画面に着いたときだけ確かめて閉じる。"""
+
+    def setUp(self):
+        self.repo = Path(tempfile.mkdtemp()) / "app"
+        shutil.copytree(FIXTURE, self.repo)
+        screens = self.repo / "screen-map" / "screens"
+        self.dialog = screens / "review_dialog.yaml"
+        self.dialog.write_text(
+            "anchor: review_dialog\n"
+            "names: [レビュー依頼]\n"
+            "summary: 起動3回目以降にランダムで出る\n"
+            "actions:\n"
+            "  - tap: review_dialog.laterButton\n"
+            "    kind: dismiss\n", encoding="utf-8")
+        detail = screens / "detail.yaml"
+        detail.write_text(detail.read_text(encoding="utf-8") + "auto_shows: [review_dialog]\n",
+                          encoding="utf-8")
+
+    def tearDown(self):
+        shutil.rmtree(self.repo.parent)
+
+    def check(self):
+        mp = route.ScreenMap(route.find_map(str(self.repo)))
+        with contextlib.redirect_stdout(io.StringIO()) as o:
+            code = route.cmd_check(mp)
+        return code, o.getvalue()
+
+    def test_checked_after_arriving(self):
+        rows, flows = write_flows([{"from": "detail", "title": "a", "expect": "a"}], self.repo)
+        flow = flows["test_01.yaml"]
+        # 詳細の anchor を待った直後に、割り込みの anchor が出ていたら閉じる。撮るのはその後
+        block = flow[flow.index("id: '^detail$'"):]
+        self.assertIn("# 自動表示: review_dialog — 起動3回目以降にランダムで出る（出ていたら閉じる）", block)
+        self.assertIn("- runFlow:\n    when:\n      visible:\n        id: '^review_dialog$'\n"
+                      "    commands:\n      - tapOn:\n          id: '^review_dialog\\.laterButton$'", block)
+        self.assertLess(block.index("runFlow"), block.index("takeScreenshot"))
+
+    def test_not_checked_on_other_screens(self):
+        rows, flows = write_flows([{"from": "list", "title": "a", "expect": "a"}], self.repo)
+        self.assertNotIn("runFlow", flows["test_01.yaml"])
+
+    def test_checked_in_pre_flow(self):
+        # 値を決める手前で詳細に着く。前半のフローでも閉じる
+        rows, flows = write_flows([
+            {"from": "list", "title": "a", "expect": "a",
+             "do": ["tap:list.row.*", "tap:BackButton",
+                    {"op": "text:list.searchField", "runtime": True}]}], self.repo)
+        self.assertIn("runFlow", flows[rows[0]["pre_flow"]])
+
+    def test_label_dismiss(self):
+        # 閉じるボタンに ID が振れない（UIAlertAction など）ときは、ほかの操作と同じく by: label
+        self.dialog.write_text(self.dialog.read_text(encoding="utf-8").replace(
+            "  - tap: review_dialog.laterButton\n    kind: dismiss\n",
+            "  - tap: 後で\n    by: label\n    kind: dismiss\n"), encoding="utf-8")
+        rows, flows = write_flows([{"from": "detail", "title": "a", "expect": "a"}], self.repo)
+        self.assertIn("tapOn:\n          text: '.*後で.*'", flows["test_01.yaml"])
+
+    def test_auto_show_as_target_waits_instead_of_closing(self):
+        # 自動表示そのものを確かめる項目。被さる先（detail）に着いたら、閉じずに出るまで待つ
+        rows, flows = write_flows([
+            {"from": "review_dialog", "fresh": True, "title": "レビュー依頼が出る",
+             "expect": "レビュー依頼のダイアログが出ている"}], self.repo)
+        flow = flows["test_01.yaml"]
+        self.assertNotIn("runFlow", flow)
+        self.assertIn("# detail: 自動表示 review_dialog を待つ", flow)
+        self.assertEqual(waits(flow)[-2:], ["^detail$", "^review_dialog$"])
+        self.assertEqual(rows[0]["screen"], "review_dialog")
+        self.assertEqual(rows[0]["checked"], "review_dialog")
+
+    def test_closing_the_auto_show_returns_to_host(self):
+        # 閉じる操作そのものも確かめられる。戻り先は履歴で被さる先
+        rows, flows = write_flows([
+            {"from": "review_dialog", "fresh": True, "title": "後でで閉じる",
+             "expect": "詳細画面に戻っている",
+             "do": ["tap:review_dialog.laterButton"]}], self.repo)
+        flow = flows["test_01.yaml"]
+        self.assertEqual(waits(flow)[-3:], ["^detail$", "^review_dialog$", "^detail$"])
+        self.assertEqual(rows[0]["screen"], "detail")
+        # 戻る操作で戻った画面では、自動表示を確かめない（入ったときに出るもの）
+        self.assertNotIn("runFlow", flow)
+
+    def test_other_items_still_close_it(self):
+        rows, flows = write_flows([
+            {"from": "review_dialog", "fresh": True, "title": "a", "expect": "a"},
+            {"from": "detail", "fresh": True, "title": "b", "expect": "b"}], self.repo)
+        self.assertNotIn("runFlow", flows["test_01.yaml"])
+        self.assertIn("runFlow", flows["test_02.yaml"])
+
+    def test_check_passes_and_counts_dialog_as_reachable(self):
+        code, out = self.check()
+        self.assertEqual(code, 0)
+        self.assertIn("到達できない: なし", out)
+        self.assertIn("detail: 自動表示 review_dialog を着くたびに確かめる", out)
+
+    def test_check_reports_missing_file(self):
+        self.dialog.unlink()
+        code, out = self.check()
+        self.assertEqual(code, 1)
+        self.assertIn("自動表示 review_dialog のファイルが無い", out)
+
+    def test_check_reports_missing_dismiss(self):
+        self.dialog.write_text("anchor: review_dialog\nactions: []\n", encoding="utf-8")
+        code, out = self.check()
+        self.assertEqual(code, 1)
+        self.assertIn("anchor と閉じる操作（kind: dismiss）の両方が要る", out)
+
+
 if __name__ == "__main__":
     unittest.main()
