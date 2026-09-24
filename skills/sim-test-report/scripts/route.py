@@ -344,6 +344,24 @@ def var_name(target):
     return re.sub(r"[^A-Za-z0-9]", "_", target.rstrip(".*")).upper()
 
 
+def runtime_uses(steps):
+    """実行時に決める値の、変数名 → 入る先。`selector`（tapOn の id / text。正規表現）か
+    `text`（inputText。文字そのまま）。
+
+    **走らせる側がこれを見てエスケープを分ける。** セレクタは正規表現なので、
+    `牛乳(1L)` や `C++入門` をそのまま入れると別物として解釈され、狙った行に
+    当たらない（`a.b` なら `aXb` にも当たる）。逆に inputText をエスケープすると
+    `\\` ごと打たれる。どちらに入るかはフローを書くここでしか分からない。
+    """
+    uses = {}
+    for st in steps:
+        if "shot" in st or st.get("restart") or not st.get("runtime"):
+            continue
+        op, target = op_of(st["action"])
+        uses[var_name(target)] = "selector" if op == "tap" else "text"
+    return uses
+
+
 def sel_id(value):
     """マップの id を Maestro のセレクタにする。
 
@@ -984,14 +1002,15 @@ def write_flows(plan, out_dir, repo, timeout=10000):
         name = shot + ".yaml"
         (d / name).write_text(flow, encoding="utf-8")
         screen, checked = shot_context(mp, seg_start, seg_steps)
-        runtime_inputs = {var_name(op_of(st["action"])[1]): "" for st in seg_steps
-                          if "shot" not in st and not st.get("restart") and st.get("runtime")}
+        uses = runtime_uses(seg_steps)
+        runtime_inputs = {v: "" for v in uses}
         it = by_shot.get(shot, {})
         written.append({"name": shot, "title": it.get("title", ""),
                         "from": it.get("from"), "fresh": bool(it.get("fresh")),
                         "do": it.get("do") or [], "expect": it.get("expect", ""),
                         "screen": screen, "checked": checked, "launch": lch,
-                        "inputs": runtime_inputs, "pre_flow": pre_name, "flow": name})
+                        "inputs": runtime_inputs, "input_use": uses,
+                        "pre_flow": pre_name, "flow": name})
     print(emit_path(mp, steps, notes))
     print("\n  フロー（{}本）: {}".format(len(written), out_dir))
     for w in written:
