@@ -1,0 +1,6 @@
+anchor: review_dialog
+names: [レビュー依頼]
+summary: 起動3回目以降にランダムで出る
+actions:
+  - tap: review_dialog.later_button
+    kind: dismiss

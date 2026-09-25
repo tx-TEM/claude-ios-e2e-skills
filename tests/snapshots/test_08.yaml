@@ -7,23 +7,18 @@ env:
     visible:
       id: '^detail$'
     timeout: 10000
-# detail: tap BackButton — 前の画面に戻る → list
+# detail: tap detail.review_button — レビューを書く画面を開く → login_alert
 - scrollUntilVisible:
     element:
-      id: '^BackButton$'
+      id: '^detail\.review_button$'
     direction: DOWN
     timeout: 60000
 - tapOn:
-    id: '^BackButton$'
+    id: '^detail\.review_button$'
 - extendedWaitUntil:
     visible:
-      id: '^list$'
-    timeout: 10000
-# list: 読み込み完了（どれか1つ）
-- extendedWaitUntil:
-    visible:
-      id: '(^list\.row\..*|^list\.empty_view$)'
+      id: '^login_alert$'
     timeout: 10000
 - waitForAnimationToEnd:
     timeout: 3000
-- takeScreenshot: '${SHOTS}/test_06'
+- takeScreenshot: '${SHOTS}/test_08'

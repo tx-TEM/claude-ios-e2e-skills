@@ -9,11 +9,25 @@ env:
     visible:
       id: '^home$'
     timeout: 10000
-# home: tap home.list → list
+- waitForAnimationToEnd:
+    timeout: 3000
+# home: tap home.list — 作品の一覧を開く → list
+- scrollUntilVisible:
+    element:
+      id: '^home\.list$'
+    direction: DOWN
+    timeout: 60000
 - tapOn:
     id: '^home\.list$'
 - extendedWaitUntil:
     visible:
       id: '^list$'
     timeout: 10000
+# list: 読み込み完了（どれか1つ）
+- extendedWaitUntil:
+    visible:
+      id: '(^list\.row\..*|^list\.empty_view$)'
+    timeout: 10000
+- waitForAnimationToEnd:
+    timeout: 3000
 - takeScreenshot: '${SHOTS}/test_01'

@@ -28,7 +28,7 @@ ErrorView(idPrefix: "browse.error") { ... }
 
 接頭辞を渡して中で組み立てる形にしない。IDは完成した文字列で、画面のファイルに1箇所だけ書く。
 
-**自分で振れないIDは、そのまま書く。** ナビゲーションの戻る（`BackButton`）やキーボードの検索キー（`Search`）はOSが持つIDで、接頭辞の規則に従えない。そのまま `tap` に書き、手順6で**lintの例外として報告する**。
+**自分で振れないIDは、そのまま書く。** ナビゲーションの戻る（`BackButton`）やキーボードの検索キー（`Search`）はOSが持つIDで、接頭辞の規則に従えない。そのまま要素の `id` に書き、手順6で**lintの例外として報告する**。
 
 **`accessibilityIdentifier` は読み上げられない。** VoiceOver が読むのは `accessibilityLabel` / `value` / `hint` のほうで、identifier は自動化専用。**identifier に何を入れてもユーザー体験は変わらない**ので、命名を実利用者に配慮して曲げる必要はない。
 
@@ -126,23 +126,19 @@ private func identifier(for target: FilterTarget) -> String {
 
 表示テキストならそうならない。テストケースが「牛乳で絞り込んでタップ」と書く時点で、`牛乳` は分かっている。
 
-```yaml
-- tap: item_list.cell.牛乳     # データソースを引かずに書ける
+```json
+{"from": "item_list", "do": ["tap:item_list.cell.牛乳"]}
 ```
 
-`index: 0` より強い。**一覧が想定と違えばそこで落ちる。** `item.id` だと黙って別の行を叩いて通る。
+plan の `do` にこう書ける。データソースを引かずに済む。
+
+「何番目の行」より強い。**一覧が想定と違えばそこで落ちる。** `item.id` だと黙って別の行を叩いて通る。
 
 ### 同名は普通にある
 
-一意にはならない。同じ名前の項目は普通にある。**絞ったうえで `select.index` で選ぶ。**
+一意にはならない。同じ名前の項目は普通にある。**IDの役目は表示と対応を取ることで、一意にすることではない。** 同名を区別するために `item.id` や index を足すと、上の問題がそのまま戻ってくる。
 
-```yaml
-- tap: item_list.cell.牛乳
-  select:
-    index: 0
-```
-
-全行同じIDなら一覧全体から何番目かを数えることになるが、これなら同名のぶんだけに絞れる。**`select.index` は実行時の選び方**で、識別子に焼き込むのとは別物。
+同名のどれを押すかは**実行時の選び方**で、識別子に焼き込むのとは別物。マップにも書かない（どれを押すかはスクリプトが実行時に決める。`reference/route.md`）。
 
 文言が変われば落ちるが、**それは欠点ではない。** 表示が変わったなら、それを期待していたテストは落ちるべき。
 
@@ -156,23 +152,21 @@ private func identifier(for target: FilterTarget) -> String {
 
 | 軸 | 振るもの | 例 |
 |---|---|---|
-| どの行か | **表示テキスト。** 絞りきれないぶんは `select.index` | `item_list.cell.<表示名>` |
+| どの行か | **表示テキスト。** 絞りきれないぶんは実行時に選ぶ（マップに書かない） | `item_list.cell.<表示名>` |
 | 行の中のどの要素か | 静的な役割名 | `item_list.cell.title` / `.subtitle` |
 
-マップ側は、**どの行でもよいならパターンで書く。**
+マップ側は、**行をパターンで書く。** 何番目か、どの行かは書かない — どの行を押すかはテストのときの選び方で、画面の事実ではない。
 
 ```yaml
-actions:
-  - tap: item_list.cell.*
-    to: item_detail
-    select:
-      index: 0
+elements:
+  - id: item_list.cell.*
+    name: アイテムの行（ID は表示中の名前）
+    actions:
+      - tap:
+        summary: アイテムの詳細を開く
+        expect: {screen: item_detail, via: push}
 ```
 
-**特定の行を名指しするときは、表示テキストまで書く。**
-
-```yaml
-  - tap: item_list.cell.牛乳
-```
+どの行を押すかはスクリプトが実行時に決める。条件が無ければ画面に見えている1件目、条件があれば plan の `do` に `pick` で書く（sim-test-report の test-case-builder）。**特定の行を名指しするのはテストケースの側で、表示テキストまで書く**（`tap:item_list.cell.牛乳`）。
 
 末尾の `*` がパターンの印。接頭辞（`item_list.cell.`）は静的なので、それでlintの存在確認ができる。**接頭辞を補間の中に散らさない。**

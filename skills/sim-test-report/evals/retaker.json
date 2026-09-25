@@ -5,35 +5,35 @@
   "evals": [
     {
       "id": "too-early",
-      "prompt": "撮り直す項目: test_07\n\nマニフェストの test_07:\n  title: 「読む」を押すとリーダーで本文が開く\n  expect: 作品の本文が表示されている\n  fresh: false（test_05 から続く鎖の中）\n  result: RETAKE\n  desc: 画面は白く、本文が描画される前に撮っている。ダンプにも本文の行が無い。本文の行が出てから撮れば判定できる。\n\nフロー test_07.yaml（抜粋）:\n  - tapOn:\n      id: '^detail\\.read_button$'\n  - extendedWaitUntil:\n      visible:\n        id: '^reader$'\n      timeout: 10000\n  - takeScreenshot: '${SHOTS}/test_07'\n\nダンプ shots/iphone/test_07.txt:\n  画面: 【不明】ナビゲーションバーが無い。遷移したかの判定には使えない\n  (195,422)  ○  #reader\n\n画面マップ（~/Program/AozoraReader/screen-map/screens/）:\n  detail.yaml の actions:\n    - tap: detail.read_button\n      to: reader\n  reader.yaml:\n    anchor: reader\n    names: [リーダー]\n    （本文のビューには accessibilityIdentifier reader.body が振ってある。以前の回のダンプでは本文の各段落が #reader.body の下に並んでいた）",
+      "prompt": "撮り直す項目: test_07\n\nマニフェストの test_07:\n  title: 「読む」を押すとリーダーで本文が開く\n  expect: 作品の本文が表示されている\n  fresh: false（test_05 から続く鎖の中）\n  result: RETAKE\n  desc: 画面は白く、本文が描画される前に撮っている。ダンプにも本文の行が無い。本文の行が出てから撮れば判定できる。\n\nフロー test_07.yaml（抜粋）:\n  # detail: tap detail.read_button — 本文をリーダーで開く → reader\n  - scrollUntilVisible:\n      element:\n        id: '^detail\\.read_button$'\n      direction: DOWN\n      timeout: 60000\n  - tapOn:\n      id: '^detail\\.read_button$'\n  - extendedWaitUntil:\n      visible:\n        id: '^reader$'\n      timeout: 10000\n  - waitForAnimationToEnd:\n      timeout: 3000\n  - takeScreenshot: '${SHOTS}/test_07'\n\nダンプ shots/iphone/test_07.txt:\n  画面: 【不明】ナビゲーションバーが無い。遷移したかの判定には使えない\n  (195,422)  ○  #reader\n\n画面マップ（~/Program/AozoraReader/screen-map/screens/）:\n  detail.yaml の elements:\n    - id: detail.read_button\n      name: 読む\n      actions:\n        - tap:\n          summary: 本文をリーダーで開く\n          expect: {screen: reader, via: push}\n  reader.yaml:\n    anchor: reader\n    names: [リーダー]\n    （ready は無い。本文のビューには accessibilityIdentifier reader.body が振ってあるが、elements には載っていない。以前の回のダンプでは本文の各段落が #reader.body の下に並んでいた）",
       "assertions": [
-        "原因を「撮るのが早い」（待っている reader の anchor は本文の描画前から出る）と見立てている",
+        "原因を「撮るのが早い」（待っている reader の anchor は本文の描画前から出て、reader に ready も無い）と見立てている",
         "plan は直さず、test_07 のフローだけに、撮る直前に reader.body（見たい状態でしか出ない要素）を待つ extendedWaitUntil を足している",
         "手前の項目（test_05, test_06）のフローには手を入れていない",
         "run_flows.py <manifest> --only test_07 で撮り直している",
         "撮った後、新しいダンプで本文の行が出ているかだけを確かめ、OK/NG の判定はしていない",
-        "報告に、フローを直したのは使い捨てであることと、マップに足す候補（detail の「読む」に expect: reader.body）を書いている",
+        "報告に、フローを直したのは使い捨てであることと、マップに足す候補（reader の ready に reader.body を足す、または detail の「読む」の expect に {visible: reader.body} を足す。reader.body を reader の要素として足すことも含む）を書いている",
         "終わったら maestrod.py stop でデーモンを止めている"
       ]
     },
     {
       "id": "wrong-precondition",
-      "prompt": "撮り直す項目: test_15\n\nマニフェストの test_15:\n  title: 一覧の作品を開くと、図書カードのリンクが出る\n  expect: 詳細画面に「図書カード」のリンクがある\n  fresh: false（test_12 から続く鎖の中。test_14 はさがす画面の一覧を下までスクロールする項目）\n  result: RETAKE\n  desc: 詳細画面ではなく、さがす画面の一番上が写っている。詳細画面に着いていないので判定できない。\n\nフロー test_15.yaml（抜粋）:\n  # 続き: browse から\n  - tapOn:\n      id: '^browse\\.book_row\\..*'\n      index: 0\n  - extendedWaitUntil:\n      visible:\n        id: '^detail$'\n      timeout: 10000\n  - takeScreenshot: '${SHOTS}/test_15'\n\nダンプ shots/iphone/test_15.txt（前の撮影のもの）:\n  画面: さがす\n  (201,41)   ×  銀河鉄道の夜  #browse.book_row.銀河鉄道の夜\n  (201,120)  ○  作品名で検索  #browse.search_field\n  (201,220)  ○  注文の多い料理店  #browse.book_row.注文の多い料理店\n\nplan の該当項目:\n  {\"from\": \"browse\", \"title\": \"一覧の作品を開くと、図書カードのリンクが出る\", \"expect\": \"詳細画面に「図書カード」のリンクがある\", \"do\": [\"tap:browse.book_row.*\"]}",
+      "prompt": "撮り直す項目: test_15\n\nマニフェストの test_15:\n  title: 一覧の作品を開くと、図書カードのリンクが出る\n  expect: 詳細画面に「図書カード」のリンクがある\n  fresh: false（test_12 から続く鎖の中。test_14 はさがす画面の検索欄に「銀河」と打って絞り込む項目）\n  devices.iphone.picked: {\"BROWSE_BOOK_ROW\": \"銀河鉄道の夜\"}（見えている1件目を run_flows.py が選んだ）\n  result: RETAKE\n  desc: 詳細画面（銀河鉄道の夜）は開いているが、キーボードが開いたままで画面の下半分が隠れている。この項目は文字を打っていない。図書カードのリンクがあるはずの位置が写っていないので判定できない。キーボードが出ていなければ判定できる。\n\nフロー test_15.yaml（抜粋。手前の test_15.1.yaml が browse.book_row.* が見えるまでスクロールして止め、run_flows.py が押す行を選んでいる）:\n  # browse: tap browse.book_row.* [見えている1件目] — 作品の詳細を開く → detail\n  - tapOn:\n      id: '^browse\\.book_row\\.${BROWSE_BOOK_ROW}$'\n  - extendedWaitUntil:\n      visible:\n        id: '^detail$'\n      timeout: 10000\n  - waitForAnimationToEnd:\n      timeout: 3000\n  - takeScreenshot: '${SHOTS}/test_15'\n\nダンプ shots/iphone/test_15.txt（前の撮影のもの）:\n  画面: 銀河鉄道の夜\n  (201,160)  ○  銀河鉄道の夜  #detail.title\n  (201,610)  ○  図書カード  #detail.card_link\n  (40,700)   ○  q\n  (80,700)   ○  w\n  (330,810)  ○  検索\n\nplan の該当項目:\n  {\"from\": \"browse\", \"title\": \"一覧の作品を開くと、図書カードのリンクが出る\", \"expect\": \"詳細画面に「図書カード」のリンクがある\", \"do\": [\"tap:browse.book_row.*\"]}",
       "assertions": [
-        "原因を「前提が違う」（前の項目で一覧をスクロールしたままで、1件目の行が検索欄の裏に隠れていた）と見立てている",
-        "フローを直接直さず、plan の test_15 に fresh: true を付けている（起動し直した一覧は一番上から始まる）",
+        "原因を「前提が違う」（この項目は文字を打っていないのに、前の項目 test_14 で検索欄に打ったキーボードが開いたままで、詳細の下半分が隠れていた）と見立てている",
+        "フローを直接直さず、plan の test_15 に fresh: true を付けている（起動し直せばキーボードは出ておらず、検索欄も空）",
         "manifest.py を、前と同じ --repo と --device iphone=AAAA-1111 で叩き直している",
         "manifest.py が実行時の値とほかの項目の判定を引き継ぐことを踏まえ、ほかの項目を撮り直していない",
         "run_flows.py <manifest> --only test_15 で撮り直している",
-        "撮った後、詳細画面に着いているか（#detail が出ているか）をダンプで確かめ、OK/NG の判定はしていない",
+        "撮った後、新しいダンプでキーボードのキーの行が無くなっているかを確かめ、OK/NG の判定はしていない",
         "報告に plan の差分（fresh: true を足した）を書いている"
       ]
     },
     {
       "id": "outside-app",
-      "prompt": "撮り直す項目: test_16\n\nマニフェストの test_16:\n  title: 図書カードのリンクをタップすると Safari で図書カードが開く\n  expect: Safari に作品の図書カードのページが表示されている\n  fresh: true\n  result: RETAKE\n  desc: Safari は開いているが、ページが読み込み中で白い。読み込み後のページが写っていれば判定できる。\n\nフロー test_16.yaml（抜粋）:\n  - tapOn:\n      id: '^detail\\.card_link$'\n  - takeScreenshot: '${SHOTS}/test_16'\n\n画面マップの detail.yaml:\n  - tap: detail.card_link\n    result: Safari で図書カードのページが開く\n    （expect は無い。Safari はマップの対象外）",
+      "prompt": "撮り直す項目: test_16\n\nマニフェストの test_16:\n  title: 図書カードのリンクをタップすると Safari で図書カードが開く\n  expect: Safari に作品の図書カードのページが表示されている\n  fresh: true\n  result: RETAKE\n  desc: Safari ではなく、アプリの詳細画面が写っている。フローはリンクを押したあとアプリに戻してから撮っている。読み込み後の Safari のページが写っていれば判定できる。\n\nフロー test_16.yaml（抜粋）:\n  - tapOn:\n      id: '^detail\\.card_link$'\n  # アプリの外（safari）に出る。確かめずにアプリに戻す\n  - launchApp:\n      stopApp: false\n  - extendedWaitUntil:\n      visible:\n        id: '^detail$'\n      timeout: 10000\n  - takeScreenshot: '${SHOTS}/test_16'\n\n画面マップの detail.yaml:\n  - id: detail.card_link\n    name: 図書カード（リンク）\n    actions:\n      - tap:\n        summary: Safari で図書カードのページを開く\n        expect: {external: safari}\n    （Safari の中はマップの対象外で、待てる要素は無い）",
       "assertions": [
-        "Safari はアプリの外で、画面マップにも待つ要素が無いことに触れている",
+        "Safari はアプリの外で、画面マップにも待つ要素が無い（expect は external だけ）ことに触れている",
         "撮れるかを確かめないまま、待ちを足したことにして撮れたと報告していない。Safari の中の要素を待てるか分からないなら、そう書いている",
         "撮れなかった場合、「撮れない」として原因と、何があれば撮れるか（探索で撮る、Safari の中の文言を待てるか確かめる等）を返している",
         "アプリのソースや画面マップを編集していない",

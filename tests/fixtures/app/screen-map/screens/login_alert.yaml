@@ -1,0 +1,10 @@
+anchor: login_alert
+names: [ログインの案内]
+summary: 未ログインで会員向けの操作をしたときに出るアラート
+elements:
+  - id: login_alert.cancel_button
+    name: キャンセル
+    actions:
+      - tap:
+        summary: 閉じる
+        expect: {screen: back, via: dismiss}

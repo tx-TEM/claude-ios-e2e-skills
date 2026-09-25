@@ -1,20 +1,22 @@
 appId: jp.example.App
-env:
-  SHOTS: ''
 ---
-# 続き: detail から
+- stopApp
+- launchApp
+# 起点: home
 - extendedWaitUntil:
     visible:
-      id: '^detail$'
+      id: '^home$'
     timeout: 10000
-# detail: tap BackButton — 前の画面に戻る → list
+- waitForAnimationToEnd:
+    timeout: 3000
+# home: tap home.list — 作品の一覧を開く → list
 - scrollUntilVisible:
     element:
-      id: '^BackButton$'
+      id: '^home\.list$'
     direction: DOWN
     timeout: 60000
 - tapOn:
-    id: '^BackButton$'
+    id: '^home\.list$'
 - extendedWaitUntil:
     visible:
       id: '^list$'
@@ -26,4 +28,9 @@ env:
     timeout: 10000
 - waitForAnimationToEnd:
     timeout: 3000
-- takeScreenshot: '${SHOTS}/test_06'
+# 次で使う list.row.* が見えるまでスクロールして止める（ここで押すものを決める）
+- scrollUntilVisible:
+    element:
+      id: '^list\.row\..*'
+    direction: DOWN
+    timeout: 60000

@@ -1,8 +1,28 @@
 anchor: home
 names: [ホーム]
 summary: 一覧とお気に入りへの入口
-actions:
-  - tap: home.list
-    to: list
-  - tap: home.fav
-    to: detail
+elements:
+  - id: home.list
+    name: 一覧（カード）
+    actions:
+      - tap:
+        summary: 作品の一覧を開く
+        expect: {screen: list, via: push}
+  - id: home.fav
+    name: お気に入り（カード）
+    actions:
+      - tap:
+        summary: お気に入りの作品の詳細を開く
+        expect: {screen: detail, via: push}
+  - id: home.menu
+    name: メニュー（右上）
+    actions:
+      - tap:
+        summary: 設定を開く
+        expect: {screen: settings, via: push}
+  - id: tab_bar.settings
+    name: 設定（タブバー）
+    actions:
+      - tap:
+        summary: 設定タブに切り替える
+        expect: {screen: settings, via: tab}

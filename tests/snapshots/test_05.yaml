@@ -8,12 +8,18 @@ env:
     visible:
       id: '^list$'
     timeout: 10000
-# list: tap list.row.* [index 0] → detail
+# list: tap list.row.* [見えている1件目] — 作品の詳細を開く → detail
 - tapOn:
     id: '^list\.row\.${LIST_ROW}$'
-    index: 0
 - extendedWaitUntil:
     visible:
       id: '^detail$'
     timeout: 10000
+# detail: 読み込み完了（全部）
+- extendedWaitUntil:
+    visible:
+      id: '^detail\.title$'
+    timeout: 10000
+- waitForAnimationToEnd:
+    timeout: 3000
 - takeScreenshot: '${SHOTS}/test_05'

@@ -1,0 +1,10 @@
+anchor: settings
+names: [設定]
+summary: アプリの設定
+elements:
+  - id: tab_bar.home
+    name: ホーム（タブバー）
+    actions:
+      - tap:
+        summary: ホームタブに切り替える
+        expect: {screen: home, via: tab}
