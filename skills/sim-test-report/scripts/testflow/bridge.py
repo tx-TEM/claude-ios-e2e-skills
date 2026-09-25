@@ -1,9 +1,9 @@
 """画面から画面への経路。テストケースの項目と項目の間を繋ぐ（橋渡し）。
 
-sim-test-report の testflow/flow.py が plan の項目を順にフローにするとき、前の項目が終わった画面から次の項目の
+flow.py が plan の項目を順にフローにするとき、前の項目が終わった画面から次の項目の
 `from` まで（最初は起動直後の画面から）をここで引く。項目の中の `do` は flow.py が扱う。
 
-経路はマップの `expect: {screen, via}` を辺にした最短路（screen.py の `path_from`）。
+経路はマップの `expect: {screen, via}` を辺にした最短路（screen-map の map.py の `path_from`）。
 ここはそれに、**歩いてきた履歴**（戻る操作の戻り先を決める）と、**自動表示の画面への
 行き方**（被さる先まで行って、閉じずに待つ）を足す。
 
@@ -40,7 +40,7 @@ class Route:
     （お気に入りから詳細に入ったなら、戻る先は一覧ではなくお気に入り）ので、マップには
     書かない。行き先が履歴に積まれていれば、戻ってから進む経路も同じ探索で比べる。
 
-    testflow/flow.py も、項目の `do` で画面を移るときに `forward()` / `back()` を使う。
+    flow.py も、項目の `do` で画面を移るときに `forward()` / `back()` を使う。
     居る画面と履歴は1つだけなので、ここに持たせる。
     """
 
@@ -181,25 +181,14 @@ class Route:
         broken = [(sid, e, mp.blocked(e, given)) for sid, e in relaxed if mp.blocked(e, given)]
         if not broken:
             self.fail("call", "{} から {} へは、途中で戻ってからまた進む経路になる。"
-                              "一度には繋げないので、折り返す画面を間に挟む（plan ならその画面を from に"
-                              "した項目を前に置く。mapctl.py path なら画面を並べる）".format(self.at, goal))
+                              "一度には繋げないので、折り返す画面を from にした項目を前に置く"
+                              .format(self.at, goal))
         out = []
         for sid, e, why in broken:
             kind = "call" if why.startswith("条件つき") else "map"
             hint = "。その前提で確かめるなら、項目の when に同じ文言を書く" if kind == "call" else ""
             out.append((kind, "{} の「{}」で切れる: {}{}".format(sid, e[0].label(), why, hint)))
         raise Unroutable(out)
-
-
-def walk(mp, goals, given=()):
-    """起点から画面を順にたどる経路。(ステップ列, 組めなかった理由, 補足)。mapctl.py path が使う。"""
-    route, steps = Route(mp), []
-    for n, goal in enumerate(goals, 1):
-        try:
-            steps += route.to(goal, given)
-        except Unroutable as e:
-            return steps, [(k, "[{}] goto {}: {}".format(n, goal, m)) for k, m in e.problems], route.notes
-    return steps, [], route.notes
 
 
 def emit_path(mp, steps, notes, start=None):

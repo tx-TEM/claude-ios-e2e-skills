@@ -164,7 +164,7 @@ python3 ~/.claude/skills/sim-test-report/scripts/maestrod.py stop
 
 ## 経路になる
 
-このスキルの成果物は、このスキルの `scripts/mapctl.py`（と、その部品の経路計算）が経路を組む入力になる。sim-test-report はそれを使って動作確認のフローを作る（`expect` の `screen` を辺にした最短路）。`anchor` と `ready` が到達判定に、`screen: back` が復路に、`in_tree: false` と条件つきの要素・枝が経路の切れ目になる。**書く側として効いてくる点と mapctl.py の使い方は `reference/route.md`**（`python3 ~/.claude/skills/screen-map/scripts/mapctl.py --help` も参照）。
+このスキルの成果物（画面マップ）から、sim-test-report が経路を組んで動作確認のフローを作る（`expect` の `screen` を辺にした最短路）。このスキルの `scripts/mapctl.py check` は、マップが経路として成り立つかを確かめる。`anchor` と `ready` が到達判定に、`screen: back` が復路に、`in_tree: false` と条件つきの要素・枝が経路の切れ目になる。**書く側として効いてくる点と mapctl.py の使い方は `reference/route.md`**（`python3 ~/.claude/skills/screen-map/scripts/mapctl.py --help` も参照）。
 
 **経路が組めないことは、マップの穴がそのまま出たもの。** スクリプトは推測して繋がない。埋めるのはこのスキルの仕事。
 

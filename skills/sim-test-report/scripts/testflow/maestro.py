@@ -9,9 +9,9 @@ from dataclasses import dataclass
 from typing import Optional
 
 from screenmap.screen import BACKWARD, is_pattern, pattern_prefix
-from screenmap.results import Arrive, External, Hidden, Selected, Value, Visible
-from screenmap.actions import Input, InputLater, Scroll, Tap
-from screenmap.steps import Act, Await, Restart, See, Shot
+from .actions import Input, InputLater, Scroll, Tap
+from .results import Arrive, External, Hidden, Selected, Value, Visible
+from .steps import Act, Await, Restart, See, Shot
 
 from .flowyaml import Comment, Raw, render
 

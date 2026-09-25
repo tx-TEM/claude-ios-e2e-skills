@@ -124,7 +124,7 @@ class ActionSpec:
     画面の yaml（screens/<画面>.yaml）を読んだときに1つだけ作る。何をすると何が起きるか
     （expect）は、書いてあるままで持つ。
     `when` つきのリストなら結果が状態で分かれる（branches）。ステップが持つ操作と結果は、
-    ここから actions.py と results.py が作る。
+    ここから sim-test-report の testflow/（actions.py / results.py）が作る。
     """
 
     def __init__(self, sid, raw, element=None):

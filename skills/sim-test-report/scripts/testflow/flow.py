@@ -1,7 +1,7 @@
 """plan.json から、項目ごとの Maestro のフローを作る（manifest.py から呼ぶ）。plan の形は manifest.py --help。
 
 項目1つ＝「`from` から `do` を順に叩いて、1枚撮る」。**項目は経路を持たない。**
-前の項目が終わった画面から次の項目の `from` までは screen-map の screenmap/bridge.py が繋ぐ（すでに居れば何もしない）。
+前の項目が終わった画面から次の項目の `from` までは bridge.py が繋ぐ（すでに居れば何もしない）。
 ここがするのは、項目の `do` をマップの操作に引き当ててステップにすることと、
 できたステップ列を maestro.py でフローに書くこと。
 
@@ -17,10 +17,10 @@ from .maestro import (add_reveals, assign_vars, emit_flow, runtime_picks, runtim
                       shot_context, split_at_shots, split_parts, var_of)
 from screenmap.map import load_map
 from screenmap.screen import DO_OPS, GESTURES, pattern_prefix
-from screenmap.bridge import Route, Unroutable, emit_path, report_problems
-from screenmap.results import resolve_result
-from screenmap.actions import resolve_action
-from screenmap.steps import Act, See, Shot
+from .actions import resolve_action
+from .bridge import Route, Unroutable, emit_path, report_problems
+from .results import resolve_result
+from .steps import Act, See, Shot
 
 PLAN_KEYS = {"app", "repo", "clear_state", "items", "explore"}
 ITEM_KEYS = {"from", "do", "fresh", "title", "expect", "when"}
