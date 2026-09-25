@@ -14,7 +14,7 @@ class Arrive:
 
 @dataclass
 class Visible:
-    """要素が出る。`own` は押した要素そのもの（パターンの要素なら押した1つ）。"""
+    """要素が出る。`own` は操作した要素そのもの（パターンの要素なら操作した1つ）。"""
     id: str
     own: bool = False
 
@@ -50,10 +50,10 @@ class External:
 
 @dataclass
 class Act:
-    """`screen` で操作する（tap / text / scroll）。起きることは `result`。"""
+    """`screen` で `action` をする。すると起きることが `result`。"""
     screen: str                       # 操作する時点で居る画面
-    action: Any                       # 何を押すか（マップの操作 model.Action。要素・種類・summary）
-    result: List[Any] = field(default_factory=list)   # 押すと起きること（Arrive / Visible / ...）
+    action: Any                       # する操作（マップの model.Action。tap / text / scroll と、その対象の要素・summary）
+    result: List[Any] = field(default_factory=list)   # action をすると起きること（Arrive / Visible / ...）
     value: Optional[str] = None       # パターンの要素を ID まで決め打ちしたときの値（`tap:list.row.牛乳` の 牛乳）
     input: Optional[str] = None       # text で打つ文字（データに依らない値）
     runtime: bool = False             # text で打つ文字を実行時に決める
