@@ -6,42 +6,42 @@ from typing import Any, List, Optional
 # ---------- 操作の結果（Act.result の1項目） ----------
 
 @dataclass
-class Arrive(object):
+class Arrive:
     """別の画面に着く。`via` は push / modal / tab / back / dismiss（着いたときの自動表示の確かめ方が変わる）。"""
     screen: str
     via: str
 
 
 @dataclass
-class Visible(object):
+class Visible:
     """要素が出る。`own` は押した要素そのもの（パターンの要素なら押した1つ）。"""
     id: str
     own: bool = False
 
 
 @dataclass
-class Value(object):
+class Value:
     """要素の値が変わる。確かめられるのは要素が見えることまでで、値そのものは証跡で見る。"""
     id: str
     own: bool = False
 
 
 @dataclass
-class Selected(object):
+class Selected:
     """要素が選択状態になる。"""
     id: str
     own: bool = False
 
 
 @dataclass
-class Hidden(object):
+class Hidden:
     """要素が消える。"""
     id: str
     own: bool = False
 
 
 @dataclass
-class External(object):
+class External:
     """アプリの外（Safari、App Store など）に出る。確かめずにアプリに戻す。"""
     name: str
 
@@ -49,7 +49,7 @@ class External(object):
 # ---------- ステップ ----------
 
 @dataclass
-class Act(object):
+class Act:
     """`screen` で操作する（tap / text / scroll）。起きることは `result`。"""
     screen: str                       # 操作する時点で居る画面
     action: Any                       # 何を押すか（マップの操作 model.Action。要素・種類・summary）
@@ -77,7 +77,7 @@ class Act(object):
 
 
 @dataclass
-class See(object):
+class See:
     """見るだけの要素を、見えるまでスクロールして確かめる。"""
     screen: str
     element: dict
@@ -87,7 +87,7 @@ class See(object):
 
 
 @dataclass
-class Await(object):
+class Await:
     """自動表示の画面が出るのを、閉じずに待つ（自動表示そのものを確かめる項目）。"""
     screen: str                       # 被さる先の画面
     to: str                           # 出てくる自動表示の画面
@@ -95,7 +95,7 @@ class Await(object):
 
 
 @dataclass
-class Shot(object):
+class Shot:
     """撮る。`name` は証跡の名前（項目の名前）。"""
     name: str
     item: Optional[str] = None
@@ -103,7 +103,7 @@ class Shot(object):
 
 
 @dataclass
-class Restart(object):
+class Restart:
     """アプリを起動し直す（`fresh` の項目の前）。起点に戻る。"""
     item: Optional[str] = None
     to = None

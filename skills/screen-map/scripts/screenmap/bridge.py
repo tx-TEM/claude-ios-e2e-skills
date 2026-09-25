@@ -55,7 +55,7 @@ class Unroutable(Exception):
         self.problems = problems
 
 
-class Route(object):
+class Route:
     """居る画面（`at`）と、歩いてきた履歴（`stack`）を持って、画面から画面へ繋ぐ。
 
     **戻る操作（`screen: back`）の戻り先はこの履歴で決める。** どこから来たかで変わる

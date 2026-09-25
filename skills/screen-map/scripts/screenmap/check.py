@@ -70,7 +70,7 @@ def is_defined(ids, ref):
     return ref in ids or any(is_pattern(i) and ref.startswith(pattern_prefix(i)) for i in ids)
 
 
-class Findings(object):
+class Findings:
     """検査で見つかったもの。直す先の重さで3つに分ける。
 
       bad     不整合。経路が組めない、黙って飛ばされる。直す

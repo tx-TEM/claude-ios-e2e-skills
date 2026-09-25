@@ -41,7 +41,7 @@ def expect_kind(e):
     return found[0] if len(found) == 1 else None
 
 
-class Action(object):
+class Action:
     """マップの1つの操作。要素のアクションか、画面の gestures の1項目。
 
     **結果は `expect` だけで持つ。** 遷移も「移った先の anchor が見える」という結果の
@@ -89,7 +89,7 @@ class Action(object):
         return not (self.element is not None and self.element.get("in_tree") is False)
 
 
-class ScreenMap(object):
+class ScreenMap:
     def __init__(self, root):
         self.root = root
         cfg = load_yaml(root / "config.yaml") or {}

@@ -17,7 +17,7 @@ SHOTS_VAR = "SHOTS"   # 撮影先のディレクトリ。run_flows.py が端末�
 
 
 @dataclass
-class Reveal(object):
+class Reveal:
     """`act` の要素が全部見えるまでスクロールする。要素を操作する Act の直前に必ず挟む（add_reveals）。
 
     **独立したステップにしておくと、フローを割るときに何もしなくてよい。** 値を決める操作の
@@ -290,7 +290,7 @@ def emit_flow(mp, steps, app, clear_state, notes=None, timeout=10000,
     return FlowWriter(mp, steps, app, clear_state, notes, timeout).write(start or mp.start, launch)
 
 
-class FlowWriter(object):
+class FlowWriter:
     """フロー1本を書く。積んだコマンド（`out`）・補足（`notes`）・居る画面（`at`）を持つ。
 
     `out` は Maestro のコマンドを dict で、注記を Comment で並べたもの。書き出しは
