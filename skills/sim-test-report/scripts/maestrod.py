@@ -332,10 +332,15 @@ def label_at(udid, x, y, tol=40):
         return None
     best = None
     for line in f.read_text().splitlines():
-        m = re.match(r"\s*\((-?\d+),(-?\d+)\)\s+\S+\s+(.*)", line)
-        if not m:
+        # elements.py の行はタブ区切り: tap / 画面内 / 上端 / id / テキスト / 状態
+        cols = line.split("\t")
+        m = re.match(r"^\((-?\d+),(-?\d+)\)$", cols[0])
+        if not m or len(cols) < 5:
             continue
-        cx, cy, lab = int(m.group(1)), int(m.group(2)), m.group(3).strip()
+        cx, cy = int(m.group(1)), int(m.group(2))
+        lab = cols[4] or ("#" + cols[3] if cols[3] else "")
+        if not lab:
+            continue
         d = abs(cx - x) + abs(cy - y)
         if d <= tol and (best is None or d < best[0]):
             best = (d, lab)

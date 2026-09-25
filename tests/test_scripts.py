@@ -600,14 +600,12 @@ class ReportShape(unittest.TestCase):
             {"name": "test_01", "title": "a", "desc": "x", "result": "NG"}],
             "footer": "確認していないこと: エラー系\n作成したデータ: 無し"}), [])
 
-def dump_line(cx, cy, on, rid, text="", state=""):
-    """elements.py の出力の1行。"""
-    label = "{}  #{}".format(text, rid) if text else "#" + rid
-    return "{:>12}  {:<5} {}{}\n".format("({},{})".format(cx, cy), on if on == "○" else "×  ",
-                                         label, " [{}]".format(state) if state else "")
+def dump_line(cx, cy, on, rid, text="", state="", height=40):
+    """elements.py の出力の1行（タブ区切り）。上端は中心から高さの半分を引く。"""
+    return "\t".join(["({},{})".format(cx, cy), on, str(cy - height // 2), rid, text, state]) + "\n"
 
 
-DUMP_HEAD = "画面: list\n" + "{:>12}  {:<5} テキスト / id\n".format("tap", "画面内")
+DUMP_HEAD = "画面: list\n" + "\t".join(["tap", "画面内", "上端", "id", "テキスト", "状態"]) + "\n"
 
 
 def build_err(items, repo=FIXTURE):
@@ -835,6 +833,45 @@ class FirstVisible(unittest.TestCase):
 
     def test_none_when_nothing_visible(self):
         self.assertIsNone(RF["first_visible"](self.DUMP, "detail.cell.*"))
+
+    def test_id_with_spaces(self):
+        dump = dump_line(201, 241, "○", "list.row.BOITEUX ・ BOITEUSE", "BOITEUX ・ BOITEUSE, 李 箱")
+        self.assertEqual(RF["first_visible"](dump, "list.row.*"), "BOITEUX ・ BOITEUSE")
+
+    def test_index_follows_the_top_edge(self):
+        # 背の高い行 A（上端 200、中心 300）と低い行 B（上端 240、中心 260）。中心で並べると
+        # B が先だが、Maestro の index は上端で並べるので A が 0
+        dump = (dump_line(195, 260, "○", "list.row.牛乳", "B", height=40)
+                + dump_line(195, 300, "○", "list.row.牛乳", "A", height=200))
+        self.assertEqual(RF["locate"](dump, "list.row.*"), ("牛乳", 0, 2))
+        self.assertEqual(RF["locate"](dump, "list.row.*", value="牛乳#2"), ("牛乳", 1, 2))
+
+
+class ElementsOutput(unittest.TestCase):
+    """elements.py の出力はタブ区切りで、id と上端を独立した欄に持つ。"""
+
+    def test_columns(self):
+        dump = {"ui_schema": {}, "elements": [{"b": "[0,0][402,874]", "c": [
+            {"b": "[16,208][386,274]", "a11y": "BOITEUX ・ BOITEUSE, 李 箱",
+             "rid": "browse.book_row.BOITEUX ・ BOITEUSE"},
+            {"b": "[16,120][200,160]", "txt": "作品名", "rid": "browse.target_picker.title", "selected": True},
+            {"b": "[16,-80][386,-20]", "rid": "browse.book_row.上の行"},
+            {"b": "[50,20][90,40]", "txt": "0:02"}]}]}
+        f = Path(tempfile.mkdtemp()) / "d.json"
+        f.write_text(json.dumps(dump, ensure_ascii=False), encoding="utf-8")
+        import subprocess
+        out = subprocess.run([sys.executable, str(SCRIPTS / "elements.py"), str(f)],
+                             capture_output=True, text=True).stdout.splitlines()
+        shutil.rmtree(f.parent)
+        self.assertEqual(out[1].split("\t"), ["tap", "画面内", "上端", "id", "テキスト", "状態"])
+        rows = [l.split("\t") for l in out[2:]]
+        self.assertIn(["(201,-50)", "×", "-80", "browse.book_row.上の行", "", ""], rows)
+        self.assertIn(["(70,30)", "○", "20", "", "0:02", ""], rows)
+        self.assertIn(["(108,140)", "○", "120", "browse.target_picker.title", "作品名", "選択"], rows)
+        self.assertIn(["(201,241)", "○", "208", "browse.book_row.BOITEUX ・ BOITEUSE",
+                       "BOITEUX ・ BOITEUSE, 李 箱", ""], rows)
+        # 読む側がそのまま使える
+        self.assertEqual(RF["locate"]("\n".join(out), "browse.book_row.*"), ("BOITEUX ・ BOITEUSE", 0, 1))
 
 
 class AutoPickRun(unittest.TestCase):

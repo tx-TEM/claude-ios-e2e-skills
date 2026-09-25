@@ -171,37 +171,43 @@ def retake_runs(sections, only):
     return [(flows[j], "shot" if flows[j]["name"] in only else "replay") for j in sorted(run)]
 
 
-STATE_MARKS = re.compile(r"( \[(選択|非活性|チェック)\])+$")
+def dump_rows(dump):
+    """elements.py の出力を [{"cx", "cy", "on", "top", "id", "text", "state"}] で。
+
+    行はタブ区切り（tap / 画面内 / 上端 / id / テキスト / 状態）。**id に空白が入っても
+    1回で取れる**（`browse.book_row.BOITEUX ・ BOITEUSE`）。1行目の画面と2行目の欄名は飛ばす。
+    """
+    out = []
+    for line in dump.splitlines():
+        cols = line.split("\t")
+        m = re.match(r"^\((-?\d+),(-?\d+)\)$", cols[0])
+        if not m or len(cols) < 6 or not cols[2].lstrip("-").isdigit():
+            continue
+        out.append({"cx": int(m.group(1)), "cy": int(m.group(2)), "on": cols[1] == "○",
+                    "top": int(cols[2]), "id": cols[3], "text": cols[4], "state": cols[5]})
+    return out
 
 
 def pattern_rows(dump, pattern, exclude=()):
-    """ダンプ（elements.py の出力）のうちパターンに当たる行を、上から順に [(値, 画面内か)] で。
+    """ダンプのうちパターンに当たる行を、Maestro の index と同じ順で [(値, 画面内か)]。
 
-    値はパターンの `*` に当たる部分。elements.py の行は位置順（y、次に x）に並んでいて、
-    画面内かどうか（○ / ×）を持つ。**画面外の行も返す** — Maestro の index はそれも数える。
+    値はパターンの `*` に当たる部分。**順は上端の y、次に x**（Maestro の Filters.index が
+    当たった要素を並べる INDEX_COMPARATOR と同じ基準。x は中心で代える — 同じ ID の行は
+    幅がそろう）。**画面外の行も返す** — Maestro の index はそれも数える。
 
     `exclude` はマップで別の要素として定義されている ID（行の中のタイトルなど）。
     パターン（`item_list.cell.*`）の前方一致には当たるが、行ではないので数えない。
     パターンになっているもの（`item_list.cell.badge.*`）は前方一致で外す。
     """
     prefix = pattern[:-1] if pattern.endswith("*") else pattern
-    out = []
-    for line in dump.splitlines():
-        m = re.match(r"^\s*\((-?\d+),(-?\d+)\)\s+(\S+)\s+(.*)$", line)
-        if not m or m.group(3) not in ("○", "×"):
-            continue
-        label = STATE_MARKS.sub("", m.group(4))
-        if label.startswith("#"):
-            rid = label[1:]
-        elif "  #" in label:
-            rid = label.rsplit("  #", 1)[1]
-        else:
-            continue
+    rows = []
+    for r in dump_rows(dump):
+        rid = r["id"]
         if any(rid == x or (x.endswith("*") and rid.startswith(x[:-1])) for x in exclude):
             continue
         if rid.startswith(prefix) and len(rid) > len(prefix):
-            out.append((rid[len(prefix):], m.group(3) == "○"))
-    return out
+            rows.append((r["top"], r["cx"], rid[len(prefix):], r["on"]))
+    return [(v, on) for _, _, v, on in sorted(rows, key=lambda x: (x[0], x[1]))]
 
 
 def locate(dump, pattern, exclude=(), value=None):
@@ -215,9 +221,8 @@ def locate(dump, pattern, exclude=(), value=None):
     同じになる**ので、`名前#2` と書けば、画面に見えている同じ名前の行のうち上から2件目。
     名前そのものが `#2` で終わる行があれば、そちらを採る。
 
-    index は、同じ ID の行を位置順に並べたときの番号（画面外も数える）。Maestro の
-    `index` がその順で数えるため（Filters.index の INDEX_COMPARATOR: 上端の y、次に x）。
-    こちらは中心の座標で並べているので、高さの違う行が縦に重なるときだけずれうる。
+    index は、同じ ID の行を位置順（上端の y、次に x）に並べたときの番号（画面外も数える）。
+    Maestro の `index` がその順で数えるため（Filters.index の INDEX_COMPARATOR）。
     """
     rows = pattern_rows(dump, pattern, exclude)
     if value is None:

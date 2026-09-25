@@ -113,7 +113,7 @@ private func identifier(for target: FilterTarget) -> String {
 ```
 
 ```
-(201,707)  ○  牛乳, 1,000ml  #item_list.cell.牛乳
+(201,707)	○	680	item_list.cell.牛乳	牛乳, 1,000ml	
 ```
 
 **ここでの「表示テキスト」はデータ由来の文言**（商品名、ユーザー名、件名）。ボタンやラベルのような**ローカライズされるUI文言とは別物**で、そちらは従来どおり静的な役割名を振る。
