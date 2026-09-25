@@ -33,7 +33,7 @@ sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(MAP_SCRIPTS))
 
 from screenmap import check as map_check  # noqa: E402
-from screenmap import model as screen_map  # noqa: E402
+from screenmap import screen as screen_map  # noqa: E402
 from testflow import flow as flows_of  # noqa: E402
 
 

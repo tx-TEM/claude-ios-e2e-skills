@@ -3,7 +3,7 @@
 sim-test-report の testflow/flow.py が plan の項目を順にフローにするとき、前の項目が終わった画面から次の項目の
 `from` まで（最初は起動直後の画面から）をここで引く。項目の中の `do` は flow.py が扱う。
 
-経路はマップの `expect: {screen, via}` を辺にした最短路（model.py の `path_from`）。
+経路はマップの `expect: {screen, via}` を辺にした最短路（screen.py の `path_from`）。
 ここはそれに、**歩いてきた履歴**（戻る操作の戻り先を決める）と、**自動表示の画面への
 行き方**（被さる先まで行って、閉じずに待つ）を足す。
 

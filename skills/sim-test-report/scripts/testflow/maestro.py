@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
-from screenmap.model import BACKWARD, auto_of, is_pattern, pattern_prefix
+from screenmap.screen import BACKWARD, auto_of, is_pattern, pattern_prefix
 from screenmap.results import Arrive, External, Hidden, Selected, Value, Visible
 from screenmap.actions import Input, InputLater, Scroll, Tap
 from screenmap.steps import Act, Await, Restart, See, Shot

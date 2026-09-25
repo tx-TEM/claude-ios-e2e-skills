@@ -6,7 +6,7 @@
 from dataclasses import dataclass
 from typing import Optional, Union
 
-from .model import ActionSpec, is_pattern, pattern_prefix
+from .screen import ActionSpec, is_pattern, pattern_prefix
 
 
 @dataclass

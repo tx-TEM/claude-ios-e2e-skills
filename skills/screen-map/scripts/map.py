@@ -33,7 +33,7 @@
 import sys
 
 from screenmap.check import cmd_check
-from screenmap.model import load_map
+from screenmap.screen import load_map
 from screenmap.bridge import emit_path, report_problems, walk
 
 

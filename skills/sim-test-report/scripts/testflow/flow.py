@@ -15,7 +15,7 @@ from pathlib import Path
 
 from .maestro import (add_reveals, assign_vars, emit_flow, runtime_picks, runtime_uses,
                       shot_context, split_at_shots, split_parts, var_of)
-from screenmap.model import DO_OPS, GESTURES, load_map, pattern_prefix
+from screenmap.screen import DO_OPS, GESTURES, load_map, pattern_prefix
 from screenmap.bridge import Route, Unroutable, emit_path, report_problems
 from screenmap.results import resolve_result
 from screenmap.actions import resolve_action

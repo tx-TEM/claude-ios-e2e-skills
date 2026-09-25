@@ -5,7 +5,7 @@
 from dataclasses import dataclass
 from typing import Union
 
-from .model import expect_kind
+from .screen import expect_kind
 
 
 @dataclass
