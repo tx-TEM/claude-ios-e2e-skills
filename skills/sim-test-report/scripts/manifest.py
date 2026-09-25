@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """test-case-builder の plan.json から、フローを書いて manifest.json を作る。
 
-  manifest.py <plan.json> <出力先ディレクトリ> --repo <アプリのリポジトリ> --device <端末>=<UDID> [--device …]
+  manifest.py <plan.json> <出力先ディレクトリ> --device <端末>=<UDID> [--device …]
 
-`--repo` はアプリのリポジトリ。**必ず渡す。** 画面マップ（その下の `screen-map/`）は、経路を組む項目があるときに読む。
+**どのアプリの画面マップで経路を組むかは plan の `repo` で決まる。** plan の画面 id と要素 id は
+そのマップを前提に書いたものなので、plan が持つ（引数では渡さない）。
 
 証跡は `<出力先>/shots/<端末>/<名前>.png` に撮る。名前は項目の並び順から振る
 （`test_01`, `test_02`, …。explore は items の続きの番号）。**1つのテストケースを複数の端末で
@@ -23,6 +24,7 @@
 plan.json の形。**項目1つ＝ from から do を順に叩いて、1枚撮る。**
 
     {"app": "<bundle id>",
+     "repo": "<アプリのリポジトリ>",
      "clear_state": false,
      "items": [
        {"from": "browse"},
@@ -37,6 +39,8 @@ plan.json の形。**項目1つ＝ from から do を順に叩いて、1枚撮�
        {"from": "browse", "do": ["see:browse.section.recommend"]},
        {"from": "book_detail", "when": ["ログイン中"],
         "do": ["tap:book_detail.register_button"]}]}
+  repo      アプリのリポジトリ（必須）。画面マップはその下の screen-map/。
+            相対パスなら plan の置き場所から読む。マニフェストにも写す
   from      その項目の操作を始める画面。**項目は経路を持たない** —
             前の項目が終わった画面から from までは、ここで計算して
             繋ぐ（すでに居れば何もしない）
@@ -140,11 +144,11 @@ def main():
     if len(argv) < 2:
         sys.exit(__doc__)
     plan_path, out_dir = Path(argv[0]).expanduser(), Path(argv[1]).expanduser()
-    repo, devices = None, []
+    devices = []
     i = 2
     while i < len(argv):
         if argv[i] == "--repo":
-            repo = argv[i + 1]; i += 2
+            sys.exit("--repo は渡さない。アプリのリポジトリは plan の repo に書く")
         elif argv[i] == "--device":
             name, _, udid = argv[i + 1].partition("=")
             if not udid:
@@ -152,8 +156,6 @@ def main():
             devices.append((name, udid)); i += 2
         else:
             sys.exit("知らない引数: " + argv[i] + "（題と meta は build_report.py に渡す）")
-    if not repo:
-        sys.exit("--repo <アプリのリポジトリ> が要る")
     if not devices:
         sys.exit("--device <端末>=<UDID> が要る（iphone / ipad。複数の端末で撮るなら並べる）")
     names = [n for n, _ in devices]
@@ -173,7 +175,7 @@ def main():
     # **置き場はスキル側の .work に固定する。** 呼ぶ側のカレント（アプリのリポジトリ）に
     # 作ると、誰も片付けない。スキル側なら maestrod.py sweep が古いものを消す
     flows = FLOWS / out_dir.resolve().name
-    rows = flows_of.write_flows(plan, flows, repo) if items else []
+    rows = flows_of.write_flows(plan, flows) if items else []
     if items:
         print()
 
@@ -235,7 +237,7 @@ def main():
             "result": prev.get("result", "PENDING"),
         })
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(dict(top, devices=info, flows=str(flows), sections=sections),
+    out.write_text(json.dumps(dict(top, repo=plan["repo"], devices=info, flows=str(flows), sections=sections),
                               ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     carried = []
     for sec in sections:

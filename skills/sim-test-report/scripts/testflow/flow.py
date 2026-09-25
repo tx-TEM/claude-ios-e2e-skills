@@ -21,7 +21,7 @@ from screenmap.results import resolve_result
 from screenmap.actions import resolve_action
 from screenmap.steps import Act, See, Shot
 
-PLAN_KEYS = {"app", "clear_state", "items", "explore"}
+PLAN_KEYS = {"app", "repo", "clear_state", "items", "explore"}
 ITEM_KEYS = {"from", "do", "fresh", "title", "expect", "when"}
 DO_KEYS = {"op", "runtime", "input", "pick"}
 EXPLORE_KEYS = {"from", "title", "expect", "reason", "when"}
@@ -37,7 +37,12 @@ def shot_name(n):
 
 def load_plan(path):
     """plan.json を読み、鍵を確かめて返す。**知らない鍵は綴り違い** — 黙って無視すると、
-    その指定が効かないまま走る。"""
+    その指定が効かないまま走る。
+
+    `repo`（アプリのリポジトリ）は必須。plan の画面 id と要素 id は、そのリポジトリの画面マップを
+    前提に書いたものなので、どのマップかも plan が持つ。相対パスなら plan の置き場所から読み、
+    返す plan では絶対パスにしておく（どこで叩いても同じマップを読むように）。
+    """
     try:
         plan = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError) as e:
@@ -51,6 +56,11 @@ def load_plan(path):
             hint = "。証跡の出力先は manifest.py の引数で決まる"
         sys.exit("plan に知らない鍵: {}（使えるのは {}）{}".format(
             ", ".join(sorted(unknown)), ", ".join(sorted(PLAN_KEYS)), hint))
+    if not plan.get("repo"):
+        sys.exit("plan に repo（アプリのリポジトリ）が要る。plan の画面 id と要素 id が前提にしている"
+                 "画面マップは、その下の screen-map/ にある")
+    repo = Path(str(plan["repo"])).expanduser()
+    plan["repo"] = str((repo if repo.is_absolute() else Path(path).resolve().parent / repo).resolve())
     for n, it in enumerate(plan.get("explore") or [], 1):
         unknown = set(it) - EXPLORE_KEYS
         if unknown:
@@ -226,7 +236,7 @@ def branch_of(action, at, given):
 
 # ---------- フローに書く ----------
 
-def write_flows(plan, out_dir, repo, timeout=10000):
+def write_flows(plan, out_dir, timeout=10000):
     """plan.json の項目ごとに Maestro のフローを out_dir に書き、項目ごとの行を返す。
 
     **項目（撮影）ごとに1本ずつ。** 走らせる側は順に run して inspect するだけで、
@@ -251,7 +261,7 @@ def write_flows(plan, out_dir, repo, timeout=10000):
         sys.exit("plan の items が空（経路が組めた項目が無いならフローは要らない）")
     if not app:
         sys.exit("plan に app（bundle id）が要る（xcrun simctl listapps <UDID> で調べる）")
-    mp = load_map(repo)
+    mp = load_map(plan.get("repo"))
     steps, problems, notes = build_steps(mp, items)
     if problems:
         report_problems(problems)
