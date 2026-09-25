@@ -11,7 +11,7 @@ from typing import Optional
 from screenmap.screen import BACKWARD, is_pattern, pattern_prefix
 from .actions import Input, InputLater, Scroll, Tap
 from .results import Arrive, External, Hidden, Selected, Value, Visible
-from .steps import Act, Await, Restart, See, Shot
+from .steps import Act, Await, Restart, See, Shot, goes_out, stays_out, waits_text
 
 from .flowyaml import Comment, Raw, render
 
@@ -43,9 +43,6 @@ class Return:
     to = None
 
 
-def goes_out(st):
-    """アプリの外に出る操作か。"""
-    return isinstance(st, Act) and any(isinstance(r, External) for r in st.result)
 
 
 def add_returns(steps):
@@ -63,7 +60,7 @@ def add_returns(steps):
     out = []
     for k, st in enumerate(steps):
         out.append(st)
-        prev = next((p for p in reversed(steps[:k]) if not isinstance(p, Reveal)), None)
+        prev = next((p for p in reversed(steps[:k]) if not isinstance(p, Reveal) and not waits_text(p)), None)
         nxt = steps[k + 1] if k + 1 < len(steps) else None
         if isinstance(st, Shot) and goes_out(prev) and nxt is not None and not isinstance(nxt, Restart):
             out.append(Return(prev.screen, prev.item))
@@ -112,13 +109,14 @@ def var_name(target):
 
 
 def needs_value(st):
-    """実行時に値を決めるステップか。打つ文字か、パターンの要素のどれに操作するか。"""
-    return isinstance(st, Act) and st.needs_value()
+    """実行時に値を決めるステップか。打つ文字か、パターンの要素のどれに操作するか、
+    見る行が含む語（`see` の `runtime`）。"""
+    return isinstance(st, (Act, See)) and st.needs_value()
 
 
 def var_of(st, names=None):
     """その Act の値を入れる env の変数名。assign_vars() が振った名前（無ければ要素の id から作る）。"""
-    return (names or {}).get(id(st)) or var_name(st.action.target)
+    return (names or {}).get(id(st)) or var_name(st.target if isinstance(st, See) else st.action.target)
 
 
 def index_var(var):
@@ -141,7 +139,7 @@ def assign_vars(steps):
     for st in steps:
         if not needs_value(st):
             continue
-        base = var_name(st.action.target)
+        base = var_name(st.target if isinstance(st, See) else st.action.target)
         used[base] = used.get(base, 0) + 1
         names[id(st)] = base if used[base] == 1 else "{}_{}".format(base, used[base])
     return names
@@ -159,7 +157,8 @@ def runtime_uses(steps, names):
     uses = {}
     for st in steps:
         if needs_value(st):
-            uses[var_of(st, names)] = "text" if isinstance(st.action, InputLater) else "selector"
+            text = isinstance(st, Act) and isinstance(st.action, InputLater)
+            uses[var_of(st, names)] = "text" if text else "selector"
         if picks_pattern(st):
             uses[index_var(var_of(st, names))] = "index"   # 数字そのもの。エスケープしない
     return uses
@@ -217,6 +216,10 @@ def element_sel(target, by_label=False, var=None):
 def step_sel(st, names=None):
     """ステップが指す要素のセレクタ（See は見る要素、Act は操作の要素）。"""
     if isinstance(st, See):
+        if st.contains is not None or st.later:
+            # その語を含む行。語は正規表現としてエスケープする（later は run_flows.py がする）
+            word = re.escape(st.contains) if st.contains is not None else "${" + var_of(st, names) + "}"
+            return "id", "^" + re.escape(pattern_prefix(st.target)) + ".*" + word + ".*"
         return element_sel(st.target, st.by_label)
     a = st.action
     var = var_of(st, names) if needs_value(st) and is_pattern(a.target) else None
@@ -483,9 +486,18 @@ class FlowWriter:
             self.at = st.screen
         elif isinstance(st, Reveal):
             self.reveal(i, st)
+        elif isinstance(st, See) and st.text:
+            # マップに無い文言（アプリの外など）。スクロールせずに出るまで待つ
+            self.out.append(Comment("{}: 「{}」が出るまで待つ".format(st.screen, st.target)))
+            self.out.append(wait_for(*step_sel(st, self.names), timeout=self.timeout))
         elif isinstance(st, See):
             name = st.name
-            self.out.append(Comment("{}: see {}{}".format(st.screen, st.target,
+            what = st.target
+            if st.contains is not None:
+                what += "（「{}」を含む行）".format(st.contains)
+            elif st.later:
+                what += "（${{{}}} を含む行）".format(var_of(st, self.names))
+            self.out.append(Comment("{}: see {}{}".format(st.screen, what,
                                                             " — " + name if name else "")))
             self.out.extend(reveal(*step_sel(st, self.names), center=True, up=st.up))
         else:
@@ -521,8 +533,8 @@ class FlowWriter:
         if st.arrive:
             self.arrive(st.to, i + 1, st.arrive.via, st.screen)
             self.at = st.to
-        # すぐ後で撮るなら、外に出たまま撮る（add_returns）
-        stay = i + 1 < len(self.steps) and isinstance(self.steps[i + 1], Shot)
+        # すぐ後で撮るなら（間に文言を待つだけなら）、外に出たまま撮る（add_returns）
+        stay = stays_out(self.steps, i, skip=(Reveal,))
         for r in st.result:
             if not isinstance(r, Arrive):
                 self.check(st, r, stay)
