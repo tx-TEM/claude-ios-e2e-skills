@@ -3,7 +3,7 @@
   python3 -m unittest discover tests            テストを走らせる
   UPDATE_SNAPSHOTS=1 python3 -m unittest ...    スナップショットを書き直す
 
-**フローはスナップショットで比べる。** walk.py の `build()` と flow.py の `emit_flow()` は
+**フローはスナップショットで比べる。** flow.py の `build_steps()` と maestro.py の `emit_flow()` は
 ほぼ純関数で、fixture のマップと plan から書かれるフローの中身がそのまま
 挙動になる。書き直したら、差分を読んでから入れる。
 
@@ -31,7 +31,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 from screenmap import check as map_check  # noqa: E402
 from screenmap import model as screen_map  # noqa: E402
-from screenmap import plans  # noqa: E402
+from screenmap import flow as flows_of  # noqa: E402
 
 
 def load_run_flows():
@@ -50,7 +50,7 @@ def write_flows(items, repo=FIXTURE):
     out = Path(tempfile.mkdtemp())
     plan = {"app": "jp.example.App", "items": items}
     with contextlib.redirect_stdout(io.StringIO()):
-        rows = plans.write_flows(plan, out, str(repo))
+        rows = flows_of.write_flows(plan, out, str(repo))
     flows = {p.name: p.read_text(encoding="utf-8") for p in sorted(out.glob("*.yaml"))}
     shutil.rmtree(out)
     return rows, flows

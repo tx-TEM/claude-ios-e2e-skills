@@ -1,7 +1,7 @@
 """画面マップ（screen-map/）を読む。画面・要素・操作と、そこから引ける辺。
 
-マップの形は screen-map スキルの reference/schema.md。ここはそれを読んで、経路の計算
-（walk.py）・フローの書き出し（flow.py）・検査（check.py）が使う形にするだけ。
+マップの形は screen-map スキルの reference/schema.md。ここはそれを読んで、経路（route.py）・
+フローを作る（flow.py / maestro.py）・検査（check.py）が使う形にするだけ。
 """
 import heapq
 import sys

@@ -12,7 +12,7 @@
 **ここにあるのは CLI だけ。** 中身は screenmap/ にある（一覧は screenmap/__init__.py）。
 
 **フローはここでは書かない。** plan.json から項目ごとのフローを書くのは `manifest.py` で、
-中で screenmap/plans.py の `write_flows()` を呼ぶ。plan の形は `manifest.py --help`。
+中で screenmap/flow.py の `write_flows()` を呼ぶ（項目の間は screenmap/route.py が繋ぐ）。plan の形は `manifest.py --help`。
 
 **どの画面が目標かを決めるのはここの仕事ではない。** `screens` が出すのは
 一覧で、絞るのは読む側。ここにキーワード一致を足さない。**文字列の一致は
@@ -22,10 +22,10 @@
 import sys
 
 from screenmap.check import cmd_check
-from screenmap.flow import emit_flow, emit_path
+from screenmap.flow import report_problems
+from screenmap.maestro import emit_flow
 from screenmap.model import load_map
-from screenmap.plans import report_problems
-from screenmap.walk import build
+from screenmap.route import emit_path, walk
 
 
 def cmd_screens(mp):
@@ -135,7 +135,7 @@ def main():
     if not rest:
         sys.exit("行き先が要る。`route.py path <画面id>`。\n"
                  "画面の一覧は `route.py screens`。")
-    steps, problems, notes = build(mp, [("goto", g, {"when": tuple(when)}) for g in rest])
+    steps, problems, notes = walk(mp, rest, tuple(when))
     if problems:
         report_problems(problems)
         sys.exit(2)

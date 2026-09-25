@@ -222,7 +222,7 @@ def check_expect(mp, a, where, e, ids, f):
 
 def check_auto_shows(mp, sid, f):
     for iid, after in mp.auto_items(sid):
-        # 欠けていると、確かめも閉じもせずに黙って飛ばす（flow.py の auto_checks）
+        # 欠けていると、確かめも閉じもせずに黙って飛ばす（maestro.py の auto_checks）
         if iid not in mp.screens:
             f.bad.append("{}: 自動表示 {} のファイルが無い（screens/{}.yaml）".format(sid, iid, iid))
         elif auto_of(mp, iid) is None:
