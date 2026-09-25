@@ -1,6 +1,6 @@
 # 経路になる
 
-マップは要素の操作の `expect: {screen, via}` で辺を持っているので、起点からの経路はグラフの最短路として機械的に組める。sim-test-report はフローを作るときにこの経路を計算して（`scripts/testflow/bridge.py`）、テストケースの項目と項目の間を繋ぐ。このスキルの `scripts/mapctl.py` は、マップが経路として成り立つかを確かめる（`check`）。**このスキルの成果物がそのまま sim-test-report の入力になるのは、ここを通してのこと。**
+マップは要素の操作の `expect: {screen, via}` で辺を持っているので、起点からの経路はグラフの最短路として機械的に組める。sim-test-report はフローを作るときにこの経路を計算して（`scripts/flowgen/bridge.py`）、テストケースの項目と項目の間を繋ぐ。このスキルの `scripts/mapctl.py` は、マップが経路として成り立つかを確かめる（`check`）。**このスキルの成果物がそのまま sim-test-report の入力になるのは、ここを通してのこと。**
 
 ```bash
 R=~/.claude/skills/screen-map/scripts/mapctl.py
@@ -10,7 +10,7 @@ python3 $R which <パス...> --repo <アプリ>   # 変更したファイルか�
 python3 $R check --repo <アプリ>             # 自己テスト（到達可否・不整合・切れている箇所・書き足すもの・鮮度）
 ```
 
-確認項目ごとのフローは sim-test-report の `manifest.py` が書く（中で testflow/bridge.py が経路を計算する）。項目は経路を持たず、前の項目が終わった画面から項目の起点までは、マップから計算して繋ぐ。
+確認項目ごとのフローは sim-test-report の `manifest.py` が書く（中で flowgen/bridge.py が経路を計算する）。項目は経路を持たず、前の項目が終わった画面から項目の起点までは、マップから計算して繋ぐ。
 
 書く側として効いてくるのは次の点。
 

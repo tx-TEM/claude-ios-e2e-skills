@@ -1,5 +1,5 @@
 """スクリプトのテスト。screen-map（mapctl.py / migrate_map.py と screenmap/）と、
-sim-test-report（manifest.py / run_flows.py と testflow/ / device/）。
+sim-test-report（manifest.py / run_flows.py と flowgen/ / device/）。
 
   python3 -m unittest discover tests            テストを走らせる
   UPDATE_SNAPSHOTS=1 python3 -m unittest ...    スナップショットを書き直す
@@ -34,7 +34,7 @@ sys.path.insert(0, str(MAP_SCRIPTS))
 
 from screenmap import check as map_check  # noqa: E402
 from screenmap import map as screen_map  # noqa: E402
-from testflow import flow as flows_of  # noqa: E402
+from flowgen import flow as flows_of  # noqa: E402
 
 
 def load_run_flows():
