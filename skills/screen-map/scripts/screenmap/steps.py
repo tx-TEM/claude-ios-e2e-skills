@@ -1,54 +1,9 @@
-"""フローの1コマ（ステップ）と、操作の結果の型。"""
+"""フローの1コマ（ステップ）の型。操作の結果の型は results.py。"""
 from dataclasses import dataclass, field
-from typing import List, Optional, Union
+from typing import List, Optional
 
 from .model import Action
-
-
-# ---------- 操作の結果（Act.result の1項目） ----------
-
-@dataclass
-class Arrive:
-    """別の画面に着く。`via` は push / modal / tab / back / dismiss（着いたときの自動表示の確かめ方が変わる）。"""
-    screen: str
-    via: str
-
-
-@dataclass
-class Visible:
-    """要素が出る。`own` は操作した要素そのもの（パターンの要素なら操作した1つ）。"""
-    id: str
-    own: bool = False
-
-
-@dataclass
-class Value:
-    """要素の値が変わる。確かめられるのは要素が見えることまでで、値そのものは証跡で見る。"""
-    id: str
-    own: bool = False
-
-
-@dataclass
-class Selected:
-    """要素が選択状態になる。"""
-    id: str
-    own: bool = False
-
-
-@dataclass
-class Hidden:
-    """要素が消える。"""
-    id: str
-    own: bool = False
-
-
-@dataclass
-class External:
-    """アプリの外（Safari、App Store など）に出る。確かめずにアプリに戻す。"""
-    name: str
-
-
-Result = Union[Arrive, Visible, Value, Selected, Hidden, External]
+from .results import Arrive, Result
 
 
 # ---------- ステップ ----------

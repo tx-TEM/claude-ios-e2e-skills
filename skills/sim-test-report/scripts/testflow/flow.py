@@ -16,7 +16,8 @@ from pathlib import Path
 from .maestro import (add_reveals, assign_vars, emit_flow, runtime_picks, runtime_uses,
                       shot_context, split_at_shots, split_parts, var_of)
 from screenmap.model import DO_OPS, GESTURES, is_pattern, load_map, pattern_prefix
-from screenmap.bridge import Route, Unroutable, emit_path, report_problems, resolve_result
+from screenmap.bridge import Route, Unroutable, emit_path, report_problems
+from screenmap.results import resolve_result
 from screenmap.steps import Act, See, Shot
 
 PLAN_KEYS = {"app", "clear_state", "items", "explore"}

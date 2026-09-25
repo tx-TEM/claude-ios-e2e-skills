@@ -16,31 +16,8 @@ sim-test-report の testflow/flow.py が plan の項目を順にフローにす�
 import os
 import sys
 
-from .model import expect_kind
-from .steps import (Act, Arrive, Await, External, Hidden, Restart, See, Selected, Shot, Value,
-                    Visible)
-
-OWN_RESULTS = {"visible": Visible, "value": Value, "selected": Selected, "hidden": Hidden}
-
-
-def resolve_result(action, expects, back_to=None):
-    """マップに書いた `expect` の並びを、ステップの結果（Arrive / Visible / ...）に解く。
-
-    `screen: back` は `back_to`（歩いた履歴で決めた、実際に戻る画面）に、`self` は押す
-    要素の ID にする。分かれる結果は、呼ぶ側が選んだ枝の expect だけを渡す。
-    """
-    out = []
-    for e in expects:
-        kind = expect_kind(e)
-        if kind == "screen":
-            out.append(Arrive(back_to if e["screen"] == "back" else e["screen"], e.get("via")))
-        elif kind == "external":
-            out.append(External(e[kind]))
-        elif kind in OWN_RESULTS:
-            ref = e[kind]
-            own = ref == "self"
-            out.append(OWN_RESULTS[kind](action.target if own else ref, own))
-    return out
+from .results import External, Hidden, Selected, Value, Visible, resolve_result
+from .steps import Act, Await, Restart, See, Shot
 
 
 class Unroutable(Exception):
