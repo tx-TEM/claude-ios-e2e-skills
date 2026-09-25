@@ -1,14 +1,15 @@
-"""sim-test-report のスクリプト（route.py / manifest.py / run_flows.py）のテスト。
+"""スクリプトのテスト。screen-map（mapctl.py / migrate_map.py と screenmap/）と、
+sim-test-report（manifest.py / run_flows.py と flowgen/ / device/）。
 
   python3 -m unittest discover tests            テストを走らせる
   UPDATE_SNAPSHOTS=1 python3 -m unittest ...    スナップショットを書き直す
 
-**フローはスナップショットで比べる。** route.py の `build()` と `emit_flow()` は
+**フローはスナップショットで比べる。** flow.py の `build_steps()` と maestro.py の `emit_flow()` は
 ほぼ純関数で、fixture のマップと plan から書かれるフローの中身がそのまま
 挙動になる。書き直したら、差分を読んでから入れる。
 
 シミュレーターも Maestro も要らない。manifest.py が UDID から機種を引く
-`simulators.lookup()` だけ差し替える。
+`device.simulators.lookup()` だけ差し替える（`run_manifest()`）。
 """
 import contextlib
 import io
@@ -19,17 +20,21 @@ import runpy
 import shutil
 import sys
 import tempfile
-import types
+from unittest import mock
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "skills" / "sim-test-report" / "scripts"
+MAP_SCRIPTS = ROOT / "skills" / "screen-map" / "scripts"      # 画面マップの部品と mapctl.py
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "app"
 SNAPSHOTS = Path(__file__).resolve().parent / "snapshots"
 sys.path.insert(0, str(SCRIPTS))
+sys.path.insert(0, str(MAP_SCRIPTS))
 
-import route  # noqa: E402
+from screenmap import check as map_check  # noqa: E402
+from screenmap import map as screen_map  # noqa: E402
+from flowgen import flow as flows_of  # noqa: E402
 
 
 def load_run_flows():
@@ -46,12 +51,26 @@ RF = load_run_flows()
 def write_flows(items, repo=FIXTURE):
     """plan から フローを書いて、(行, {ファイル名: 中身}) を返す。経路の表示は捨てる。"""
     out = Path(tempfile.mkdtemp())
-    plan = {"app": "jp.example.App", "items": items}
+    plan = {"app": "jp.example.App", "repo": str(repo), "items": items}
     with contextlib.redirect_stdout(io.StringIO()):
-        rows = route.write_flows(plan, out, str(repo))
+        rows = flows_of.write_flows(plan, out)
     flows = {p.name: p.read_text(encoding="utf-8") for p in sorted(out.glob("*.yaml"))}
     shutil.rmtree(out)
     return rows, flows
+
+
+def run_manifest(args):
+    """manifest.py を叩いて標準出力を返す。UDID から機種を引くところだけ差し替える。"""
+    argv = sys.argv
+    sys.argv = ["manifest.py"] + [str(a) for a in args]
+    try:
+        with mock.patch("device.simulators.lookup",
+                        lambda udid: {"model": "iPhone 17 Pro", "os": "iOS 26.5"}), \
+                contextlib.redirect_stdout(io.StringIO()) as o:
+            runpy.run_path(str(SCRIPTS / "manifest.py"), run_name="__main__")
+    finally:
+        sys.argv = argv
+    return o.getvalue()
 
 
 def waits(flow):
@@ -171,7 +190,7 @@ class RuntimeInputs(unittest.TestCase):
     def test_input_use_is_recorded(self):
         rows, _ = self.rows()
         self.assertEqual(rows[0]["input_use"], {"LIST_SEARCH_FIELD": "text"})
-        self.assertEqual(rows[1]["input_use"], {"LIST_ROW": "selector"})
+        self.assertEqual(rows[1]["input_use"], {"LIST_ROW": "selector", "LIST_ROW_INDEX": "index"})
         self.assertEqual(rows[0]["inputs"], {"LIST_SEARCH_FIELD": ""})
         self.assertEqual(rows[1]["inputs"], {"LIST_ROW": ""})
         self.assertEqual(rows[1]["picks"], {"LIST_ROW": {"pattern": "list.row.*", "pick": "いちばん長い名前",
@@ -179,19 +198,21 @@ class RuntimeInputs(unittest.TestCase):
 
     def fill(self, flow, var, value, use):
         body = RF["fill_env"](flow, RF["required_env"](flow),
-                              {var: value, "SHOTS": "/tmp/shots"}, {var: use})
+                              {var: value, var + "_INDEX": 0, "SHOTS": "/tmp/shots"}, {var: use})
         env = dict(re.findall(r"^\s+([A-Z_]+):\s*'(.*)'$", body.split("\n---")[0], re.M))
         return env[var].replace("''", "'")
 
     def test_selector_values_are_escaped(self):
         rows, flows = self.rows()
         flow = flows[rows[1]["flow"]]
-        pattern = re.search(r"id: '(\^list\\\.row\\\.\$\{LIST_ROW\}\$)'", flow).group(1)
+        # 値はアクセシビリティ ID そのもの
+        pattern = re.search(r"id: '(\^\$\{LIST_ROW\}\$)'", flow).group(1)
         for value, other in [("牛乳(1L)", "牛乳1L"), ("a.b", "aXb"),
                              ("C++入門", None), ("50% off [new]", None), ("It's", None)]:
             with self.subTest(value=value):
-                filled = pattern.replace("${LIST_ROW}", self.fill(flow, "LIST_ROW", value, "selector"))
+                filled = pattern.replace("${LIST_ROW}", self.fill(flow, "LIST_ROW", "list.row." + value, "selector"))
                 self.assertTrue(re.fullmatch(filled, "list.row." + value))
+                self.assertFalse(re.fullmatch(filled, "listXrow." + value))
                 if other:
                     self.assertFalse(re.fullmatch(filled, "list.row." + other))
 
@@ -207,33 +228,22 @@ class Manifest(unittest.TestCase):
     def test_manifest_from_plan(self):
         work = Path(tempfile.mkdtemp())
         plan = work / "plan.json"
-        plan.write_text(json.dumps({"app": "jp.example.App", "items": [
+        plan.write_text(json.dumps({"app": "jp.example.App", "repo": str(FIXTURE), "items": [
             {"from": "list", "title": "a", "expect": "a",
              "do": ["tap:list.row.*"]}],
             "explore": [{"from": "settings", "title": "b", "expect": "b",
                          "reason": "画面 settings がマップに無い"}]}), encoding="utf-8")
         out = work / "out"
-        fake = types.ModuleType("simulators")
-        fake.lookup = lambda udid: {"model": "iPhone 17 Pro", "os": "iOS 26.5"}
-        argv, mods = sys.argv, dict(sys.modules)
-        sys.modules["simulators"] = fake
-        sys.argv = ["manifest.py", str(plan), str(out), "--repo", str(FIXTURE),
-                    "--device", "iphone=AAAA", "--device", "ipad=BBBB"]
-        try:
-            with contextlib.redirect_stdout(io.StringIO()):
-                runpy.run_path(str(SCRIPTS / "manifest.py"), run_name="__main__")
-        finally:
-            sys.argv = argv
-            sys.modules.clear()
-            sys.modules.update(mods)
+        run_manifest([plan, out, "--device", "iphone=AAAA", "--device", "ipad=BBBB"])
         m = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
         shutil.rmtree(Path(m["flows"]), ignore_errors=True)
         shutil.rmtree(work)
 
         self.assertEqual(sorted(m["devices"]), ["ipad", "iphone"])
+        self.assertEqual(m["repo"], str(FIXTURE.resolve()))   # どのマップで組んだかを残す
         first, explore = m["sections"]
         self.assertEqual(first["name"], "test_01")
-        self.assertEqual(first["input_use"], {"LIST_ROW": "selector"})
+        self.assertEqual(first["input_use"], {"LIST_ROW": "selector", "LIST_ROW_INDEX": "index"})
         # 条件の無い選択は run_flows.py が決めるので、inputs には入らない
         self.assertEqual(first["devices"]["iphone"], {"inputs": {}, "picked": {}})
         self.assertEqual(first["picks"], {"LIST_ROW": {"pattern": "list.row.*", "pick": "", "exclude": []}})
@@ -253,21 +263,9 @@ class Manifest(unittest.TestCase):
         out = work / "out"
 
         def build(items):
-            plan.write_text(json.dumps({"app": "x", "items": items}), encoding="utf-8")
-            fake = types.ModuleType("simulators")
-            fake.lookup = lambda udid: {"model": "iPhone 17 Pro", "os": "iOS 26.5"}
-            argv, mods = sys.argv, dict(sys.modules)
-            sys.modules["simulators"] = fake
-            sys.argv = ["manifest.py", str(plan), str(out), "--repo", str(FIXTURE),
-                        "--device", "iphone=AAAA"]
-            try:
-                with contextlib.redirect_stdout(io.StringIO()) as o:
-                    runpy.run_path(str(SCRIPTS / "manifest.py"), run_name="__main__")
-            finally:
-                sys.argv = argv
-                sys.modules.clear()
-                sys.modules.update(mods)
-            return json.loads((out / "manifest.json").read_text(encoding="utf-8")), o.getvalue()
+            plan.write_text(json.dumps({"app": "x", "repo": str(FIXTURE), "items": items}), encoding="utf-8")
+            printed = run_manifest([plan, out, "--device", "iphone=AAAA"])
+            return json.loads((out / "manifest.json").read_text(encoding="utf-8")), printed
 
         text = {"from": "list", "title": "a", "expect": "a",
                 "do": [{"op": "text:list.search_field", "runtime": True}]}
@@ -287,6 +285,40 @@ class Manifest(unittest.TestCase):
         self.assertEqual(m["sections"][0]["devices"]["iphone"]["inputs"], {"LIST_ROW": ""})
         shutil.rmtree(Path(m["flows"]), ignore_errors=True)
         shutil.rmtree(work)
+
+
+class PlanRepo(unittest.TestCase):
+    """plan が、どのアプリの画面マップを前提にしたかを持つ（repo）。manifest.py は引数で受け取らない。"""
+
+    def setUp(self):
+        self.work = Path(tempfile.mkdtemp())
+
+    def tearDown(self):
+        shutil.rmtree(self.work)
+
+    def load(self, plan):
+        f = self.work / "plans" / "plan.json"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps(plan), encoding="utf-8")
+        return flows_of.load_plan(f)
+
+    def test_repo_is_required(self):
+        with self.assertRaises(SystemExit) as cm:
+            self.load({"app": "x", "items": []})
+        self.assertIn("plan に repo（アプリのリポジトリ）が要る", str(cm.exception.code))
+
+    def test_relative_repo_is_read_from_the_plan_file(self):
+        app = self.work / "app"
+        app.mkdir()
+        plan = self.load({"app": "x", "repo": "../app", "items": []})
+        self.assertEqual(plan["repo"], str(app.resolve()))
+
+    def test_manifest_refuses_repo_argument(self):
+        f = self.work / "plan.json"
+        f.write_text(json.dumps({"app": "x", "repo": str(FIXTURE), "items": []}), encoding="utf-8")
+        with self.assertRaises(SystemExit) as cm:
+            run_manifest([f, self.work / "out", "--repo", FIXTURE, "--device", "iphone=AAAA"])
+        self.assertIn("plan の repo に書く", str(cm.exception.code))
 
 
 class RetakeRuns(unittest.TestCase):
@@ -468,9 +500,9 @@ class Interrupts(unittest.TestCase):
         shutil.rmtree(self.repo.parent)
 
     def check(self):
-        mp = route.ScreenMap(route.find_map(str(self.repo)))
+        mp = screen_map.ScreenMap(screen_map.find_map(str(self.repo)))
         with contextlib.redirect_stdout(io.StringIO()) as o:
-            code = route.cmd_check(mp)
+            code = map_check.cmd_check(mp)
         return code, o.getvalue()
 
     def test_checked_after_arriving(self):
@@ -600,6 +632,14 @@ class ReportShape(unittest.TestCase):
             {"name": "test_01", "title": "a", "desc": "x", "result": "NG"}],
             "footer": "確認していないこと: エラー系\n作成したデータ: 無し"}), [])
 
+def dump_line(cx, cy, on, rid, text="", state="", height=40):
+    """elements.py の出力の1行（タブ区切り）。上端は中心から高さの半分を引く。"""
+    return "\t".join(["({},{})".format(cx, cy), on, str(cy - height // 2), rid, text, state]) + "\n"
+
+
+DUMP_HEAD = "画面: list\n" + "\t".join(["tap", "画面内", "上端", "id", "テキスト", "状態"]) + "\n"
+
+
 def build_err(items, repo=FIXTURE):
     """組めない plan。stderr に出た理由を返す。"""
     with contextlib.redirect_stderr(io.StringIO()) as err, \
@@ -615,7 +655,7 @@ class Routing(unittest.TestCase):
     """#50: 経路は expect の screen を辺にして引く。"""
 
     def mp(self, repo=FIXTURE):
-        return route.load_map(str(repo))
+        return screen_map.load_map(str(repo))
 
     def test_tab_is_preferred_at_same_length(self):
         # home からの settings は、メニュー（push）とタブの2通り。同じ長さならタブ
@@ -645,9 +685,9 @@ class Routing(unittest.TestCase):
         # フォローボタンを押すと設定に移ることにする（条件つきの要素の辺）
         detail.write_text(detail.read_text(encoding="utf-8").replace(
             "expect: {hidden: self}", "expect: {screen: settings, via: push}"), encoding="utf-8")
-        hops = route.load_map(str(repo)).path_from("detail", "settings")
+        hops = screen_map.load_map(str(repo)).path_from("detail", "settings")
         self.assertIsNone(hops)
-        hops = route.load_map(str(repo)).path_from("detail", "settings", ("フォローしていないとき",))
+        hops = screen_map.load_map(str(repo)).path_from("detail", "settings", ("フォローしていないとき",))
         self.assertEqual([e[0].target for _, e in hops], ["detail.follow_button"])
         rows, _ = write_flows([{"from": "detail", "title": "a", "expect": "a",
                                 "do": ["tap:detail.follow_button"]}], repo)
@@ -777,16 +817,16 @@ class AutoShowAfter(unittest.TestCase):
         self.assertEqual(rows[0]["screen"], "review_dialog")
 
     def test_check(self):
-        mp = route.load_map(str(self.repo))
+        mp = screen_map.load_map(str(self.repo))
         with contextlib.redirect_stdout(io.StringIO()) as o:
-            code = route.cmd_check(mp)
+            code = map_check.cmd_check(mp)
         self.assertEqual(code, 0, o.getvalue())
         self.assertIn("自動表示 review_dialog を detail から戻るたびに確かめる", o.getvalue())
         lst = self.repo / "screen-map" / "screens" / "list.yaml"
         lst.write_text(lst.read_text(encoding="utf-8").replace("after: detail", "after: viewer"),
                        encoding="utf-8")
         with contextlib.redirect_stdout(io.StringIO()) as o:
-            code = route.cmd_check(route.load_map(str(self.repo)))
+            code = map_check.cmd_check(screen_map.load_map(str(self.repo)))
         self.assertEqual(code, 1)
         self.assertIn("自動表示 review_dialog の after viewer の画面が無い", o.getvalue())
 
@@ -794,27 +834,76 @@ class AutoShowAfter(unittest.TestCase):
 class FirstVisible(unittest.TestCase):
     """#50: パターンの要素は、ツリー順ではなく画面に見えている1件目を選ぶ。"""
 
-    DUMP = ("画面: list\n"
-            "         tap  画面内   テキスト / id\n"
-            "   (195,-40)  ×     吾輩は猫である  #list.row.吾輩は猫である\n"
-            "    (195,60)  ○     一覧  #list\n"
-            "   (195,300)  ○     C++入門  #list.row.C++入門 [選択]\n"
-            "   (195,380)  ○     #list.row.こころ\n"
-            "   (195,900)  ×     坊っちゃん  #list.row.坊っちゃん\n")
+    DUMP = (DUMP_HEAD
+            + dump_line(195, -40, "×", "list.row.吾輩は猫である", "吾輩は猫である")
+            + dump_line(195, 60, "○", "list", "一覧")
+            + dump_line(195, 300, "○", "list.row.C++入門", "C++入門", "選択")
+            + dump_line(195, 380, "○", "list.row.こころ", "")
+            + dump_line(195, 900, "×", "list.row.坊っちゃん", "坊っちゃん"))
 
     def test_skips_offscreen_and_strips_state(self):
-        self.assertEqual(RF["first_visible"](self.DUMP, "list.row.*"), "C++入門")
+        self.assertEqual(RF["first_visible"](self.DUMP, "list.row.*"), "list.row.C++入門")
 
     def test_elements_inside_the_row_are_excluded(self):
         # 行の中のタイトル（list.row.title）も行のパターンに当たる。マップで別の要素なら選ばない
-        dump = ("    (195,280)  ○     吾輩は猫である  #list.row.title\n"
-                "    (195,300)  ○     #list.row.こころ\n")
-        self.assertEqual(RF["first_visible"](dump, "list.row.*"), "title")
-        self.assertEqual(RF["first_visible"](dump, "list.row.*", ["list.row.title"]), "こころ")
-        self.assertEqual(RF["first_visible"](dump, "list.row.*", ["list.row.t*"]), "こころ")
+        dump = (dump_line(195, 280, "○", "list.row.title", "吾輩は猫である")
+                + dump_line(195, 300, "○", "list.row.こころ", ""))
+        self.assertEqual(RF["first_visible"](dump, "list.row.*"), "list.row.title")
+        self.assertEqual(RF["first_visible"](dump, "list.row.*", ["list.row.title"]), "list.row.こころ")
+        self.assertEqual(RF["first_visible"](dump, "list.row.*", ["list.row.t*"]), "list.row.こころ")
+
+    def test_locate_counts_offscreen_rows_for_index(self):
+        # Maestro の index は画面外も含めた位置順。吾輩は猫である は1件しか無いので 0
+        self.assertEqual(RF["locate"](self.DUMP, "list.row.*"), ("list.row.C++入門", 0, 1))
+        dump = (dump_line(195, -40, "×", "list.row.牛乳", "")
+                + dump_line(195, 300, "○", "list.row.牛乳", "")
+                + dump_line(195, 380, "○", "list.row.牛乳#2", ""))
+        self.assertEqual(RF["locate"](dump, "list.row.*"), ("list.row.牛乳", 1, 2))
+        # 名前そのものが #2 で終わる行があれば、そちらを採る
+        self.assertEqual(RF["locate"](dump, "list.row.*", value="list.row.牛乳#2"), ("list.row.牛乳#2", 0, 1))
+        self.assertIsNone(RF["locate"](dump, "list.row.*", value="list.row.牛乳#3"))
 
     def test_none_when_nothing_visible(self):
         self.assertIsNone(RF["first_visible"](self.DUMP, "detail.cell.*"))
+
+    def test_id_with_spaces(self):
+        dump = dump_line(201, 241, "○", "list.row.BOITEUX ・ BOITEUSE", "BOITEUX ・ BOITEUSE, 李 箱")
+        self.assertEqual(RF["first_visible"](dump, "list.row.*"), "list.row.BOITEUX ・ BOITEUSE")
+
+    def test_index_follows_the_top_edge(self):
+        # 背の高い行 A（上端 200、中心 300）と低い行 B（上端 240、中心 260）。中心で並べると
+        # B が先だが、Maestro の index は上端で並べるので A が 0
+        dump = (dump_line(195, 260, "○", "list.row.牛乳", "B", height=40)
+                + dump_line(195, 300, "○", "list.row.牛乳", "A", height=200))
+        self.assertEqual(RF["locate"](dump, "list.row.*"), ("list.row.牛乳", 0, 2))
+        self.assertEqual(RF["locate"](dump, "list.row.*", value="list.row.牛乳#2"), ("list.row.牛乳", 1, 2))
+
+
+class ElementsOutput(unittest.TestCase):
+    """elements.py の出力はタブ区切りで、id と上端を独立した欄に持つ。"""
+
+    def test_columns(self):
+        dump = {"ui_schema": {}, "elements": [{"b": "[0,0][402,874]", "c": [
+            {"b": "[16,208][386,274]", "a11y": "BOITEUX ・ BOITEUSE, 李 箱",
+             "rid": "browse.book_row.BOITEUX ・ BOITEUSE"},
+            {"b": "[16,120][200,160]", "txt": "作品名", "rid": "browse.target_picker.title", "selected": True},
+            {"b": "[16,-80][386,-20]", "rid": "browse.book_row.上の行"},
+            {"b": "[50,20][90,40]", "txt": "0:02"}]}]}
+        f = Path(tempfile.mkdtemp()) / "d.json"
+        f.write_text(json.dumps(dump, ensure_ascii=False), encoding="utf-8")
+        import subprocess
+        out = subprocess.run([sys.executable, str(SCRIPTS / "device" / "elements.py"), str(f)],
+                             capture_output=True, text=True).stdout.splitlines()
+        shutil.rmtree(f.parent)
+        self.assertEqual(out[1].split("\t"), ["tap", "画面内", "上端", "id", "テキスト", "状態"])
+        rows = [l.split("\t") for l in out[2:]]
+        self.assertIn(["(201,-50)", "×", "-80", "browse.book_row.上の行", "", ""], rows)
+        self.assertIn(["(70,30)", "○", "20", "", "0:02", ""], rows)
+        self.assertIn(["(108,140)", "○", "120", "browse.target_picker.title", "作品名", "選択"], rows)
+        self.assertIn(["(201,241)", "○", "208", "browse.book_row.BOITEUX ・ BOITEUSE",
+                       "BOITEUX ・ BOITEUSE, 李 箱", ""], rows)
+        # 読む側がそのまま使える
+        self.assertEqual(RF["locate"]("\n".join(out), "browse.book_row.*"), ("browse.book_row.BOITEUX ・ BOITEUSE", 0, 1))
 
 
 class AutoPickRun(unittest.TestCase):
@@ -828,13 +917,14 @@ class AutoPickRun(unittest.TestCase):
         self.out.mkdir()
         (self.flows / "test_01.1.yaml").write_text("appId: x\n---\n", encoding="utf-8")
         (self.flows / "test_01.yaml").write_text(
-            "appId: x\nenv:\n  SHOTS: ''\n  LIST_ROW: ''\n---\n- tapOn:\n    id: '^list\\.row\\.${LIST_ROW}$'\n",
+            "appId: x\nenv:\n  SHOTS: ''\n  LIST_ROW: ''\n  LIST_ROW_INDEX: ''\n---\n- tapOn:\n"
+            "    id: '^${LIST_ROW}$'\n    index: ${LIST_ROW_INDEX}\n",
             encoding="utf-8")
         self.sec = {"name": "test_01", "flow": "test_01.yaml", "launch": True,
                     "parts": [{"flow": "test_01.1.yaml", "decide": None},
                               {"flow": "test_01.yaml", "decide": "LIST_ROW"}],
-                    "input_use": {"LIST_ROW": "selector"},
-                    "picks": {"LIST_ROW": {"pattern": "list.row.*", "pick": ""}},
+                    "input_use": {"LIST_ROW": "selector", "LIST_ROW_INDEX": "index"},
+                    "picks": {"LIST_ROW": {"pattern": "list.row.*", "pick": "", "exclude": []}},
                     "devices": {"iphone": {"inputs": {}, "picked": {}}},
                     "desc": "", "note": "", "result": "PENDING"}
         self.saved = {k: RF[k] for k in ("sh", "HERE")}
@@ -863,14 +953,61 @@ class AutoPickRun(unittest.TestCase):
     def test_picks_first_visible_and_fills_env(self):
         stopped, done, lost = self.run_device()
         self.assertEqual((stopped, done, lost), (None, 1, []))
-        self.assertEqual(self.sec["devices"]["iphone"]["picked"], {"LIST_ROW": "C++入門"})
+        self.assertEqual(self.sec["devices"]["iphone"]["picked"], {"LIST_ROW": "list.row.C++入門", "LIST_ROW_INDEX": 0})
         body = [a[2] for a in self.calls if a[0] == "run" and a[3] == "test_01"][0]
-        self.assertIn("LIST_ROW: 'C\\+\\+入門'", body)
+        self.assertIn("LIST_ROW: 'list\\.row\\.C\\+\\+入門'", body)
+        self.assertIn("LIST_ROW_INDEX: '0'", body)
         log = (self.out / "progress_iphone.log").read_text(encoding="utf-8")
-        self.assertIn("test_01 撮影済み（選んだ: LIST_ROW=C++入門）", log)
+        self.assertIn("test_01 撮影済み（選んだ: LIST_ROW=list.row.C++入門）", log)
+
+    def test_same_name_rows_get_index(self):
+        # 同じ名前の行が画面外（上）に1件、画面内に2件。見えている1件目は、位置順で2件目
+        self.dump = (dump_line(195, -40, "×", "list.row.牛乳", "")
+                     + dump_line(195, 300, "○", "list.row.牛乳", "")
+                     + dump_line(195, 380, "○", "list.row.牛乳", ""))
+        self.run_device()
+        self.assertEqual(self.sec["devices"]["iphone"]["picked"], {"LIST_ROW": "list.row.牛乳", "LIST_ROW_INDEX": 1})
+        log = (self.out / "progress_iphone.log").read_text(encoding="utf-8")
+        self.assertIn("LIST_ROW=list.row.牛乳（同じ名前 3件のうち上から2件目）", log)
+
+    def test_conditional_pick_with_ordinal(self):
+        # 条件で選んだ値に #2 を付けると、見えている同じ名前のうち上から2件目
+        self.dump = (dump_line(195, -40, "×", "list.row.牛乳", "")
+                     + dump_line(195, 300, "○", "list.row.牛乳", "")
+                     + dump_line(195, 380, "○", "list.row.牛乳", ""))
+        self.sec["picks"]["LIST_ROW"]["pick"] = "下の方の牛乳"
+        self.sec["devices"]["iphone"]["inputs"] = {"LIST_ROW": "list.row.牛乳#2"}
+        with contextlib.redirect_stdout(io.StringIO()):
+            RF["run_device"]({"sections": [self.sec]}, self.out / "manifest.json",
+                             self.flows, "iphone", "AAAA", ("test_01", 1))
+        self.assertEqual(self.sec["devices"]["iphone"]["picked"], {"LIST_ROW": "list.row.牛乳", "LIST_ROW_INDEX": 2})
+        body = [a[2] for a in self.calls if a[0] == "run"][0]
+        self.assertIn("LIST_ROW: 'list\\.row\\.牛乳'", body)
+        self.assertIn("LIST_ROW_INDEX: '2'", body)
+
+    def test_conditional_pick_not_on_screen_loses_the_item(self):
+        self.sec["picks"]["LIST_ROW"]["pick"] = "x"
+        self.sec["devices"]["iphone"]["inputs"] = {"LIST_ROW": "list.row.坊っちゃん"}   # 画面外
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            stopped, done, lost = RF["run_device"]({"sections": [self.sec]}, self.out / "manifest.json",
+                                                   self.flows, "iphone", "AAAA", ("test_01", 1))
+        self.assertEqual(lost, ["iphone test_01"])
+        self.assertIn("list.row.坊っちゃん が画面に見えていない",
+                      (self.out / "progress_iphone.log").read_text(encoding="utf-8"))
+
+    def test_id_outside_the_pattern_stops(self):
+        # 接頭辞を落として書いた（こころ）。押さずに止め、直せば続きから走れる
+        self.sec["picks"]["LIST_ROW"]["pick"] = "x"
+        self.sec["devices"]["iphone"]["inputs"] = {"LIST_ROW": "こころ"}
+        with contextlib.redirect_stdout(io.StringIO()) as o:
+            stopped, done, lost = RF["run_device"]({"sections": [self.sec]}, self.out / "manifest.json",
+                                                   self.flows, "iphone", "AAAA", ("test_01", 1))
+        self.assertEqual(stopped, ("test_01", 1))
+        self.assertEqual([a for a in self.calls if a[0] == "run"], [])
+        self.assertIn("LIST_ROW の値 こころ が list.row.* に当たらない", o.getvalue())
 
     def test_nothing_visible_loses_the_item(self):
-        self.dump = "画面: list\n"
+        self.dump = DUMP_HEAD
         stopped, done, lost = self.run_device()
         self.assertEqual((done, lost), (0, ["iphone test_01"]))
         self.assertIn("押す list.row.* が画面に見えていない",
@@ -885,7 +1022,7 @@ class AutoPickRun(unittest.TestCase):
 
     def test_resume_starts_from_the_stopped_part(self):
         self.sec["picks"]["LIST_ROW"]["pick"] = "いちばん長い名前"
-        self.sec["devices"]["iphone"]["inputs"] = {"LIST_ROW": "こころ"}
+        self.sec["devices"]["iphone"]["inputs"] = {"LIST_ROW": "list.row.こころ"}
         with contextlib.redirect_stdout(io.StringIO()):
             RF["run_device"]({"sections": [self.sec]}, self.out / "manifest.json",
                              self.flows, "iphone", "AAAA", ("test_01", 1))
@@ -904,9 +1041,9 @@ class Check(unittest.TestCase):
         shutil.rmtree(self.repo.parent)
 
     def check(self):
-        mp = route.ScreenMap(route.find_map(str(self.repo)))
+        mp = screen_map.ScreenMap(screen_map.find_map(str(self.repo)))
         with contextlib.redirect_stdout(io.StringIO()) as o:
-            code = route.cmd_check(mp)
+            code = map_check.cmd_check(mp)
         return code, o.getvalue()
 
     def edit(self, name, old, new):
@@ -918,6 +1055,13 @@ class Check(unittest.TestCase):
     def test_fixture_passes(self):
         code, out = self.check()
         self.assertEqual(code, 0, out)
+
+    def test_screen_that_is_not_a_mapping(self):
+        # 中身が辞書でない画面ファイルでも落ちずに、不整合として出す
+        (self.screens / "weird.yaml").write_text("- [1, 2]\n", encoding="utf-8")
+        code, out = self.check()
+        self.assertEqual(code, 1)
+        self.assertIn("weird: 画面の中身が辞書になっていない", out)
 
     def test_undefined_expect_id(self):
         self.edit("list.yaml", "expect: {visible: list.footer}", "expect: {visible: list.count_label}")
@@ -945,7 +1089,7 @@ class Check(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("migrate_map.py", out)
         with self.assertRaises(SystemExit) as cm:
-            route.load_map(str(self.repo))
+            screen_map.load_map(str(self.repo))
         self.assertIn("migrate_map.py", str(cm.exception.code))
 
 
@@ -959,30 +1103,30 @@ class Migrate(unittest.TestCase):
         sys.argv = ["migrate_map.py", "--repo", str(repo), "--write"]
         try:
             with contextlib.redirect_stdout(io.StringIO()) as o:
-                runpy.run_path(str(SCRIPTS / "migrate_map.py"), run_name="__main__")
+                runpy.run_path(str(MAP_SCRIPTS / "migrate_map.py"), run_name="__main__")
         finally:
             sys.argv = argv
         out = o.getvalue()
         self.assertIn("移した画面: detail home list review_dialog", out)
         self.assertIn("select（index: 0, capture: itemTitle）を捨てた", out)
         self.assertIn("に条件が書いてある", out)
-        mp = route.load_map(str(repo))
-        lst = {el["id"]: el for el in mp.elements("list")}
+        mp = screen_map.load_map(str(repo))
+        lst = {el["id"]: el for el in mp.screens["list"].elements}
         self.assertEqual(lst["list.empty_view"]["when"], "0件のとき")
         self.assertIn("list.count_label", lst)          # 観測点だった ID も要素になる
         self.assertEqual(lst["Clear text"]["by"], "label")
         self.assertIs(lst["list.banner"]["in_tree"], False)
-        self.assertEqual(mp.screens["list"]["gestures"][0]["scroll"], "down")
-        self.assertEqual(mp.screens["list"]["auto_shows"], ["review_dialog"])
+        self.assertEqual(mp.screens["list"].actions[-1].label(), "scroll down")
+        self.assertEqual(mp.screens["list"].auto_shows(), ["review_dialog"])
         with contextlib.redirect_stdout(io.StringIO()) as o:
-            self.assertEqual(route.cmd_check(mp), 0, o.getvalue())
+            self.assertEqual(map_check.cmd_check(mp), 0, o.getvalue())
         self.assertEqual([e[0].target for _, e in mp.path_from("home", "detail")], ["home.fav"])
         shutil.rmtree(repo.parent)
 
 
 class MiniYaml(unittest.TestCase):
     def test_flow_mapping(self):
-        from mini_yaml import load_yaml
+        from screenmap.mini_yaml import load_yaml
         f = Path(tempfile.mkdtemp()) / "x.yaml"
         f.write_text("a:\n  - tap:\n    expect: {screen: x, via: push}\n"
                      "b: [c, {screen: d, after: [e, f]}]\n"

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """test-case-builder の plan.json から、フローを書いて manifest.json を作る。
 
-  manifest.py <plan.json> <出力先ディレクトリ> --repo <アプリのリポジトリ> --device <端末>=<UDID> [--device …]
+  manifest.py <plan.json> <出力先ディレクトリ> --device <端末>=<UDID> [--device …]
 
-`--repo` はアプリのリポジトリ。**必ず渡す。** 画面マップ（その下の `screen-map/`）は、経路を組む項目があるときに読む。
+**どのアプリの画面マップで経路を組むかは plan の `repo` で決まる。** plan の画面 id と要素 id は
+そのマップを前提に書いたものなので、plan が持つ（引数では渡さない）。
 
 証跡は `<出力先>/shots/<端末>/<名前>.png` に撮る。名前は項目の並び順から振る
 （`test_01`, `test_02`, …。explore は items の続きの番号）。**1つのテストケースを複数の端末で
@@ -16,13 +17,14 @@
 そこから出す。撮るときに手で渡し直さない。
 
 1. plan の項目ごとに Maestro のフローを、スキル側の `.work/flows/<出力先の名前>/` に書く
-   （route.py の `write_flows()`）。経路が組めなければ理由を出して止まる
+   （flowgen/flow.py の `write_flows()`）。経路が組めなければ理由を出して止まる
    （manifest は書かない）。組めたら読める経路を出す
 2. 返ってきた項目ごとの行から manifest.json を組む。証跡1枚＝1セクション
 
 plan.json の形。**項目1つ＝ from から do を順に叩いて、1枚撮る。**
 
     {"app": "<bundle id>",
+     "repo": "<アプリのリポジトリ>",
      "clear_state": false,
      "items": [
        {"from": "browse"},
@@ -37,6 +39,8 @@ plan.json の形。**項目1つ＝ from から do を順に叩いて、1枚撮�
        {"from": "browse", "do": ["see:browse.section.recommend"]},
        {"from": "book_detail", "when": ["ログイン中"],
         "do": ["tap:book_detail.register_button"]}]}
+  repo      アプリのリポジトリ（必須）。画面マップはその下の screen-map/。
+            相対パスなら plan の置き場所から読む。マニフェストにも写す
   from      その項目の操作を始める画面。**項目は経路を持たない** —
             前の項目が終わった画面から from までは、ここで計算して
             繋ぐ（すでに居れば何もしない）
@@ -94,6 +98,8 @@ plan.json の形。**項目1つ＝ from から do を順に叩いて、1枚撮�
 がそこで止まる）。着いた画面を見ないと決まらないものなので、埋めるのは撮影する側。
 **条件の無いパターンの要素は `inputs` に入らない。** `picks` に選び方だけがあり、
 `run_flows.py` が画面に見えている1件目を選んで `devices.<端末>.picked` に書く。
+`picked` には、条件つきで選んだ行も含めて、押した行の値と、同じ ID の行のうち何番目か
+（`<変数>_INDEX`。Maestro の `index` に入る）が入る。同じ名前の行を区別するため。
 **埋める側は正規表現のエスケープをかけない。** 各値がセレクタ（正規表現）に入るか
 inputText に入るかは `input_use` に書いてあり、エスケープは run_flows.py がする。
 
@@ -101,7 +107,7 @@ plan の `explore` は**経路が組めなかった項目**。`flow` を持た�
 飛ばし、sim-driver が探索で撮る。**末尾に並ぶ** — 自動確認の付かない項目がまとまる。
 
 なぜスクリプトなのか。一覧の中身（証跡の名前、画面、自動確認のID、フローの
-ファイル名）は route.py が既に計算したもので、**手で写すとタイポの余地ができる。**
+ファイル名）は flowgen が既に計算したもので、**手で写すとタイポの余地ができる。**
 撮影の名前と manifest の `src` がずれても、走らせるまで誰も気づかない。
 
 `desc` / `result` / `note` は手順2で埋める。`result` を `PENDING` で置くのは、
@@ -122,8 +128,8 @@ import json
 import sys
 from pathlib import Path
 
-import route   # 同じディレクトリ。経路の計算とフローの書き出し
-import simulators
+from device import simulators
+from flowgen import flow as flows_of   # plan からフローを作る
 
 
 LABELS = {"iphone": "iPhone", "ipad": "iPad"}
@@ -138,11 +144,11 @@ def main():
     if len(argv) < 2:
         sys.exit(__doc__)
     plan_path, out_dir = Path(argv[0]).expanduser(), Path(argv[1]).expanduser()
-    repo, devices = None, []
+    devices = []
     i = 2
     while i < len(argv):
         if argv[i] == "--repo":
-            repo = argv[i + 1]; i += 2
+            sys.exit("--repo は渡さない。アプリのリポジトリは plan の repo に書く")
         elif argv[i] == "--device":
             name, _, udid = argv[i + 1].partition("=")
             if not udid:
@@ -150,8 +156,6 @@ def main():
             devices.append((name, udid)); i += 2
         else:
             sys.exit("知らない引数: " + argv[i] + "（題と meta は build_report.py に渡す）")
-    if not repo:
-        sys.exit("--repo <アプリのリポジトリ> が要る")
     if not devices:
         sys.exit("--device <端末>=<UDID> が要る（iphone / ipad。複数の端末で撮るなら並べる）")
     names = [n for n, _ in devices]
@@ -164,14 +168,14 @@ def main():
         info[n] = {"udid": u, "model": sim["model"], "os": sim["os"]}
     devices = names
 
-    plan = route.load_plan(plan_path)
+    plan = flows_of.load_plan(plan_path)
     items, explore = plan.get("items") or [], plan.get("explore") or []
 
     # フローは端末によらず1組。撮影先は ${SHOTS} のままで、run_flows.py が端末ごとに埋める。
     # **置き場はスキル側の .work に固定する。** 呼ぶ側のカレント（アプリのリポジトリ）に
     # 作ると、誰も片付けない。スキル側なら maestrod.py sweep が古いものを消す
     flows = FLOWS / out_dir.resolve().name
-    rows = route.write_flows(plan, flows, repo) if items else []
+    rows = flows_of.write_flows(plan, flows) if items else []
     if items:
         print()
 
@@ -189,7 +193,7 @@ def main():
             pass
 
     # フローのある行 ＋ 探索のぶん。探索は末尾に積む
-    entries = list(rows) + [{"name": route.shot_name(len(items) + n),
+    entries = list(rows) + [{"name": flows_of.shot_name(len(items) + n),
                              "title": it.get("title", ""), "from": it.get("from"),
                              "fresh": bool(it.get("fresh")), "do": it.get("do") or [],
                              "when": it.get("when") or [],
@@ -233,7 +237,7 @@ def main():
             "result": prev.get("result", "PENDING"),
         })
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(dict(top, devices=info, flows=str(flows), sections=sections),
+    out.write_text(json.dumps(dict(top, repo=plan["repo"], devices=info, flows=str(flows), sections=sections),
                               ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     carried = []
     for sec in sections:

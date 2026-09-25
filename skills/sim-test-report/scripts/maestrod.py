@@ -35,7 +35,7 @@ WORK = HERE.parent / ".work"
 # 用途ごとに分ける。混ぜると、残すもの（判断の記録）と捨ててよいもの（生データ、
 # 使い捨てのフロー）と、いま生きている状態（直近のダンプ）が見分けられない。
 DUMPS = WORK / "dumps"        # <実行>/<名前>.json（生） / <名前>.txt（抽出後）
-FLOWS = WORK / "flows"        # <実行>/ 以下に route.py が書く使い捨てのフロー
+FLOWS = WORK / "flows"        # <実行>/ 以下に manifest.py が書く使い捨てのフロー
 STATE = WORK / "state"        # 直近のダンプと画面。tap が読む
 # ソケットはデバイスごとに分けるが、**同時に生かすのは1本だけ**。
 #
@@ -306,7 +306,7 @@ def cmd_inspect(udid, name, save_to=None):
     dumps.mkdir(parents=True, exist_ok=True)
     raw = dumps / f"{name}.json"
     raw.write_text(r["text"])
-    out = subprocess.run([sys.executable, str(HERE / "elements.py"), str(raw)],
+    out = subprocess.run([sys.executable, str(HERE / "device" / "elements.py"), str(raw)],
                          capture_output=True, text=True)
     (dumps / f"{name}.txt").write_text(out.stdout)
     # 証跡と同じ場所に同じ名前で置くと、判定する側が画像と対で読める。
@@ -332,10 +332,15 @@ def label_at(udid, x, y, tol=40):
         return None
     best = None
     for line in f.read_text().splitlines():
-        m = re.match(r"\s*\((-?\d+),(-?\d+)\)\s+\S+\s+(.*)", line)
-        if not m:
+        # elements.py の行はタブ区切り: tap / 画面内 / 上端 / id / テキスト / 状態
+        cols = line.split("\t")
+        m = re.match(r"^\((-?\d+),(-?\d+)\)$", cols[0])
+        if not m or len(cols) < 5:
             continue
-        cx, cy, lab = int(m.group(1)), int(m.group(2)), m.group(3).strip()
+        cx, cy = int(m.group(1)), int(m.group(2))
+        lab = cols[4] or ("#" + cols[3] if cols[3] else "")
+        if not lab:
+            continue
         d = abs(cx - x) + abs(cy - y)
         if d <= tol and (best is None or d < best[0]):
             best = (d, lab)

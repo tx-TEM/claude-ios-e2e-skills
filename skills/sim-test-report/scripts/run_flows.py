@@ -55,6 +55,11 @@
   - **打つ文字と、条件つきの選択**: `devices.<端末>.inputs` の値を使う。空なら止まる
     （下の「入力が未定なら」）。再開のときは止まった本から走る（もうそこに居る）
 
+**パターンの要素を押すときは、同じ ID の行のうち何番目かも数える**（`locate()`）。行の ID は
+表示中の名前なので、同じ名前の行は ID も同じになる。数えた番号を Maestro の `index` に渡して
+1件に絞る。値はアクセシビリティ ID そのもの（ダンプの id の欄）。条件つきの選択は
+`<ID>#2`（見えている同じ ID の行のうち上から2件目）とも書ける。
+
 **セレクタに入る値だけ正規表現としてエスケープする**（`fill_env()`）。どれがそうかは
 マニフェストの `input_use` を見る。inputs に書く側はエスケープをかけない。
 
@@ -81,7 +86,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-import simulators   # 同じディレクトリ。UDID から起動しているかを引く
+from device import simulators   # UDID から起動しているかを引く
 
 HERE = Path(__file__).resolve().parent
 MAESTROD = HERE / "maestrod.py"
@@ -114,7 +119,7 @@ def fill_env(body, need, inputs, uses):
     **セレクタに入る値は正規表現としてエスケープする。** tapOn の id / text は
     正規表現で、表示テキストには `(` や `+` や `.` が普通に入る。そのまま入れると
     `牛乳(1L)` に当たらず、`a.b` が `aXb` にも当たる。inputText に入る値は
-    打つ文字そのものなので触らない。どちらに入るかは route.py がマニフェストに書いている。
+    打つ文字そのものなので触らない。どちらに入るかは manifest.py がマニフェストに書いている。
     """
     for k in need:
         v = str(inputs[k])
@@ -167,49 +172,92 @@ def retake_runs(sections, only):
     return [(flows[j], "shot" if flows[j]["name"] in only else "replay") for j in sorted(run)]
 
 
-STATE_MARKS = re.compile(r"( \[(選択|非活性|チェック)\])+$")
+def dump_rows(dump):
+    """elements.py の出力を [{"cx", "cy", "on", "top", "id", "text", "state"}] で。
+
+    行はタブ区切り（tap / 画面内 / 上端 / id / テキスト / 状態）。**id に空白が入っても
+    1回で取れる**（`browse.book_row.BOITEUX ・ BOITEUSE`）。1行目の画面と2行目の欄名は飛ばす。
+    """
+    out = []
+    for line in dump.splitlines():
+        cols = line.split("\t")
+        m = re.match(r"^\((-?\d+),(-?\d+)\)$", cols[0])
+        if not m or len(cols) < 6 or not cols[2].lstrip("-").isdigit():
+            continue
+        out.append({"cx": int(m.group(1)), "cy": int(m.group(2)), "on": cols[1] == "○",
+                    "top": int(cols[2]), "id": cols[3], "text": cols[4], "state": cols[5]})
+    return out
 
 
-def first_visible(dump, pattern, exclude=()):
-    """ダンプ（elements.py の出力）から、パターンに当たる要素のうち**画面に見えている
-    1件目**の、パターンの `*` に当たる部分を返す。無ければ None。
+def pattern_rows(dump, pattern, exclude=()):
+    """ダンプのうちパターンに当たる行を、Maestro の index と同じ順で [(ID, 画面内か)]。
 
-    **Maestro のツリー順の0番目ではない。** ツリー順の先頭は画面外のことがあり、
-    画面外の要素を ID で押すと、Maestro はその位置を叩いて別の要素を押す
-    （mobile-dev-inc/Maestro#1275 と同じ症状）。elements.py の行は上から順に
-    並んでいて、画面内かどうか（○ / ×）を持つので、その先頭を採る。
+    ID はアクセシビリティ ID そのもの（ダンプの id の欄）。**順は上端の y、次に x**（Maestro の Filters.index が
+    当たった要素を並べる INDEX_COMPARATOR と同じ基準。x は中心で代える — 同じ ID の行は
+    幅がそろう）。**画面外の行も返す** — Maestro の index はそれも数える。
 
     `exclude` はマップで別の要素として定義されている ID（行の中のタイトルなど）。
-    パターン（`item_list.cell.*`）の前方一致には当たるが、行ではないので選ばない。
+    パターン（`item_list.cell.*`）の前方一致には当たるが、行ではないので数えない。
     パターンになっているもの（`item_list.cell.badge.*`）は前方一致で外す。
     """
     prefix = pattern[:-1] if pattern.endswith("*") else pattern
-    for line in dump.splitlines():
-        m = re.match(r"^\s*\((-?\d+),(-?\d+)\)\s+(\S+)\s+(.*)$", line)
-        if not m or m.group(3) != "○":
-            continue
-        label = STATE_MARKS.sub("", m.group(4))
-        if label.startswith("#"):
-            rid = label[1:]
-        elif "  #" in label:
-            rid = label.rsplit("  #", 1)[1]
-        else:
-            continue
+    rows = []
+    for r in dump_rows(dump):
+        rid = r["id"]
         if any(rid == x or (x.endswith("*") and rid.startswith(x[:-1])) for x in exclude):
             continue
         if rid.startswith(prefix) and len(rid) > len(prefix):
-            return rid[len(prefix):]
-    return None
+            rows.append((r["top"], r["cx"], rid, r["on"]))
+    return [(v, on) for _, _, v, on in sorted(rows, key=lambda x: (x[0], x[1]))]
 
 
-def pick_visible(udid, name, pattern, exclude=()):
-    """画面を読んで、見えている1件目を選ぶ。読めなければ None。"""
+def locate(dump, pattern, exclude=(), value=None):
+    """押す行を決める。(ID, Maestro の index, 同じ ID の行の数)。決められなければ None。
+
+    `value` が None なら**画面に見えている1件目**。**Maestro のツリー順の0番目ではない** —
+    ツリー順の先頭は画面外のことがあり、画面外の要素を ID で押すと Maestro はその位置を
+    叩いて別の要素を押す（mobile-dev-inc/Maestro#1275 と同じ症状）。
+
+    `value` を渡すとその ID の行（LLM が条件で選んだもの。ダンプの id の欄をそのまま写す）。
+    **同じ名前の行が複数あると ID も同じになる**ので、`<ID>#2` と書けば、画面に見えている
+    同じ ID の行のうち上から2件目。ID そのものが `#2` で終わる行があれば、そちらを採る。
+    パターンに当たらない ID（別の画面の ID、接頭辞の書き間違い）は None。
+
+    index は、同じ ID の行を位置順（上端の y、次に x）に並べたときの番号（画面外も数える）。
+    Maestro の `index` がその順で数えるため（Filters.index の INDEX_COMPARATOR）。
+    """
+    rows = pattern_rows(dump, pattern, exclude)
+    if value is None:
+        chosen = next((r for r in rows if r[1]), None)
+        nth = 1
+    else:
+        name, nth = value, 1
+        m = re.match(r"^(.*)#(\d+)$", value)
+        if m and not any(v == value for v, _ in rows):
+            name, nth = m.group(1), int(m.group(2))
+        seen = [r for r in rows if r[1] and r[0] == name]
+        chosen = seen[nth - 1] if 0 < nth <= len(seen) else None
+    if chosen is None:
+        return None
+    same = [i for i, r in enumerate(rows) if r[0] == chosen[0]]
+    visible_same = [i for i in same if rows[i][1]]
+    return chosen[0], same.index(visible_same[nth - 1]), len(same)
+
+
+def first_visible(dump, pattern, exclude=()):
+    """画面に見えている1件目の ID。無ければ None。"""
+    found = locate(dump, pattern, exclude)
+    return found[0] if found else None
+
+
+def read_dump(udid, name):
+    """画面を読んで、elements.py の出力を返す。読めなければ None。"""
     if sh(["inspect", udid, name]) != 0:
         return None
     last = HERE.parent / ".work" / "state" / f"last_dump_{udid}.txt"   # maestrod.py が置く
     if not last.exists():
         return None
-    return first_visible(last.read_text(encoding="utf-8"), pattern, exclude)
+    return last.read_text(encoding="utf-8")
 
 
 def parts_of(sec):
@@ -265,6 +313,7 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, only=Non
         dev = sec["devices"][device]
         dev["picked"] = {} if not (resume_name == name and resume_part) else dev.get("picked") or {}
         picks = sec.get("picks") or {}
+        notes = {}   # 同じ名前の行があったときの、何件目を押したか
         parts = parts_of(sec)
         # 再開のときは、止まった本から走らせる（前の本は走っていて、アプリはもうそこに居る）
         first = resume_part if name == resume_name else 0
@@ -277,17 +326,8 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, only=Non
                 sys.exit(f"{name} フローが無い: {flow}")
             if decide:
                 pk = picks.get(decide)
-                if pk is not None and not pk.get("pick"):
-                    # 選ぶ条件が無い。画面に見えている1件目を選ぶ（モデルに訊かない）
-                    value = pick_visible(udid, f"{name}.pick{k}", pk["pattern"], pk.get("exclude") or ())
-                    if value is None:
-                        failed = True
-                        logline(f"{line} 撮影できず 押す {pk['pattern']} が画面に見えていない")
-                        print(f"{line} {pk['pattern']} が画面に見えていない。次に起動し直すフローまで飛ばす",
-                              file=sys.stderr)
-                        break
-                    dev["picked"][decide] = value
-                elif not (dev.get("inputs") or {}).get(decide):
+                given = (dev.get("inputs") or {}).get(decide)
+                if (pk is None or pk.get("pick")) and not given:
                     # **未定ならそこで止まる。** 落ちたときは次の鎖へ進むが、こちらは進めない。
                     # 先へ走らせると画面が変わってしまい、値を決めるために見ることができない。
                     # **止まった時点でアプリはその画面に居る。** 値を埋めて叩き直せば続きから走る。
@@ -298,12 +338,43 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, only=Non
                                  f"なぞるので、devices.{device}.inputs に前に撮ったときの値が要る")
                     logline(f"{line} 撮影せず 入力が未定（{decide}）")
                     rest = [n for n, _ in targets[targets.index((i, sec)):]]
-                    how = f"条件「{pk['pick']}」に合う {pk['pattern']} を選んで" if pk else "打つ文字を"
+                    how = (f"条件「{pk['pick']}」に合う {pk['pattern']} を選んで、その ID（ダンプの id の欄）を"
+                           if pk else "打つ文字を")
                     print(f"\n{device} {line} 入力が未定（{decide}）。")
                     print(f"いまこの画面に居る。見て {how} {decide} に決め、"
                           f"devices.{device}.inputs に書き、同じコマンドをもう一度叩けば続きから走る。")
+                    if pk:
+                        print(f"同じ ID の行が複数あるなら「<ID>#2」のように書く"
+                              "（画面に見えている同じ ID の行のうち上から2件目）。")
                     print(f"{device} のここから先の {len(rest)}件はまだ撮っていない。")
                     return (name, k), done, lost
+                prefix = pk["pattern"][:-1] if pk and pk["pattern"].endswith("*") else None
+                if pk and pk.get("pick") and prefix and not given.startswith(prefix):
+                    # 書いた ID がこの操作のパターンに当たらない（別の画面の ID、接頭辞の書き間違い）。
+                    # 押すと別物を押すか落ちる。まだ画面は動いていないので、直して叩き直せば続きから走る
+                    logline(f"{line} 撮影せず {decide} の {given} が {pk['pattern']} に当たらない")
+                    print(f"\n{device} {line} {decide} の値 {given} が {pk['pattern']} に当たらない。"
+                          f"ダンプの id の欄（{prefix}…）をそのまま devices.{device}.inputs に書き、"
+                          "同じコマンドをもう一度叩く。")
+                    return (name, k), done, lost
+                if pk is not None:
+                    # どの行を押すかを決め、同じ ID の行のうち何番目か（Maestro の index）を数える。
+                    # 条件が無ければ画面に見えている1件目（モデルに訊かない）
+                    dump = read_dump(udid, f"{name}.pick{k}")
+                    found = locate(dump, pk["pattern"], pk.get("exclude") or (),
+                                   given if pk.get("pick") else None) if dump else None
+                    if found is None:
+                        what = f"{given} が" if pk.get("pick") else f"押す {pk['pattern']} が"
+                        failed = True
+                        logline(f"{line} 撮影できず {what}画面に見えていない")
+                        print(f"{line} {what}画面に見えていない。次に起動し直すフローまで飛ばす",
+                              file=sys.stderr)
+                        break
+                    value, index, count = found
+                    dev["picked"][decide] = value
+                    dev["picked"][decide + "_INDEX"] = index
+                    if count > 1:
+                        notes[decide] = f"同じ名前 {count}件のうち上から{index + 1}件目"
 
             body = flow.read_text(encoding="utf-8")
             need = required_env(body)
@@ -311,7 +382,7 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, only=Non
             if need:
                 # 撮影先は端末で決まる。決めるのはそれ以外の値
                 values = dict(dev.get("inputs") or {}, **dev["picked"], SHOTS=str(dest.resolve()))
-                missing = [v for v in need if not values.get(v)]
+                missing = [v for v in need if values.get(v) in (None, "")]
                 if missing:
                     sys.exit(f"{name} の {flow_name} に値が入らない（{', '.join(missing)}）。"
                              "manifest.py で作り直す")
@@ -337,7 +408,8 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, only=Non
         sh(["inspect", udid, name, str(shots)])   # 出力は捨てる
         sec["desc"], sec["note"], sec["result"] = "", "", "PENDING"   # 証跡が入れ替わったので判定も捨てる
         done += 1
-        picked = ", ".join(f"{k}={v}" for k, v in dev["picked"].items())
+        picked = ", ".join(f"{k}={v}" + (f"（{notes[k]}）" if k in notes else "")
+                           for k, v in dev["picked"].items() if not k.endswith("_INDEX"))
         logline(f"{line} 撮影済み" + (f"（選んだ: {picked}）" if picked else ""))
         print(line + " 撮影済み" + (f"（選んだ: {picked}）" if picked else ""))
     print(f"{done}件を撮った: {shots}")

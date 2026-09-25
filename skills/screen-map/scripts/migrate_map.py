@@ -26,7 +26,7 @@ import re
 import sys
 from pathlib import Path
 
-from mini_yaml import load_yaml
+from screenmap.mini_yaml import load_yaml
 
 KEEP = ("anchor", "names", "summary", "files", "stub")
 CONDITION = re.compile(r"とき|場合|なら|ログイン|未登録|0件|権限")
@@ -260,7 +260,7 @@ def main():
         for t in todo:
             print("  " + t)
     if moved:
-        print("\n直したら route.py check --repo <アプリ> で確かめる")
+        print("\n直したら mapctl.py check --repo <アプリ> で確かめる")
 
 
 if __name__ == "__main__":
