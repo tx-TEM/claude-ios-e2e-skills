@@ -1,7 +1,4 @@
-"""操作をすると起きることを、画面仕様から読み解く。
-
-画面の yaml に書いた操作の expect を、Arrive / Visible などの型に変換する（resolve_result）。
-"""
+"""操作をすると起きること（Arrive / Visible / Value / Selected / Hidden / External）。"""
 from dataclasses import dataclass
 from typing import Union
 

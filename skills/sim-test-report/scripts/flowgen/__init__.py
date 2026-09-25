@@ -4,8 +4,8 @@
                bridge.py で繋ぎ、maestro.py で書く
   bridge.py    画面から画面への経路（項目と項目の橋渡し）。人が読む経路の表示もここ
   steps.py     ステップの型（Act / See / Await / Shot / Restart）
-  actions.py   画面でする操作を、画面仕様から読み解く（Tap / Input / InputLater / Scroll と resolve_action）
-  results.py   起きることを、画面仕様から読み解く（Arrive / Visible / … と resolve_result）
+  actions.py   ステップでする操作（Tap / Input / InputLater / Scroll）
+  results.py   操作をすると起きること（Arrive / Visible / …）
   maestro.py   ステップを Maestro のコマンドにする
   flowyaml.py  コマンドを yaml に書き出す
 

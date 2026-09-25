@@ -1,8 +1,4 @@
-"""画面でする操作を、画面仕様から読み解く。
-
-画面の yaml に書いた操作（ActionSpec）を、Tap / Input などの型に変換する（resolve_action）。
-どの行を押すか・何を打つかは、テストケースの do から入れる。
-"""
+"""ステップでする操作（Tap / Input / InputLater / Scroll）。"""
 from dataclasses import dataclass
 from typing import Optional, Union
 
