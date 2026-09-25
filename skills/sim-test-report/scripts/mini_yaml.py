@@ -27,10 +27,42 @@ def _strip_comment(s):
     return s
 
 
+def _split_flow(body):
+    """`a, [b, c], {d: e}` を最上位のカンマで割る。括弧と引用符の中では割らない。"""
+    parts, depth, quote, cur = [], 0, None, ""
+    for c in body:
+        if quote:
+            quote = None if c == quote else quote
+        elif c in "\"'":
+            quote = c
+        elif c in "[{":
+            depth += 1
+        elif c in "]}":
+            depth -= 1
+        elif c == "," and depth == 0:
+            parts.append(cur.strip())
+            cur = ""
+            continue
+        cur += c
+    if quote or depth:
+        raise ValueError("括弧か引用符が閉じていない: " + body)
+    if cur.strip():
+        parts.append(cur.strip())
+    return parts
+
+
 def _scalar(s):
     if s.startswith("[") and s.endswith("]"):
-        body = s[1:-1].strip()
-        return [_scalar(p.strip()) for p in body.split(",")] if body else []
+        return [_scalar(p) for p in _split_flow(s[1:-1])]
+    if s.startswith("{") and s.endswith("}"):
+        # `{screen: settings, via: modal}` の形。値は入れ子にできる
+        out = {}
+        for p in _split_flow(s[1:-1]):
+            k, sep, v = p.partition(":")
+            if not sep or not _KEY.match(p):
+                raise ValueError("読めない要素: " + p)
+            out[k.strip()] = _scalar(v.strip()) if v.strip() else None
+        return out
     if len(s) >= 2 and s[0] == s[-1] and s[0] in "\"'":
         return s[1:-1]
     if s in ("true", "True"):
