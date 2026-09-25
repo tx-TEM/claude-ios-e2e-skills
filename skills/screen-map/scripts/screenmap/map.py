@@ -8,7 +8,7 @@ from pathlib import Path
 
 # PyYAML を入れさせないための最小パーサ（理由は mini_yaml.py）
 from .mini_yaml import load_yaml
-from .screen import Screen
+from .screen import SYSTEM_IDS, Screen
 
 
 class ScreenMap:
@@ -18,6 +18,9 @@ class ScreenMap:
         self.root = root
         cfg = load_yaml(root / "config.yaml") or {}
         self.start = cfg.get("start")
+        # OS が持つ ID。ソースに無いので生存チェックから外す。共通のもの（SYSTEM_IDS）に、
+        # アプリの config.yaml の system_ids を足す
+        self.system_ids = list(SYSTEM_IDS) + [str(x) for x in (cfg.get("system_ids") or [])]
         self.screens = {f.stem: Screen(f.stem, load_yaml(f) or {})
                         for f in sorted((root / "screens").glob("*.yaml"))}
 
