@@ -1,4 +1,4 @@
-"""画面マップの自己テスト（route.py check）。不整合・経路が切れる箇所・書き足すもの・鮮度。"""
+"""画面マップの自己テスト（map.py check）。不整合・経路が切れる箇所・書き足すもの・鮮度。"""
 import subprocess
 
 from .model import (ACTION_KEYS, BACKWARD, ELEMENT_KEYS, EXPECT_KEYS, FORWARD, GESTURE_KEYS,
