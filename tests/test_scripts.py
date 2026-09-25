@@ -1,14 +1,15 @@
-"""sim-test-report のスクリプト（route.py / manifest.py / run_flows.py）のテスト。
+"""スクリプトのテスト。screen-map（map.py / migrate_map.py と screenmap/）と、
+sim-test-report（manifest.py / run_flows.py と testflow/ / device/）。
 
   python3 -m unittest discover tests            テストを走らせる
   UPDATE_SNAPSHOTS=1 python3 -m unittest ...    スナップショットを書き直す
 
-**フローはスナップショットで比べる。** route.py の `build()` と `emit_flow()` は
+**フローはスナップショットで比べる。** flow.py の `build_steps()` と maestro.py の `emit_flow()` は
 ほぼ純関数で、fixture のマップと plan から書かれるフローの中身がそのまま
 挙動になる。書き直したら、差分を読んでから入れる。
 
 シミュレーターも Maestro も要らない。manifest.py が UDID から機種を引く
-`simulators.lookup()` だけ差し替える。
+`device.simulators.lookup()` だけ差し替える（`run_manifest()`）。
 """
 import contextlib
 import io
@@ -19,17 +20,21 @@ import runpy
 import shutil
 import sys
 import tempfile
-import types
+from unittest import mock
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "skills" / "sim-test-report" / "scripts"
+MAP_SCRIPTS = ROOT / "skills" / "screen-map" / "scripts"      # 画面マップの部品と map.py
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "app"
 SNAPSHOTS = Path(__file__).resolve().parent / "snapshots"
 sys.path.insert(0, str(SCRIPTS))
+sys.path.insert(0, str(MAP_SCRIPTS))
 
-import route  # noqa: E402
+from screenmap import check as map_check  # noqa: E402
+from screenmap import model as screen_map  # noqa: E402
+from testflow import flow as flows_of  # noqa: E402
 
 
 def load_run_flows():
@@ -48,10 +53,24 @@ def write_flows(items, repo=FIXTURE):
     out = Path(tempfile.mkdtemp())
     plan = {"app": "jp.example.App", "items": items}
     with contextlib.redirect_stdout(io.StringIO()):
-        rows = route.write_flows(plan, out, str(repo))
+        rows = flows_of.write_flows(plan, out, str(repo))
     flows = {p.name: p.read_text(encoding="utf-8") for p in sorted(out.glob("*.yaml"))}
     shutil.rmtree(out)
     return rows, flows
+
+
+def run_manifest(args):
+    """manifest.py を叩いて標準出力を返す。UDID から機種を引くところだけ差し替える。"""
+    argv = sys.argv
+    sys.argv = ["manifest.py"] + [str(a) for a in args]
+    try:
+        with mock.patch("device.simulators.lookup",
+                        lambda udid: {"model": "iPhone 17 Pro", "os": "iOS 26.5"}), \
+                contextlib.redirect_stdout(io.StringIO()) as o:
+            runpy.run_path(str(SCRIPTS / "manifest.py"), run_name="__main__")
+    finally:
+        sys.argv = argv
+    return o.getvalue()
 
 
 def waits(flow):
@@ -215,19 +234,7 @@ class Manifest(unittest.TestCase):
             "explore": [{"from": "settings", "title": "b", "expect": "b",
                          "reason": "画面 settings がマップに無い"}]}), encoding="utf-8")
         out = work / "out"
-        fake = types.ModuleType("simulators")
-        fake.lookup = lambda udid: {"model": "iPhone 17 Pro", "os": "iOS 26.5"}
-        argv, mods = sys.argv, dict(sys.modules)
-        sys.modules["simulators"] = fake
-        sys.argv = ["manifest.py", str(plan), str(out), "--repo", str(FIXTURE),
-                    "--device", "iphone=AAAA", "--device", "ipad=BBBB"]
-        try:
-            with contextlib.redirect_stdout(io.StringIO()):
-                runpy.run_path(str(SCRIPTS / "manifest.py"), run_name="__main__")
-        finally:
-            sys.argv = argv
-            sys.modules.clear()
-            sys.modules.update(mods)
+        run_manifest([plan, out, "--repo", FIXTURE, "--device", "iphone=AAAA", "--device", "ipad=BBBB"])
         m = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
         shutil.rmtree(Path(m["flows"]), ignore_errors=True)
         shutil.rmtree(work)
@@ -256,20 +263,8 @@ class Manifest(unittest.TestCase):
 
         def build(items):
             plan.write_text(json.dumps({"app": "x", "items": items}), encoding="utf-8")
-            fake = types.ModuleType("simulators")
-            fake.lookup = lambda udid: {"model": "iPhone 17 Pro", "os": "iOS 26.5"}
-            argv, mods = sys.argv, dict(sys.modules)
-            sys.modules["simulators"] = fake
-            sys.argv = ["manifest.py", str(plan), str(out), "--repo", str(FIXTURE),
-                        "--device", "iphone=AAAA"]
-            try:
-                with contextlib.redirect_stdout(io.StringIO()) as o:
-                    runpy.run_path(str(SCRIPTS / "manifest.py"), run_name="__main__")
-            finally:
-                sys.argv = argv
-                sys.modules.clear()
-                sys.modules.update(mods)
-            return json.loads((out / "manifest.json").read_text(encoding="utf-8")), o.getvalue()
+            printed = run_manifest([plan, out, "--repo", FIXTURE, "--device", "iphone=AAAA"])
+            return json.loads((out / "manifest.json").read_text(encoding="utf-8")), printed
 
         text = {"from": "list", "title": "a", "expect": "a",
                 "do": [{"op": "text:list.search_field", "runtime": True}]}
@@ -470,9 +465,9 @@ class Interrupts(unittest.TestCase):
         shutil.rmtree(self.repo.parent)
 
     def check(self):
-        mp = route.ScreenMap(route.find_map(str(self.repo)))
+        mp = screen_map.ScreenMap(screen_map.find_map(str(self.repo)))
         with contextlib.redirect_stdout(io.StringIO()) as o:
-            code = route.cmd_check(mp)
+            code = map_check.cmd_check(mp)
         return code, o.getvalue()
 
     def test_checked_after_arriving(self):
@@ -625,7 +620,7 @@ class Routing(unittest.TestCase):
     """#50: 経路は expect の screen を辺にして引く。"""
 
     def mp(self, repo=FIXTURE):
-        return route.load_map(str(repo))
+        return screen_map.load_map(str(repo))
 
     def test_tab_is_preferred_at_same_length(self):
         # home からの settings は、メニュー（push）とタブの2通り。同じ長さならタブ
@@ -655,9 +650,9 @@ class Routing(unittest.TestCase):
         # フォローボタンを押すと設定に移ることにする（条件つきの要素の辺）
         detail.write_text(detail.read_text(encoding="utf-8").replace(
             "expect: {hidden: self}", "expect: {screen: settings, via: push}"), encoding="utf-8")
-        hops = route.load_map(str(repo)).path_from("detail", "settings")
+        hops = screen_map.load_map(str(repo)).path_from("detail", "settings")
         self.assertIsNone(hops)
-        hops = route.load_map(str(repo)).path_from("detail", "settings", ("フォローしていないとき",))
+        hops = screen_map.load_map(str(repo)).path_from("detail", "settings", ("フォローしていないとき",))
         self.assertEqual([e[0].target for _, e in hops], ["detail.follow_button"])
         rows, _ = write_flows([{"from": "detail", "title": "a", "expect": "a",
                                 "do": ["tap:detail.follow_button"]}], repo)
@@ -787,16 +782,16 @@ class AutoShowAfter(unittest.TestCase):
         self.assertEqual(rows[0]["screen"], "review_dialog")
 
     def test_check(self):
-        mp = route.load_map(str(self.repo))
+        mp = screen_map.load_map(str(self.repo))
         with contextlib.redirect_stdout(io.StringIO()) as o:
-            code = route.cmd_check(mp)
+            code = map_check.cmd_check(mp)
         self.assertEqual(code, 0, o.getvalue())
         self.assertIn("自動表示 review_dialog を detail から戻るたびに確かめる", o.getvalue())
         lst = self.repo / "screen-map" / "screens" / "list.yaml"
         lst.write_text(lst.read_text(encoding="utf-8").replace("after: detail", "after: viewer"),
                        encoding="utf-8")
         with contextlib.redirect_stdout(io.StringIO()) as o:
-            code = route.cmd_check(route.load_map(str(self.repo)))
+            code = map_check.cmd_check(screen_map.load_map(str(self.repo)))
         self.assertEqual(code, 1)
         self.assertIn("自動表示 review_dialog の after viewer の画面が無い", o.getvalue())
 
@@ -862,7 +857,7 @@ class ElementsOutput(unittest.TestCase):
         f = Path(tempfile.mkdtemp()) / "d.json"
         f.write_text(json.dumps(dump, ensure_ascii=False), encoding="utf-8")
         import subprocess
-        out = subprocess.run([sys.executable, str(SCRIPTS / "elements.py"), str(f)],
+        out = subprocess.run([sys.executable, str(SCRIPTS / "device" / "elements.py"), str(f)],
                              capture_output=True, text=True).stdout.splitlines()
         shutil.rmtree(f.parent)
         self.assertEqual(out[1].split("\t"), ["tap", "画面内", "上端", "id", "テキスト", "状態"])
@@ -1011,9 +1006,9 @@ class Check(unittest.TestCase):
         shutil.rmtree(self.repo.parent)
 
     def check(self):
-        mp = route.ScreenMap(route.find_map(str(self.repo)))
+        mp = screen_map.ScreenMap(screen_map.find_map(str(self.repo)))
         with contextlib.redirect_stdout(io.StringIO()) as o:
-            code = route.cmd_check(mp)
+            code = map_check.cmd_check(mp)
         return code, o.getvalue()
 
     def edit(self, name, old, new):
@@ -1052,7 +1047,7 @@ class Check(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("migrate_map.py", out)
         with self.assertRaises(SystemExit) as cm:
-            route.load_map(str(self.repo))
+            screen_map.load_map(str(self.repo))
         self.assertIn("migrate_map.py", str(cm.exception.code))
 
 
@@ -1066,14 +1061,14 @@ class Migrate(unittest.TestCase):
         sys.argv = ["migrate_map.py", "--repo", str(repo), "--write"]
         try:
             with contextlib.redirect_stdout(io.StringIO()) as o:
-                runpy.run_path(str(SCRIPTS / "migrate_map.py"), run_name="__main__")
+                runpy.run_path(str(MAP_SCRIPTS / "migrate_map.py"), run_name="__main__")
         finally:
             sys.argv = argv
         out = o.getvalue()
         self.assertIn("移した画面: detail home list review_dialog", out)
         self.assertIn("select（index: 0, capture: itemTitle）を捨てた", out)
         self.assertIn("に条件が書いてある", out)
-        mp = route.load_map(str(repo))
+        mp = screen_map.load_map(str(repo))
         lst = {el["id"]: el for el in mp.elements("list")}
         self.assertEqual(lst["list.empty_view"]["when"], "0件のとき")
         self.assertIn("list.count_label", lst)          # 観測点だった ID も要素になる
@@ -1082,14 +1077,14 @@ class Migrate(unittest.TestCase):
         self.assertEqual(mp.screens["list"]["gestures"][0]["scroll"], "down")
         self.assertEqual(mp.screens["list"]["auto_shows"], ["review_dialog"])
         with contextlib.redirect_stdout(io.StringIO()) as o:
-            self.assertEqual(route.cmd_check(mp), 0, o.getvalue())
+            self.assertEqual(map_check.cmd_check(mp), 0, o.getvalue())
         self.assertEqual([e[0].target for _, e in mp.path_from("home", "detail")], ["home.fav"])
         shutil.rmtree(repo.parent)
 
 
 class MiniYaml(unittest.TestCase):
     def test_flow_mapping(self):
-        from mini_yaml import load_yaml
+        from screenmap.mini_yaml import load_yaml
         f = Path(tempfile.mkdtemp()) / "x.yaml"
         f.write_text("a:\n  - tap:\n    expect: {screen: x, via: push}\n"
                      "b: [c, {screen: d, after: [e, f]}]\n"

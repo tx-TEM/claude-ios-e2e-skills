@@ -16,7 +16,7 @@
 そこから出す。撮るときに手で渡し直さない。
 
 1. plan の項目ごとに Maestro のフローを、スキル側の `.work/flows/<出力先の名前>/` に書く
-   （route.py の `write_flows()`）。経路が組めなければ理由を出して止まる
+   （testflow/flow.py の `write_flows()`）。経路が組めなければ理由を出して止まる
    （manifest は書かない）。組めたら読める経路を出す
 2. 返ってきた項目ごとの行から manifest.json を組む。証跡1枚＝1セクション
 
@@ -103,7 +103,7 @@ plan の `explore` は**経路が組めなかった項目**。`flow` を持た�
 飛ばし、sim-driver が探索で撮る。**末尾に並ぶ** — 自動確認の付かない項目がまとまる。
 
 なぜスクリプトなのか。一覧の中身（証跡の名前、画面、自動確認のID、フローの
-ファイル名）は route.py が既に計算したもので、**手で写すとタイポの余地ができる。**
+ファイル名）は testflow が既に計算したもので、**手で写すとタイポの余地ができる。**
 撮影の名前と manifest の `src` がずれても、走らせるまで誰も気づかない。
 
 `desc` / `result` / `note` は手順2で埋める。`result` を `PENDING` で置くのは、
@@ -124,8 +124,8 @@ import json
 import sys
 from pathlib import Path
 
-import route   # 同じディレクトリ。経路の計算とフローの書き出し
-import simulators
+from device import simulators
+from testflow import flow as flows_of   # plan からフローを作る
 
 
 LABELS = {"iphone": "iPhone", "ipad": "iPad"}
@@ -166,14 +166,14 @@ def main():
         info[n] = {"udid": u, "model": sim["model"], "os": sim["os"]}
     devices = names
 
-    plan = route.load_plan(plan_path)
+    plan = flows_of.load_plan(plan_path)
     items, explore = plan.get("items") or [], plan.get("explore") or []
 
     # フローは端末によらず1組。撮影先は ${SHOTS} のままで、run_flows.py が端末ごとに埋める。
     # **置き場はスキル側の .work に固定する。** 呼ぶ側のカレント（アプリのリポジトリ）に
     # 作ると、誰も片付けない。スキル側なら maestrod.py sweep が古いものを消す
     flows = FLOWS / out_dir.resolve().name
-    rows = route.write_flows(plan, flows, repo) if items else []
+    rows = flows_of.write_flows(plan, flows, repo) if items else []
     if items:
         print()
 
@@ -191,7 +191,7 @@ def main():
             pass
 
     # フローのある行 ＋ 探索のぶん。探索は末尾に積む
-    entries = list(rows) + [{"name": route.shot_name(len(items) + n),
+    entries = list(rows) + [{"name": flows_of.shot_name(len(items) + n),
                              "title": it.get("title", ""), "from": it.get("from"),
                              "fresh": bool(it.get("fresh")), "do": it.get("do") or [],
                              "when": it.get("when") or [],

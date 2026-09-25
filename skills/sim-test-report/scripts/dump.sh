@@ -65,7 +65,7 @@ if [ ! -s "$WORK/$NAME.json" ]; then
   exit 1
 fi
 rm -f "$WORK/$NAME.raw" "$WORK/$NAME.err"
-python3 "$SCRIPTS/elements.py" "$WORK/$NAME.json" > "$WORK/$NAME.txt"
+python3 "$SCRIPTS/device/elements.py" "$WORK/$NAME.json" > "$WORK/$NAME.txt"
 
 grep -v '×' "$WORK/$NAME.txt" || true
 echo "生: $WORK/$NAME.json / 全行: $WORK/$NAME.txt" >&2

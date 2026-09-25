@@ -86,7 +86,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-import simulators   # 同じディレクトリ。UDID から起動しているかを引く
+from device import simulators   # UDID から起動しているかを引く
 
 HERE = Path(__file__).resolve().parent
 MAESTROD = HERE / "maestrod.py"
@@ -119,7 +119,7 @@ def fill_env(body, need, inputs, uses):
     **セレクタに入る値は正規表現としてエスケープする。** tapOn の id / text は
     正規表現で、表示テキストには `(` や `+` や `.` が普通に入る。そのまま入れると
     `牛乳(1L)` に当たらず、`a.b` が `aXb` にも当たる。inputText に入る値は
-    打つ文字そのものなので触らない。どちらに入るかは route.py がマニフェストに書いている。
+    打つ文字そのものなので触らない。どちらに入るかは manifest.py がマニフェストに書いている。
     """
     for k in need:
         v = str(inputs[k])

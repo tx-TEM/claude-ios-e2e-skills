@@ -35,7 +35,7 @@ WORK = HERE.parent / ".work"
 # 用途ごとに分ける。混ぜると、残すもの（判断の記録）と捨ててよいもの（生データ、
 # 使い捨てのフロー）と、いま生きている状態（直近のダンプ）が見分けられない。
 DUMPS = WORK / "dumps"        # <実行>/<名前>.json（生） / <名前>.txt（抽出後）
-FLOWS = WORK / "flows"        # <実行>/ 以下に route.py が書く使い捨てのフロー
+FLOWS = WORK / "flows"        # <実行>/ 以下に manifest.py が書く使い捨てのフロー
 STATE = WORK / "state"        # 直近のダンプと画面。tap が読む
 # ソケットはデバイスごとに分けるが、**同時に生かすのは1本だけ**。
 #
@@ -306,7 +306,7 @@ def cmd_inspect(udid, name, save_to=None):
     dumps.mkdir(parents=True, exist_ok=True)
     raw = dumps / f"{name}.json"
     raw.write_text(r["text"])
-    out = subprocess.run([sys.executable, str(HERE / "elements.py"), str(raw)],
+    out = subprocess.run([sys.executable, str(HERE / "device" / "elements.py"), str(raw)],
                          capture_output=True, text=True)
     (dumps / f"{name}.txt").write_text(out.stdout)
     # 証跡と同じ場所に同じ名前で置くと、判定する側が画像と対で読める。
