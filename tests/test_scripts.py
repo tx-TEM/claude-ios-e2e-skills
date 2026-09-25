@@ -1,9 +1,9 @@
-"""sim-test-report のスクリプト（route.py / manifest.py / run_flows.py）のテスト。
+"""sim-test-report のスクリプト（route.py とその部品 / manifest.py / run_flows.py）のテスト。
 
   python3 -m unittest discover tests            テストを走らせる
   UPDATE_SNAPSHOTS=1 python3 -m unittest ...    スナップショットを書き直す
 
-**フローはスナップショットで比べる。** route.py の `build()` と `emit_flow()` は
+**フローはスナップショットで比べる。** walk.py の `build()` と flow.py の `emit_flow()` は
 ほぼ純関数で、fixture のマップと plan から書かれるフローの中身がそのまま
 挙動になる。書き直したら、差分を読んでから入れる。
 
@@ -29,7 +29,9 @@ FIXTURE = Path(__file__).resolve().parent / "fixtures" / "app"
 SNAPSHOTS = Path(__file__).resolve().parent / "snapshots"
 sys.path.insert(0, str(SCRIPTS))
 
-import route  # noqa: E402
+import map_check  # noqa: E402
+import plans  # noqa: E402
+import screen_map  # noqa: E402
 
 
 def load_run_flows():
@@ -48,7 +50,7 @@ def write_flows(items, repo=FIXTURE):
     out = Path(tempfile.mkdtemp())
     plan = {"app": "jp.example.App", "items": items}
     with contextlib.redirect_stdout(io.StringIO()):
-        rows = route.write_flows(plan, out, str(repo))
+        rows = plans.write_flows(plan, out, str(repo))
     flows = {p.name: p.read_text(encoding="utf-8") for p in sorted(out.glob("*.yaml"))}
     shutil.rmtree(out)
     return rows, flows
@@ -470,9 +472,9 @@ class Interrupts(unittest.TestCase):
         shutil.rmtree(self.repo.parent)
 
     def check(self):
-        mp = route.ScreenMap(route.find_map(str(self.repo)))
+        mp = screen_map.ScreenMap(screen_map.find_map(str(self.repo)))
         with contextlib.redirect_stdout(io.StringIO()) as o:
-            code = route.cmd_check(mp)
+            code = map_check.cmd_check(mp)
         return code, o.getvalue()
 
     def test_checked_after_arriving(self):
@@ -625,7 +627,7 @@ class Routing(unittest.TestCase):
     """#50: 経路は expect の screen を辺にして引く。"""
 
     def mp(self, repo=FIXTURE):
-        return route.load_map(str(repo))
+        return screen_map.load_map(str(repo))
 
     def test_tab_is_preferred_at_same_length(self):
         # home からの settings は、メニュー（push）とタブの2通り。同じ長さならタブ
@@ -655,9 +657,9 @@ class Routing(unittest.TestCase):
         # フォローボタンを押すと設定に移ることにする（条件つきの要素の辺）
         detail.write_text(detail.read_text(encoding="utf-8").replace(
             "expect: {hidden: self}", "expect: {screen: settings, via: push}"), encoding="utf-8")
-        hops = route.load_map(str(repo)).path_from("detail", "settings")
+        hops = screen_map.load_map(str(repo)).path_from("detail", "settings")
         self.assertIsNone(hops)
-        hops = route.load_map(str(repo)).path_from("detail", "settings", ("フォローしていないとき",))
+        hops = screen_map.load_map(str(repo)).path_from("detail", "settings", ("フォローしていないとき",))
         self.assertEqual([e[0].target for _, e in hops], ["detail.follow_button"])
         rows, _ = write_flows([{"from": "detail", "title": "a", "expect": "a",
                                 "do": ["tap:detail.follow_button"]}], repo)
@@ -787,16 +789,16 @@ class AutoShowAfter(unittest.TestCase):
         self.assertEqual(rows[0]["screen"], "review_dialog")
 
     def test_check(self):
-        mp = route.load_map(str(self.repo))
+        mp = screen_map.load_map(str(self.repo))
         with contextlib.redirect_stdout(io.StringIO()) as o:
-            code = route.cmd_check(mp)
+            code = map_check.cmd_check(mp)
         self.assertEqual(code, 0, o.getvalue())
         self.assertIn("自動表示 review_dialog を detail から戻るたびに確かめる", o.getvalue())
         lst = self.repo / "screen-map" / "screens" / "list.yaml"
         lst.write_text(lst.read_text(encoding="utf-8").replace("after: detail", "after: viewer"),
                        encoding="utf-8")
         with contextlib.redirect_stdout(io.StringIO()) as o:
-            code = route.cmd_check(route.load_map(str(self.repo)))
+            code = map_check.cmd_check(screen_map.load_map(str(self.repo)))
         self.assertEqual(code, 1)
         self.assertIn("自動表示 review_dialog の after viewer の画面が無い", o.getvalue())
 
@@ -1011,9 +1013,9 @@ class Check(unittest.TestCase):
         shutil.rmtree(self.repo.parent)
 
     def check(self):
-        mp = route.ScreenMap(route.find_map(str(self.repo)))
+        mp = screen_map.ScreenMap(screen_map.find_map(str(self.repo)))
         with contextlib.redirect_stdout(io.StringIO()) as o:
-            code = route.cmd_check(mp)
+            code = map_check.cmd_check(mp)
         return code, o.getvalue()
 
     def edit(self, name, old, new):
@@ -1052,7 +1054,7 @@ class Check(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("migrate_map.py", out)
         with self.assertRaises(SystemExit) as cm:
-            route.load_map(str(self.repo))
+            screen_map.load_map(str(self.repo))
         self.assertIn("migrate_map.py", str(cm.exception.code))
 
 
@@ -1073,7 +1075,7 @@ class Migrate(unittest.TestCase):
         self.assertIn("移した画面: detail home list review_dialog", out)
         self.assertIn("select（index: 0, capture: itemTitle）を捨てた", out)
         self.assertIn("に条件が書いてある", out)
-        mp = route.load_map(str(repo))
+        mp = screen_map.load_map(str(repo))
         lst = {el["id"]: el for el in mp.elements("list")}
         self.assertEqual(lst["list.empty_view"]["when"], "0件のとき")
         self.assertIn("list.count_label", lst)          # 観測点だった ID も要素になる
@@ -1082,7 +1084,7 @@ class Migrate(unittest.TestCase):
         self.assertEqual(mp.screens["list"]["gestures"][0]["scroll"], "down")
         self.assertEqual(mp.screens["list"]["auto_shows"], ["review_dialog"])
         with contextlib.redirect_stdout(io.StringIO()) as o:
-            self.assertEqual(route.cmd_check(mp), 0, o.getvalue())
+            self.assertEqual(map_check.cmd_check(mp), 0, o.getvalue())
         self.assertEqual([e[0].target for _, e in mp.path_from("home", "detail")], ["home.fav"])
         shutil.rmtree(repo.parent)
 
