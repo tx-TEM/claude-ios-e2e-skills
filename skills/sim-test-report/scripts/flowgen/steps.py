@@ -40,6 +40,7 @@ class See:
     name: Optional[str] = None        # 画面での見え方（フローのコメントになる）
     by_label: bool = False
     item: Optional[str] = None
+    up: bool = False                  # 下で見つからなければ上も探すか（maestro.add_reveals が決める）
     to = None
 
 

@@ -43,6 +43,12 @@ env:
       id: '^detail\.share_button$'
     direction: DOWN
     timeout: 60000
+    optional: true
+- scrollUntilVisible:
+    element:
+      id: '^detail\.share_button$'
+    direction: UP
+    timeout: 60000
 - tapOn:
     id: '^detail\.share_button$'
 # アプリの外（safari）に出る。確かめずにアプリに戻す

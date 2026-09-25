@@ -28,15 +28,40 @@ class Reveal:
     """
     act: Act
     item: Optional[str] = None
+    up: bool = False          # 下で見つからなければ上も探すか（add_reveals が決める）
     to = None
 
 
+FRESH = ("push", "modal")   # 新しく開く画面。上端から始まる
+
+
 def add_reveals(steps):
-    """要素を操作する Act の直前に Reveal を挟む。See は自分がスクロールなので挟まない。"""
-    out = []
+    """要素を操作する Act の直前に Reveal を挟む。See は自分がスクロールなので挟まない。
+
+    **スクロールされているかもしれない画面では、上も探す（`up`）。** 押す前・見る前の
+    スクロールは下向きなので、前の項目で下までスクロールしたままの画面では、上にある
+    要素に届かない。どの画面がスクロールされているかは、ここで全項目のステップを
+    頭から追って決める（フローを割る前なので項目をまたいで追える）。
+
+    - その画面で押す・見る・`scroll` をしたら、スクロールされているかもしれない
+    - 起動し直したときと、push / modal で開いた画面は上端から始まる
+    - 戻る（back / dismiss）で戻った画面とタブの先は、前の位置のまま
+    """
+    out, scrolled = [], set()
     for st in steps:
-        if isinstance(st, Act) and not isinstance(st.action, Scroll):
-            out.append(Reveal(st, st.item))
+        if isinstance(st, Restart):
+            scrolled.clear()
+        elif isinstance(st, Await):
+            scrolled.discard(st.to)
+        elif isinstance(st, See):
+            st.up = st.screen in scrolled
+            scrolled.add(st.screen)
+        elif isinstance(st, Act):
+            if not isinstance(st.action, Scroll):
+                out.append(Reveal(st, st.item, st.screen in scrolled))
+            scrolled.add(st.screen)
+            if st.arrive and st.arrive.via in FRESH:
+                scrolled.discard(st.to)
         out.append(st)
     return out
 
@@ -167,7 +192,7 @@ SCROLL_TIMEOUT = 60000   # scrollUntilVisible の上限。理由は reveal()
 SETTLE_TIMEOUT = 3000    # 着いたあとの落ち着き待ちの上限
 
 
-def reveal(key, value, center=False):
+def reveal(key, value, center=False, up=False):
     """要素が全部見えるまでスクロールする。**マップに載っている要素を操作・確認する前に必ず入れる。**
 
     画面外の要素は、フローからは見つからずに落ちる。さらに悪いことに、ツリーには
@@ -178,16 +203,38 @@ def reveal(key, value, center=False):
     スクロールを繰り返す。スクロール1回は実測5〜8秒（maestrod.py の実測）で、
     60秒でも8〜12回ぶんにしかならない。
 
-    **見る要素（`see`）は `center` で画面の中ほどまで寄せる。** 寄せないと、要素が
-    画面の下端に入ったところでスクロールが止まる。セクションの見出しなら中身が
-    画面外に切れ、その部分の見た目を確かめる証跡にならない。押すだけなら下端でも
+    **見る要素（`see`）は `center` で下端から離す。** 付けないと、要素が画面の下端に
+    入ったところでスクロールが止まり、その下が証跡に写らない。押すだけなら下端でも
     困らないので、操作の前には付けない。
+
+    `centerElement` は中央までは寄せない。下向きでは、要素の中心が画面の上から7割の線
+    より上に来たら止まる（Maestro の `UiElement.isElementNearScreenCenter`。余白は
+    画面の高さの1/5）。初めからその線より上に見えていれば、スクロールしない。
+
+    **`up` なら、下向きを `optional` にして、そのあとに上向きも探す。** 要素が見えているか
+    下にあれば下向きで止まり、上向きは見えている要素なのですぐ抜ける。上にあれば下向きは
+    時間切れ（落ちない）になり、上向きで見つかる。scrollUntilVisible はスクロールの端を
+    検知しない（Orchestra.scrollUntilVisible）ので、この時間切れは上限いっぱいかかる。
+    上限を縮めると、長く下までスクロールしたあとで上に戻りきれないので縮めない。
+
+    **下を先にする。** 画面は上端から始まるので、`up` の付かない画面と同じく、下にある
+    要素はこれまでどおりの速さで見つかる。待ちが増えるのは上にある要素（`up` が無いと
+    届かなかったもの）だけ。
+
+    `when: notVisible` で上向きを飛ばすことはしない。画面外でもツリーに残っている要素は
+    visible と判定されることがあり、条件に使えない。
     """
-    body = {"element": {key: value}, "direction": Raw("DOWN")}
-    if center:
-        body["centerElement"] = True
-    body["timeout"] = SCROLL_TIMEOUT
-    return {"scrollUntilVisible": body}
+    def scroll(direction, optional=False):
+        body = {"element": {key: value}, "direction": Raw(direction)}
+        if center:
+            body["centerElement"] = True
+        body["timeout"] = SCROLL_TIMEOUT
+        if optional:
+            body["optional"] = True
+        return {"scrollUntilVisible": body}
+    if up:
+        return [scroll("DOWN", optional=True), scroll("UP")]
+    return [scroll("DOWN")]
 
 
 def wait_for(selector, value, timeout, extra=None):
@@ -398,7 +445,7 @@ class FlowWriter:
             name = st.name
             self.out.append(Comment("{}: see {}{}".format(st.screen, st.target,
                                                             " — " + name if name else "")))
-            self.out.append(reveal(*step_sel(st, self.names), center=True))
+            self.out.extend(reveal(*step_sel(st, self.names), center=True, up=st.up))
         else:
             self.action(i, st)
 
@@ -414,7 +461,7 @@ class FlowWriter:
             what = "打つ文字" if isinstance(act.action, InputLater) else "押すもの"
             self.out.append(Comment("次で使う {} が見えるまでスクロールして止める（ここで{}を決める）"
                                     .format(act.action.target, what)))
-        self.out.append(reveal(*element_sel(act.action.target, act.action.by_label)))
+        self.out.extend(reveal(*element_sel(act.action.target, act.action.by_label), up=st.up))
 
     def action(self, i, st):
         a = st.action
