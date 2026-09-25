@@ -17,6 +17,7 @@ from .maestro import (assign_vars, emit_flow, runtime_picks, runtime_uses, shot_
                       split_at_shots, split_parts, var_of)
 from screenmap.model import DO_OPS, FORWARD, GESTURES, is_pattern, load_map, pattern_prefix
 from screenmap.route import Route, Unroutable, emit_path, report_problems
+from screenmap.steps import Act, See, Shot
 
 PLAN_KEYS = {"app", "clear_state", "items", "explore"}
 ITEM_KEYS = {"from", "do", "fresh", "title", "expect", "when"}
@@ -124,17 +125,21 @@ def build_steps(mp, items):
     for item in items:
         name = item["name"]
         tag = "({}) goto {}".format(name, item["from"])
+        first = len(steps)
         try:
             if item["fresh"] and steps:
                 steps.append(route.restart())
-            steps += [dict(st, item=name) for st in route.to(item["from"], item["when"])]
+            steps += route.to(item["from"], item["when"])
             for op, how in item["do"]:
                 tag = "({}) do {}".format(name, op)
-                steps.append(dict(do_step(mp, route, op, how, item["when"]), item=name))
+                steps.append(do_step(mp, route, op, how, item["when"]))
+            steps.append(Shot(name))
         except Unroutable as e:
             problems += [(kind, "{}: {}".format(tag, msg)) for kind, msg in e.problems]
+        for st in steps[first:]:
+            st.item = name
+        if problems:
             break
-        steps.append({"shot": name, "item": name})
     check_values(steps, problems)
     return steps, problems, route.notes
 
@@ -179,28 +184,32 @@ def do_step(mp, route, op, how, given):
     at = route.at
     found, el, val = resolve(mp, at, op)
     if op.partition(":")[0] == "see" and el is not None:
-        return {"screen": at, "see": el, "value": val}
+        return See(at, el, value=val)
     if found is None:
         raise Unroutable([("call", "{} に「{}」という操作がマップに無い。この画面にあるのは {}"
                                    .format(at, op, known_ops(mp, at) or "（無し）"))])
     if not found.in_tree():
         raise Unroutable([("map", "{} の「{}」は in_tree: false（座標が要る）。フローでは押せない"
                                   .format(at, found.label()))])
-    extra = dict(how, value=val)
     if found.is_back():
-        return dict(route.back(found), **extra)
-    st = dict({"screen": at, "action": found}, **extra)
-    outcome = found.expects
-    if found.branches:
-        st["branch"] = branch_of(found, at, given)
-        outcome = [found.branches[st["branch"]]]
-    dest = next((e for e in outcome if e.get("screen") and e.get("via") in FORWARD), None)
+        st = route.back(found)
+    else:
+        st = Act(at, found)
+        if found.branches:
+            st.branch = branch_of(found, at, given)
+    st.value = val
+    for k, v in how.items():          # input / runtime / pick
+        setattr(st, k, v)
+    if found.is_back():
+        return st
+    dest = next((e for e in st.outcome() if e.get("screen") and e.get("via") in FORWARD), None)
     if dest is None:
         return st
     if dest["screen"] not in mp.screens:
         raise Unroutable([("map", "{} の「{}」の遷移先 {} のファイルが無い"
                                   .format(at, found.label(), dest["screen"]))])
-    return route.forward(dict(st, to=dest["screen"], via=dest["via"]), dest["screen"])
+    st.to, st.via = dest["screen"], dest["via"]
+    return route.forward(st, dest["screen"])
 
 
 def branch_of(action, at, given):
@@ -220,18 +229,18 @@ def check_values(steps, problems):
     見えている1件目）。どれを押すかは走らせるときに決まる。
     """
     for st in steps:
-        a = st.get("action")
-        if a is None:
+        if not isinstance(st, Act):
             continue
-        where = "({}) ".format(st["item"]) if st.get("item") else ""
-        pattern = a.element is not None and is_pattern(a.element.get("id")) and st.get("value") is None
-        if st.get("runtime") and a.op != "text":
+        a = st.action
+        where = "({}) ".format(st.item) if st.item else ""
+        pattern = a.element is not None and is_pattern(a.element.get("id")) and st.value is None
+        if st.runtime and a.op != "text":
             problems.append(("call", "{}{} に runtime は付けられない。どの行を押すかは"
                              "スクリプトが決める（条件があるなら pick に書く）".format(where, a.label())))
-        if "pick" in st and not pattern:
+        if st.pick is not None and not pattern:
             problems.append(("call", "{}{} はパターンの要素（ID の末尾が *）ではないので、"
                              "実行時に選べない（pick を外す）".format(where, a.label())))
-        if a.op == "text" and "input" not in st and not st.get("runtime"):
+        if a.op == "text" and st.input is None and not st.runtime:
             problems.append(("call", "{}text {} に打つ文字が渡されていない（do に {{\"op\": …, \"input\": 値}} か "
                              "{{\"op\": …, \"runtime\": true}} で書く）。"
                              "マップは値を持たない。何を打つかはテストケースが決める"
@@ -241,7 +250,7 @@ def check_values(steps, problems):
             problems.append(("call", "{}text {} はパターンの要素なので、どの欄に打つかを ID まで書く"
                              "（text:{}<表示中の名前>）".format(where, a.target, pattern_prefix(a.target))))
         elif pattern:
-            st["pick"] = st.get("pick") or ""
+            st.pick = st.pick or ""
 
 
 # ---------- フローに書く ----------

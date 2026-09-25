@@ -17,6 +17,7 @@ import os
 import sys
 
 from .model import expect_kind
+from .steps import Act, Await, Restart, See, Shot
 
 
 class Unroutable(Exception):
@@ -68,7 +69,7 @@ class Route(object):
                              "起動直後の画面から戻る先は無い".format(self.at, action.label()))
         dest = self.stack[-2]
         via = next(e.get("via") for e in action.expects if e.get("screen") == "back")
-        step = {"screen": self.at, "action": action, "to": dest, "via": via}
+        step = Act(self.at, action, to=dest, via=via)
         self.stack.pop()
         self.at = dest
         return step
@@ -77,7 +78,7 @@ class Route(object):
         """起動し直す。居る場所も歩いた履歴も捨てて起点に戻る。"""
         self.at = self.mp.start
         self.stack = [self.at]
-        return {"restart": True}
+        return Restart()
 
     # ---- 繋ぐ ----
 
@@ -100,7 +101,7 @@ class Route(object):
         steps = self.walk_to(host, given)
         if after:
             steps += self.walk_to(after[0], given) + self.walk_to(host, given)
-        steps.append(self.forward({"screen": self.at, "await": True, "to": goal}, goal))
+        steps.append(self.forward(Await(self.at, goal), goal))
         return steps
 
     def pick_host(self, goal, hosts, given):
@@ -138,10 +139,7 @@ class Route(object):
                                  .format(self.at, goal))
             steps.append(self.back(a))
         for sid, (a, bi, dest, via, _) in hops:
-            st = {"screen": sid, "action": a, "to": dest, "via": via}
-            if bi is not None:
-                st["branch"] = bi
-            steps.append(self.forward(st, dest))
+            steps.append(self.forward(Act(sid, a, to=dest, via=via, branch=bi), dest))
         return steps
 
     def best_route(self, goal, given):
@@ -196,16 +194,6 @@ def walk(mp, goals, given=()):
     return steps, [], route.notes
 
 
-def outcome(st):
-    """そのステップで確かめる expect の並び（分岐なら選んだ枝だけ）。"""
-    a = st["action"]
-    if a.branches:
-        return [a.branches[st["branch"]]] if "branch" in st else []
-    return a.expects
-
-
-
-
 def emit_path(mp, steps, notes, start=None):
     """人が読む経路。**どこに自動確認があり、どこが証跡頼みかを明示する。**
 
@@ -217,19 +205,16 @@ def emit_path(mp, steps, notes, start=None):
     at = start or mp.start
     chain = [at]
     for st in steps:
-        if st.get("restart"):
+        if isinstance(st, Restart):
             at = mp.start
             chain.append("（起動し直す）")
             chain.append(at)
-            continue
-        if "shot" in st:
-            continue
-        if st.get("to"):
-            at = st["to"]
+        elif st.to:
+            at = st.to
             chain.append(at)
     out = [" → ".join(chain), ""]
 
-    w = max([len(st["screen"]) for st in steps if "screen" in st] + [len(at), 4])
+    w = max([len(st.screen) for st in steps if isinstance(st, (Act, See, Await))] + [len(at), 4])
     rows, checked, unchecked = [], 0, 0
 
     def row(left, right):
@@ -244,41 +229,41 @@ def emit_path(mp, steps, notes, start=None):
         "✓ {} が出ている".format(start_anchor) if start_anchor else "— anchor が無い")
 
     for n, st in enumerate(steps):
-        if st.get("restart"):
+        if isinstance(st, Restart):
             a = (mp.screens.get(mp.start) or {}).get("anchor")
             row("  {}  アプリを起動し直す".format("".ljust(w)), None)
             row("  {}  起点".format(mp.start.ljust(w)),
                 "✓ {} が出ている".format(a) if a else "— anchor が無い")
             continue
-        if "shot" in st:
+        if isinstance(st, Shot):
             # 撮影行は右カラムを持たないので、桁揃えの計算から外す
-            row("  {}  撮影 {}".format("".ljust(w), os.path.basename(st["shot"])), None)
+            row("  {}  撮影 {}".format("".ljust(w), os.path.basename(st.name)), None)
             continue
-        if st.get("await"):
-            dest = (mp.screens.get(st["to"]) or {}).get("anchor")
-            row("  {}  自動表示 {} を待つ".format(st["screen"].ljust(w), st["to"]),
-                "✓ {} が出ている".format(dest) if dest else "— {} に anchor が無い".format(st["to"]))
+        if isinstance(st, Await):
+            dest = (mp.screens.get(st.to) or {}).get("anchor")
+            row("  {}  自動表示 {} を待つ".format(st.screen.ljust(w), st.to),
+                "✓ {} が出ている".format(dest) if dest else "— {} に anchor が無い".format(st.to))
             continue
-        if "see" in st:
-            row("  {}  see {}".format(st["screen"].ljust(w), st["see"].get("id")),
-                "✓ {} が見える".format(st["see"].get("id")))
+        if isinstance(st, See):
+            row("  {}  see {}".format(st.screen.ljust(w), st.element.get("id")),
+                "✓ {} が見える".format(st.element.get("id")))
             continue
-        a = st["action"]
-        extra = ' "{}"'.format(st.get("input", "")) if a.op == "text" and "input" in st else ""
-        if st.get("value") is not None:
-            extra += " [{}]".format(st["value"])
-        elif "pick" in st:
-            extra += " [{}]".format(st["pick"] or "見えている1件目")
-        left = "  {}  {}{}".format(st["screen"].ljust(w), a.label(), extra)
-        nxt = next((x for x in steps[n + 1:] if "shot" not in x), None)
+        a = st.action
+        extra = ' "{}"'.format(st.input) if a.op == "text" and st.input is not None else ""
+        if st.value is not None:
+            extra += " [{}]".format(st.value)
+        elif st.pick is not None:
+            extra += " [{}]".format(st.pick or "見えている1件目")
+        left = "  {}  {}{}".format(st.screen.ljust(w), a.label(), extra)
+        nxt = next((x for x in steps[n + 1:] if not isinstance(x, Shot)), None)
         rights = []
-        if st.get("to") and nxt and nxt.get("await"):
-            rights.append("（{} が被さって隠れるので、次の自動表示で確かめる）".format(st["to"]))
-        elif st.get("to"):
-            dest = (mp.screens.get(st["to"]) or {}).get("anchor")
-            rights.append("✓ {} に着いたことを確認".format(st["to"]) if dest
-                          else "— {} に anchor が無い".format(st["to"]))
-        for e in outcome(st):
+        if st.to and isinstance(nxt, Await):
+            rights.append("（{} が被さって隠れるので、次の自動表示で確かめる）".format(st.to))
+        elif st.to:
+            dest = (mp.screens.get(st.to) or {}).get("anchor")
+            rights.append("✓ {} に着いたことを確認".format(st.to) if dest
+                          else "— {} に anchor が無い".format(st.to))
+        for e in st.outcome():
             kind = expect_kind(e)
             ref = e.get(kind)
             ref = a.target if ref == "self" else ref

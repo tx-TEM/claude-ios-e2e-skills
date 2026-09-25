@@ -5,9 +5,10 @@
 """
 import os
 import re
+from dataclasses import replace
 
 from screenmap.model import BACKWARD, auto_of, expect_kind, is_pattern, pattern_prefix
-from screenmap.route import outcome
+from screenmap.steps import Act, Await, Restart, See, Shot
 
 SHOTS_VAR = "SHOTS"   # 撮影先のディレクトリ。run_flows.py が端末ごとに埋める
 
@@ -24,11 +25,11 @@ def var_name(target):
 
 def needs_value(st):
     """実行時に値を決めるステップか。打つ文字（runtime）か、パターンの要素のどれを押すか（pick）。"""
-    return "action" in st and (bool(st.get("runtime")) or "pick" in st)
+    return isinstance(st, Act) and st.needs_value()
 
 
 def var_of(st):
-    return st.get("var") or var_name(st["action"].target)
+    return st.var or var_name(st.action.target)
 
 
 def index_var(var):
@@ -38,7 +39,7 @@ def index_var(var):
 
 def picks_pattern(st):
     """パターンの要素のどれを押すかを実行時に決めるステップか（打つ文字ではなく）。"""
-    return "pick" in st and "action" in st
+    return isinstance(st, Act) and st.pick is not None
 
 
 def assign_vars(steps):
@@ -48,9 +49,9 @@ def assign_vars(steps):
     for st in steps:
         if not needs_value(st):
             continue
-        base = var_name(st["action"].target)
+        base = var_name(st.action.target)
         used[base] = used.get(base, 0) + 1
-        st["var"] = base if used[base] == 1 else "{}_{}".format(base, used[base])
+        st.var = base if used[base] == 1 else "{}_{}".format(base, used[base])
 
 
 def runtime_uses(steps):
@@ -65,7 +66,7 @@ def runtime_uses(steps):
     uses = {}
     for st in steps:
         if needs_value(st):
-            uses[var_of(st)] = "text" if st.get("runtime") else "selector"
+            uses[var_of(st)] = "text" if st.runtime else "selector"
         if picks_pattern(st):
             uses[index_var(var_of(st))] = "index"   # 数字そのもの。エスケープしない
     return uses
@@ -83,13 +84,13 @@ def runtime_picks(mp, steps):
     """
     out = {}
     for st in steps:
-        if "pick" not in st or "action" not in st:
+        if not picks_pattern(st):
             continue
-        a = st["action"]
+        a = st.action
         prefix = pattern_prefix(a.target)
         others = sorted(str(el.get("id")) for el in mp.elements(a.sid)
                         if el is not a.element and str(el.get("id") or "").startswith(prefix))
-        out[var_of(st)] = {"pattern": a.target, "pick": st.get("pick") or "", "exclude": others}
+        out[var_of(st)] = {"pattern": a.target, "pick": st.pick or "", "exclude": others}
     return out
 
 
@@ -129,11 +130,12 @@ def element_sel(el, value=None, var=None):
 
 
 def step_sel(st):
-    a = st.get("action")
-    el = st.get("see") if a is None else a.element
-    var = var_of(st) if a is not None and needs_value(st) and a.element is not None \
-        and is_pattern(a.element.get("id")) else None
-    return element_sel(el, st.get("value"), var)
+    """ステップが指す要素のセレクタ（See は見る要素、Act は操作の要素）。"""
+    if isinstance(st, See):
+        return element_sel(st.element, st.value)
+    el = st.action.element
+    var = var_of(st) if needs_value(st) and el is not None and is_pattern(el.get("id")) else None
+    return element_sel(el, st.value, var)
 
 
 SCROLL_TIMEOUT = 60000   # scrollUntilVisible の上限。理由は reveal()
@@ -245,16 +247,16 @@ def step_comment(st):
     要約を別に作って見せると、レビューしたものと実際に走るものが別になる。
     同じ1つを読めるようにする。
     """
-    a = st["action"]
-    head = "# {}: {}".format(st["screen"], a.label())
-    if st.get("value") is not None:
-        head += " [{}]".format(st["value"])
-    elif "pick" in st:
-        head += " [{}]".format(st["pick"] or "見えている1件目")
+    a = st.action
+    head = "# {}: {}".format(st.screen, a.label())
+    if st.value is not None:
+        head += " [{}]".format(st.value)
+    elif st.pick is not None:
+        head += " [{}]".format(st.pick or "見えている1件目")
     if a.summary:
         head += " — " + str(a.summary)
-    if st.get("to"):
-        head += " → " + st["to"]
+    if st.to:
+        head += " → " + st.to
     return head
 
 
@@ -293,10 +295,10 @@ class FlowWriter(object):
         for i, st in enumerate(self.steps):
             self.step(i, st)
         if tail is not None:
-            what = "打つ文字" if tail.get("runtime") else "押すもの"
+            what = "打つ文字" if tail.runtime else "押すもの"
             self.out.append("# 次で使う {} が見えるまでスクロールして止める（ここで{}を決める）"
-                            .format(tail["action"].target, what))
-            self.out.append(reveal(*element_sel(tail["action"].element)))
+                            .format(tail.action.target, what))
+            self.out.append(reveal(*element_sel(tail.action.element)))
         notes = list(dict.fromkeys(self.notes))   # 同じ画面の anchor 無しなどが重ならないように
         if notes:
             self.out.append("")
@@ -307,7 +309,7 @@ class FlowWriter(object):
         """appId と env。**実行時に決める値は env に未定のまま置く。** 値を焼き込むと、
         データが変わったときに黙って古い値で走る。未定のままなら、埋まっていないことが
         走らせる前に分かる。撮影先も端末で変わるので焼き込まない。"""
-        used = [SHOTS_VAR] if any("shot" in st for st in self.steps) else []
+        used = [SHOTS_VAR] if any(isinstance(st, Shot) for st in self.steps) else []
         for st in self.steps:
             if needs_value(st):
                 used.append(var_of(st))
@@ -328,8 +330,8 @@ class FlowWriter(object):
 
     def awaited_after(self, i):
         """steps[i] の次が自動表示を待つステップなら、その画面（着いた画面で閉じない）。"""
-        nxt = next((st for st in self.steps[i:] if "shot" not in st), None)
-        return nxt["to"] if nxt and nxt.get("await") else None
+        nxt = next((st for st in self.steps[i:] if not isinstance(st, Shot)), None)
+        return nxt.to if isinstance(nxt, Await) else None
 
     def relaunch(self, sid, i):
         # 起点に戻してから始める。launchApp だけでは前の項目の画面に居座ることがある。
@@ -359,41 +361,41 @@ class FlowWriter(object):
     # ---- ステップの種類ごと ----
 
     def step(self, i, st):
-        if st.get("restart"):
+        if isinstance(st, Restart):
             self.out.append("# ここで起動し直す（前の状態から次の前提に行けないため）")
             self.relaunch(self.mp.start, i + 1)
             self.at = self.mp.start
-        elif st.get("await"):
+        elif isinstance(st, Await):
             # 自動表示を確かめる項目。閉じずに、出るまで待つ（出なければ落ちる）
-            summary = (self.mp.screens.get(st["to"]) or {}).get("summary")
+            summary = (self.mp.screens.get(st.to) or {}).get("summary")
             self.out.append("# {}: 自動表示 {} を待つ{}".format(
-                st["screen"], st["to"], " — " + summary if summary else ""))
-            self.wait_anchor(st["to"])
-            self.at = st["to"]
-        elif "shot" in st:
-            self.out.append("- takeScreenshot: " + q("${" + SHOTS_VAR + "}/" + st["shot"]))
-        elif "see" in st:
-            name = st["see"].get("name")
-            self.out.append("# {}: see {}{}".format(st["screen"], st["see"].get("id"),
+                st.screen, st.to, " — " + summary if summary else ""))
+            self.wait_anchor(st.to)
+            self.at = st.to
+        elif isinstance(st, Shot):
+            self.out.append("- takeScreenshot: " + q("${" + SHOTS_VAR + "}/" + st.name))
+        elif isinstance(st, See):
+            name = st.element.get("name")
+            self.out.append("# {}: see {}{}".format(st.screen, st.element.get("id"),
                                                     " — " + name if name else ""))
             self.out.append(reveal(*step_sel(st)))
         else:
             self.action(i, st)
 
     def action(self, i, st):
-        a = st["action"]
+        a = st.action
         self.out.append(step_comment(st))
-        if a.element is not None and not st.get("revealed"):
+        if a.element is not None and not st.revealed:
             self.out.append(reveal(*step_sel(st)))
         op = getattr(self, "op_" + str(a.op), None)
         if op is None:
             self.notes.append("種類の分からない操作を飛ばした: {}".format(a.label()))
             return
         op(st)
-        if st.get("to"):
-            self.arrive(st["to"], i + 1, st.get("via"), st["screen"])
-            self.at = st["to"]
-        exps = outcome(st)
+        if st.to:
+            self.arrive(st.to, i + 1, st.via, st.screen)
+            self.at = st.to
+        exps = st.outcome()
         for e in exps:
             self.expect(st, e)
         if not exps:
@@ -415,13 +417,13 @@ class FlowWriter(object):
         key, val = step_sel(st)
         self.out.append("- tapOn:\n    {}: {}".format(key, q(val)))
         self.out.append("- eraseText")       # 前の項目の文字が残ったまま打たない
-        if st.get("runtime"):
+        if st.runtime:
             self.out.append("- inputText: ${" + var_of(st) + "}")
         else:
-            self.out.append("- inputText: " + q(str(st.get("input", ""))))
+            self.out.append("- inputText: " + q(str(st.input or "")))
 
     def op_scroll(self, st):
-        if st["action"].target == "up":
+        if st.action.target == "up":
             self.out.append("- swipe:\n    direction: DOWN")   # 内容を下へ＝上へ戻る
         else:
             self.out.append("- scroll")
@@ -446,19 +448,19 @@ class FlowWriter(object):
 
 def check_of(mp, st):
     """そのステップで最後に自動で確かめる ID。確かめないなら None。"""
-    if st.get("await") or st.get("restart"):
-        sid = st["to"] if st.get("await") else mp.start
+    if isinstance(st, (Await, Restart)):
+        sid = st.to if isinstance(st, Await) else mp.start
         return (mp.screens.get(sid) or {}).get("anchor")
-    if "see" in st:
-        return st["see"].get("id")
+    if isinstance(st, See):
+        return st.element.get("id")
     checked = None
-    if st.get("to"):
-        checked = (mp.screens.get(st["to"]) or {}).get("anchor")
-    for e in outcome(st):
+    if st.to:
+        checked = (mp.screens.get(st.to) or {}).get("anchor")
+    for e in st.outcome():
         kind = expect_kind(e)
         if kind in ("visible", "value", "selected", "hidden"):
             ref = e[kind]
-            checked = st["action"].target if ref == "self" else ref
+            checked = st.action.target if ref == "self" else ref
         elif kind == "external":
             checked = None
     return checked
@@ -473,12 +475,12 @@ def shot_context(mp, seg_start, seg_steps):
     """
     at, checked = seg_start, (mp.screens.get(seg_start) or {}).get("anchor")
     for st in seg_steps:
-        if "shot" in st:
+        if isinstance(st, Shot):
             continue
-        if st.get("restart"):
+        if isinstance(st, Restart):
             at = mp.start
-        elif st.get("to"):
-            at = st["to"]
+        elif st.to:
+            at = st.to
         checked = check_of(mp, st)
     return at, checked
 
@@ -497,17 +499,17 @@ def split_at_shots(mp, steps, start, launch_first=True):
     out, cur, at = [], [], start or mp.start
     seg_start, launch = at, launch_first
     for st in steps:
-        if st.get("restart"):
+        if isinstance(st, Restart):
             # build が直前の撮影を保証しているので、cur は空
             at = seg_start = mp.start
             launch = True
             continue
         cur.append(st)
-        if "shot" in st:
-            out.append((seg_start, cur, os.path.basename(str(st["shot"])), launch))
+        if isinstance(st, Shot):
+            out.append((seg_start, cur, os.path.basename(st.name), launch))
             cur, seg_start, launch = [], at, False
-        elif st.get("to"):
-            at = st["to"]
+        elif st.to:
+            at = st.to
     if cur:
         out.append((seg_start, cur, None, launch))
     return out
@@ -526,13 +528,13 @@ def split_parts(seg_start, seg_steps):
         if needs_value(st) and (cur or parts):
             parts.append((start, cur))
             cur, start = [], at
-            st = dict(st, revealed=True)
+            st = replace(st, revealed=True)
         elif needs_value(st):
             # 区間の頭で値が要る。スクロールだけの本を先に置く
             parts.append((start, []))
-            st = dict(st, revealed=True)
+            st = replace(st, revealed=True)
         cur.append(st)
-        if st.get("to"):
-            at = st["to"]
+        if st.to:
+            at = st.to
     parts.append((start, cur))
     return parts
