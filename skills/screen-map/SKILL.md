@@ -124,10 +124,10 @@ python3 ~/.claude/skills/sim-test-report/scripts/maestrod.py inspect <UDID> <名
 
 その画面を通る経路は存在しないことになるが、それが事実。**「検証されていないが、たぶんこう」を書き足すと、マップ全体が無条件に信用できなくなる。**
 
-**最後に `map.py check` を通す。** 実測はIDが出るかを見るもので、こちらは**マップが経路として成立しているか**を見る。到達できない画面、ファイルの無い遷移先、`anchor` の無い画面、`expect` や `ready` が指しているのにどの画面の要素にも無いID、知らない鍵がここで出る。
+**最後に `mapctl.py check` を通す。** 実測はIDが出るかを見るもので、こちらは**マップが経路として成立しているか**を見る。到達できない画面、ファイルの無い遷移先、`anchor` の無い画面、`expect` や `ready` が指しているのにどの画面の要素にも無いID、知らない鍵がここで出る。
 
 ```bash
-python3 ~/.claude/skills/screen-map/scripts/map.py check --repo <アプリのリポジトリ>
+python3 ~/.claude/skills/screen-map/scripts/mapctl.py check --repo <アプリのリポジトリ>
 ```
 
 **鮮度も出る。** `screens/<id>.yaml` より新しく `files` が触られていたら、その画面のマップは実装とずれている可能性がある（判定は git のコミット日時。mtime は clone や checkout で揃うので使わない）。リファクタやコメントの修正でも出るので不整合ではなく警告だが、**`files` が薄いと検出自体が効かない。**
@@ -156,7 +156,7 @@ python3 ~/.claude/skills/sim-test-report/scripts/maestrod.py stop
 - **遷移先を追い切れなかった操作。** Router経由やクロージャで解決先が確定できなかったもの。**推測で `expect` の `screen` を書かない**
 - `stub` にした画面
 - **接頭辞の規則に合わないID**（既存IDの流用、`BackButton` や `Search` のようなOS提供のID）。lintの例外になる
-- **`map.py check` の出力**。到達できない画面と、経路が切れる箇所がそのまま確認の限界になる
+- **`mapctl.py check` の出力**。到達できない画面と、経路が切れる箇所がそのまま確認の限界になる
 - 手順1で特定した遷移の語彙
 - **ID付与はソースの変更である。** 新規UIを実装するときにIDの付与とマップ更新を同じPRでやらないとマップは腐る。この運用をチームに要求するかは人の判断なので、勝手に決めずここで挙げる
 
@@ -164,7 +164,7 @@ python3 ~/.claude/skills/sim-test-report/scripts/maestrod.py stop
 
 ## 経路になる
 
-このスキルの成果物は、このスキルの `scripts/map.py`（と、その部品の経路計算）が経路を組む入力になる。sim-test-report はそれを使って動作確認のフローを作る（`expect` の `screen` を辺にした最短路）。`anchor` と `ready` が到達判定に、`screen: back` が復路に、`in_tree: false` と条件つきの要素・枝が経路の切れ目になる。**書く側として効いてくる点と map.py の使い方は `reference/route.md`**（`python3 ~/.claude/skills/screen-map/scripts/map.py --help` も参照）。
+このスキルの成果物（画面マップ）から、sim-test-report が経路を組んで動作確認のフローを作る（`expect` の `screen` を辺にした最短路）。このスキルの `scripts/mapctl.py check` は、マップが経路として成り立つかを確かめる。`anchor` と `ready` が到達判定に、`screen: back` が復路に、`in_tree: false` と条件つきの要素・枝が経路の切れ目になる。**書く側として効いてくる点と mapctl.py の使い方は `reference/route.md`**（`python3 ~/.claude/skills/screen-map/scripts/mapctl.py --help` も参照）。
 
 **経路が組めないことは、マップの穴がそのまま出たもの。** スクリプトは推測して繋がない。埋めるのはこのスキルの仕事。
 

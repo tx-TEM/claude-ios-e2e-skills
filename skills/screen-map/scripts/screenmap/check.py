@@ -1,9 +1,10 @@
-"""画面マップの自己テスト（map.py check）。不整合・経路が切れる箇所・書き足すもの・鮮度。"""
+"""画面マップの自己テスト（mapctl.py check）。不整合・経路が切れる箇所・書き足すもの・鮮度。"""
 import subprocess
 
-from .model import (ACTION_KEYS, BACKWARD, ELEMENT_KEYS, EXPECT_KEYS, FORWARD, GESTURE_KEYS,
-                        GESTURES, KINDS, OPS, SCREEN_KEYS, auto_of, expect_kind, is_pattern,
-                        old_schema, pattern_prefix)
+from .screen import (ACTION_KEYS, BACKWARD, ELEMENT_KEYS, EXPECT_KEYS, FORWARD, GESTURE_KEYS,
+                        GESTURES, KINDS, OPS, SCREEN_KEYS, expect_kind, is_pattern,
+                        pattern_prefix)
+from .map import old_schema
 
 
 def last_commit(repo, paths):
@@ -43,7 +44,7 @@ def staleness(mp):
         return None
     out = []
     for sid in sorted(mp.screens):
-        files = (mp.screens[sid] or {}).get("files") or []
+        files = mp.screens[sid].files
         y = last_commit(repo, [str(mp.root / "screens" / (sid + ".yaml"))])
         f = last_commit(repo, [str(repo / str(x)) for x in files])
         if y is None or f is None or not files:
@@ -57,10 +58,10 @@ def defined_ids(mp):
     """どこかの画面に要素として定義されている ID と、画面の anchor。"""
     ids = set()
     for sid in mp.screens:
-        a = (mp.screens[sid] or {}).get("anchor")
+        a = mp.screens[sid].anchor
         if a:
             ids.add(str(a))
-        ids.update(str(el.get("id")) for el in mp.elements(sid) if el.get("id"))
+        ids.update(str(el.get("id")) for el in mp.screens[sid].elements if el.get("id"))
     return ids
 
 
@@ -88,14 +89,15 @@ def unknown_keys(d, allowed):
 
 def check_screen(mp, sid, ids):
     """1画面ぶんの (bad, breaks, todo)。"""
-    s = mp.screens[sid] or {}
+    scr = mp.screens[sid]
+    s = scr.raw or {}
     f = Findings()
     if not isinstance(s, dict):
         return ["{}: 画面の中身が辞書になっていない".format(sid)], [], []
     check_screen_keys(sid, s, f)
     check_ready(sid, s, ids, f)
     check_elements(sid, s, f)
-    for a in mp.actions(sid):
+    for a in scr.actions:
         check_action(mp, sid, a, ids, f)
     check_auto_shows(mp, sid, f)
     return f.bad, f.breaks, f.todo
@@ -221,11 +223,11 @@ def check_expect(mp, a, where, e, ids, f):
 
 
 def check_auto_shows(mp, sid, f):
-    for iid, after in mp.auto_items(sid):
-        # 欠けていると、確かめも閉じもせずに黙って飛ばす（sim-test-report の testflow/maestro.py の auto_checks）
+    for iid, after in mp.screens[sid].auto_items():
+        # 欠けていると、確かめも閉じもせずに黙って飛ばす（sim-test-report の flowgen/maestro.py の auto_checks）
         if iid not in mp.screens:
             f.bad.append("{}: 自動表示 {} のファイルが無い（screens/{}.yaml）".format(sid, iid, iid))
-        elif auto_of(mp, iid) is None:
+        elif mp.screens[iid].auto_close() is None:
             f.bad.append("{}: 自動表示 {} に anchor と閉じる操作（screen: back）の両方が要る"
                          .format(sid, iid))
         for x in after:
@@ -251,7 +253,7 @@ def cmd_check(mp):
     reach = mp.reachable()
     # 自動表示の画面は遷移で入らない（こちらの操作と関係なく被さる）。被さる先の画面に
     # 着けるなら、出会いうる画面として数える
-    reach |= {i for sid in reach for i in mp.auto_shows(sid) if i in mp.screens}
+    reach |= {i for sid in reach if sid in mp.screens for i in mp.screens[sid].auto_shows() if i in mp.screens}
     print("起点: {}".format(mp.start))
     print("到達できる: {}".format(" ".join(sorted(reach))))
     lost = sorted(set(mp.screens) - reach)

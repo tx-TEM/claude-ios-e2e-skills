@@ -1,12 +1,8 @@
-"""画面でする操作を、マップから読み解く。
-
-マップの操作を、Tap / Input などの型に変換する（resolve_action）。
-どの行を押すか・何を打つかは、テストケースの do から入れる。
-"""
+"""ステップでする操作（Tap / Input / InputLater / Scroll）。"""
 from dataclasses import dataclass
 from typing import Optional, Union
 
-from .model import ActionSpec, is_pattern, pattern_prefix
+from screenmap.screen import ActionSpec, is_pattern, pattern_prefix
 
 
 @dataclass
@@ -56,7 +52,7 @@ class InputLater:
 
 @dataclass
 class Scroll:
-    """画面をスクロールする（マップの gestures）。要素は持たない。"""
+    """画面をスクロールする（画面の gestures）。要素は持たない。"""
     direction: str                     # down / up
     summary: Optional[str] = None
 
@@ -68,7 +64,7 @@ Action = Union[Tap, Input, InputLater, Scroll]
 
 
 def resolve_action(spec: ActionSpec, target: Optional[str] = None, how: Optional[dict] = None):
-    """マップの操作を、このステップでする操作の型にする。(操作, 呼び方の間違いの文の並び)。
+    """画面の操作（ActionSpec）を、このステップでする操作の型にする。(操作, 呼び方の間違いの文の並び)。
 
     `target` はパターンの要素を ID まで書いたとき（`tap:list.row.牛乳`）の、その ID。
     `how` はテストケースが添えた値の決め方（`input` / `runtime` / `pick`）。

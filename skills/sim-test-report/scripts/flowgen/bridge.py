@@ -1,9 +1,9 @@
 """画面から画面への経路。テストケースの項目と項目の間を繋ぐ（橋渡し）。
 
-sim-test-report の testflow/flow.py が plan の項目を順にフローにするとき、前の項目が終わった画面から次の項目の
+flow.py が plan の項目を順にフローにするとき、前の項目が終わった画面から次の項目の
 `from` まで（最初は起動直後の画面から）をここで引く。項目の中の `do` は flow.py が扱う。
 
-経路はマップの `expect: {screen, via}` を辺にした最短路（model.py の `path_from`）。
+経路はマップの `expect: {screen, via}` を辺にした最短路（screen-map の map.py の `path_from`）。
 ここはそれに、**歩いてきた履歴**（戻る操作の戻り先を決める）と、**自動表示の画面への
 行き方**（被さる先まで行って、閉じずに待つ）を足す。
 
@@ -40,7 +40,7 @@ class Route:
     （お気に入りから詳細に入ったなら、戻る先は一覧ではなくお気に入り）ので、マップには
     書かない。行き先が履歴に積まれていれば、戻ってから進む経路も同じ探索で比べる。
 
-    testflow/flow.py も、項目の `do` で画面を移るときに `forward()` / `back()` を使う。
+    flow.py も、項目の `do` で画面を移るときに `forward()` / `back()` を使う。
     居る画面と履歴は1つだけなので、ここに持たせる。
     """
 
@@ -140,7 +140,7 @@ class Route:
         pops, hops = best
         steps = []
         for _ in range(pops):
-            a = mp.back_action(self.at)
+            a = mp.screens[self.at].back_action()
             if a is None:
                 self.fail("map", "{} に戻る操作（screen: back）がマップに無いので、{} へ向かえない"
                                  .format(self.at, goal))
@@ -181,25 +181,14 @@ class Route:
         broken = [(sid, e, mp.blocked(e, given)) for sid, e in relaxed if mp.blocked(e, given)]
         if not broken:
             self.fail("call", "{} から {} へは、途中で戻ってからまた進む経路になる。"
-                              "一度には繋げないので、折り返す画面を間に挟む（plan ならその画面を from に"
-                              "した項目を前に置く。map.py path なら画面を並べる）".format(self.at, goal))
+                              "一度には繋げないので、折り返す画面を from にした項目を前に置く"
+                              .format(self.at, goal))
         out = []
         for sid, e, why in broken:
             kind = "call" if why.startswith("条件つき") else "map"
             hint = "。その前提で確かめるなら、項目の when に同じ文言を書く" if kind == "call" else ""
             out.append((kind, "{} の「{}」で切れる: {}{}".format(sid, e[0].label(), why, hint)))
         raise Unroutable(out)
-
-
-def walk(mp, goals, given=()):
-    """起点から画面を順にたどる経路。(ステップ列, 組めなかった理由, 補足)。map.py path が使う。"""
-    route, steps = Route(mp), []
-    for n, goal in enumerate(goals, 1):
-        try:
-            steps += route.to(goal, given)
-        except Unroutable as e:
-            return steps, [(k, "[{}] goto {}: {}".format(n, goal, m)) for k, m in e.problems], route.notes
-    return steps, [], route.notes
 
 
 def emit_path(mp, steps, notes, start=None):
@@ -232,13 +221,13 @@ def emit_path(mp, steps, notes, start=None):
             checked += right.startswith("✓")
             unchecked += right.startswith("—")
 
-    start_anchor = (mp.screens.get(chain[0]) or {}).get("anchor")
+    start_anchor = mp.anchor(chain[0])
     row("  {}  {}".format(chain[0].ljust(w), "起点" if chain[0] == mp.start else "続き"),
         "✓ {} が出ている".format(start_anchor) if start_anchor else "— anchor が無い")
 
     for n, st in enumerate(steps):
         if isinstance(st, Restart):
-            a = (mp.screens.get(mp.start) or {}).get("anchor")
+            a = mp.anchor(mp.start)
             row("  {}  アプリを起動し直す".format("".ljust(w)), None)
             row("  {}  起点".format(mp.start.ljust(w)),
                 "✓ {} が出ている".format(a) if a else "— anchor が無い")
@@ -248,7 +237,7 @@ def emit_path(mp, steps, notes, start=None):
             row("  {}  撮影 {}".format("".ljust(w), os.path.basename(st.name)), None)
             continue
         if isinstance(st, Await):
-            dest = (mp.screens.get(st.to) or {}).get("anchor")
+            dest = mp.anchor(st.to)
             row("  {}  自動表示 {} を待つ".format(st.screen.ljust(w), st.to),
                 "✓ {} が出ている".format(dest) if dest else "— {} に anchor が無い".format(st.to))
             continue
@@ -266,7 +255,7 @@ def emit_path(mp, steps, notes, start=None):
         if st.to and isinstance(nxt, Await):
             rights.append("（{} が被さって隠れるので、次の自動表示で確かめる）".format(st.to))
         elif st.to:
-            dest = (mp.screens.get(st.to) or {}).get("anchor")
+            dest = mp.anchor(st.to)
             rights.append("✓ {} に着いたことを確認".format(st.to) if dest
                           else "— {} に anchor が無い".format(st.to))
         for r in st.result:

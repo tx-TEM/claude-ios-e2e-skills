@@ -17,7 +17,7 @@
 そこから出す。撮るときに手で渡し直さない。
 
 1. plan の項目ごとに Maestro のフローを、スキル側の `.work/flows/<出力先の名前>/` に書く
-   （testflow/flow.py の `write_flows()`）。経路が組めなければ理由を出して止まる
+   （flowgen/flow.py の `write_flows()`）。経路が組めなければ理由を出して止まる
    （manifest は書かない）。組めたら読める経路を出す
 2. 返ってきた項目ごとの行から manifest.json を組む。証跡1枚＝1セクション
 
@@ -107,7 +107,7 @@ plan の `explore` は**経路が組めなかった項目**。`flow` を持た�
 飛ばし、sim-driver が探索で撮る。**末尾に並ぶ** — 自動確認の付かない項目がまとまる。
 
 なぜスクリプトなのか。一覧の中身（証跡の名前、画面、自動確認のID、フローの
-ファイル名）は testflow が既に計算したもので、**手で写すとタイポの余地ができる。**
+ファイル名）は flowgen が既に計算したもので、**手で写すとタイポの余地ができる。**
 撮影の名前と manifest の `src` がずれても、走らせるまで誰も気づかない。
 
 `desc` / `result` / `note` は手順2で埋める。`result` を `PENDING` で置くのは、
@@ -129,7 +129,7 @@ import sys
 from pathlib import Path
 
 from device import simulators
-from testflow import flow as flows_of   # plan からフローを作る
+from flowgen import flow as flows_of   # plan からフローを作る
 
 
 LABELS = {"iphone": "iPhone", "ipad": "iPad"}

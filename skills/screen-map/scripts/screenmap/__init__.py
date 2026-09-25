@@ -1,12 +1,10 @@
-"""画面マップの部品。叩くのは scripts/ 直下の map.py / migrate_map.py。
+"""画面マップを読み、確かめる部品。叩くのは scripts/ 直下の mapctl.py / migrate_map.py。
 
-  model.py      マップを読む（画面・要素・操作と、そこから引ける辺）
-  bridge.py     画面から画面への経路（項目と項目の橋渡し）。人が読む経路の表示もここ
-  steps.py      ステップの型（Act / See / Await / Shot / Restart）
-  actions.py    画面でする操作を、マップから読み解く（Tap / Input / InputLater / Scroll と resolve_action）
-  results.py    起きることを、マップから読み解く（Arrive / Visible / … と resolve_result）
-  check.py      マップの自己テスト（map.py check）
+  map.py        画面マップを読む（画面を引く、画面から画面への行き方を探す）
+  screen.py     1つの画面を読む（要素と操作、そこから進める先、戻る操作、自動表示）
   mini_yaml.py  screen-map が書く yaml だけを読む最小のパーサ
+  check.py      マップの自己テスト（mapctl.py check）
 
-sim-test-report の testflow/ がこれを import してフローを作る（依存は sim-test-report → screen-map の向きだけ）。
+経路を組んでフローを作るのは sim-test-report の flowgen/。ここを import して画面マップを読む
+（依存は sim-test-report → screen-map の向きだけ）。
 """
