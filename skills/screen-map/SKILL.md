@@ -5,7 +5,7 @@ description: iOSアプリの画面マップ（どの画面で何ができて、�
 
 # 画面マップ
 
-**どの画面で何ができて、操作するとどうなるか**を1画面1ファイルで書き出す。動作確認のときに、探索なしで対象画面まで辿って操作できるようにするためのもの。**必要な画面から作り、まだ書いていない画面は `stub` で置く。** アプリ全体を一度に作らない。`accessibilityIdentifier` を実装に振り、画面・操作・結果・遷移を `screen-map/screens/*.yaml` に落とす。
+**どの画面で何ができて、操作するとどうなるか**を1画面1ファイルで書き出す。動作確認のときに、探索なしで対象画面まで辿って操作できるようにするためのもの。**必要な画面から作り、まだ書いていない画面は `stub` で置く。** アプリ全体を一度に作らない。`accessibilityIdentifier` を実装に振り、画面の要素と、その操作・結果・遷移を `screen-map/screens/*.yaml` に落とす。
 
 **動作確認の実施はこのスキルの仕事ではない**（`sim-test-report`）。ここで作るのはその入力になるマップ。
 
@@ -44,12 +44,12 @@ grep -rnc "NavigationLink\|navigationDestination\|pushViewController\|present(\|
 
 シミュレーターを触る前、ソースを編集する前に合意を取る。**複数ファイルに散るソース編集を事前合意なしに始めない。**
 
-| 画面id | ファイル | anchor | actions | stub |
+| 画面id | ファイル | anchor | elements | stub |
 |---|---|---|---|---|
-| `item_list` | `ItemListViewController.swift` 他2件 | `item_list` | add_button → item_new / cell → item_detail / favorite_button（遷移なし） | |
+| `item_list` | `ItemListViewController.swift` 他2件 | `item_list` | add_button → item_new / cell.* → item_detail / favorite_button（遷移なし）/ empty_view（見るだけ、0件のとき） | |
 | `settings` | `SettingsViewController.swift` | `settings` | item_list_cell → item_list | ✓ |
 
-- **今回書かない画面は `stub` にする。** `to` の先として必要なだけの画面は、最低限 `anchor` とそこへ入る `actions` を書いて中身は作らない。これが無いと `to` を辿るたびに次の画面を書く羽目になり、アプリ全体に引きずられる
+- **今回書かない画面は `stub` にする。** `expect` の `screen` の先として必要なだけの画面は、最低限 `anchor` と、そこから出る操作（戻る操作など）を書いて中身は作らない。これが無いと遷移先を辿るたびに次の画面を書く羽目になり、アプリ全体に引きずられる
 - 画面idは `snake_case` で、**そのままファイル名になる**（`item_list` → `screens/item_list.yaml`）。**anchor は画面idそのもの、新しく振るIDの接頭辞も画面idそのもの**（`item_list`、`item_list.add_button`）。変換しない — 画面id・ファイル名・anchor・接頭辞が同じ文字列なら、どれからでも残りが引ける。**役割名もスネークケース**（`add_button`、`search_field`）。IDは Swift の識別子ではなくただの文字列なので、Swift の命名（lowerCamelCase）に合わせない — 1つのIDの中でスネークとキャメルが混ざらないように。OS が持つID（`BackButton`、`Search`）はそのまま使う。lintが接頭辞を検査できるようにするため、新規分はここを崩さない。既存IDを流用する場合は接頭辞が揃わないので、**手順6でその一覧を報告する**（lintの例外になる）
 
 ### 3. 既存のIDを棚卸しする
@@ -59,7 +59,7 @@ grep -rn "accessibilityIdentifier" --include="*.swift" . | head -50
 ```
 
 - **既にあるIDは変えない。** 既存のUIテストが参照している可能性があり、命名規則に合わないからと振り直すと無関係なテストが落ちる
-- 命名が合わないものもそのまま使い、**その文字列を `anchor` / `tap` / `expect` の値に書く**。規則に揃えるのは別PRの話として切り出す
+- 命名が合わないものもそのまま使い、**その文字列を `anchor` / 要素の `id` / `expect` / `ready` の値に書く**。規則に揃えるのは別PRの話として切り出す
 - 既存IDが全く無いアプリでは、この手順は空振りでよい
 
 ### 4. 画面ごとに、振ってから書く
@@ -70,13 +70,15 @@ grep -rn "accessibilityIdentifier" --include="*.swift" . | head -50
 
 | 対象 | 個数 | 用途 |
 |---|---|---|
-| `anchor` | 1画面に1つ | 到達判定（フロー内の `assertVisible`） |
-| `actions[].tap` | 操作する要素のぶん | フローの `tapOn` |
-| `actions[].expect` | 遷移しない操作のぶん | 操作の結果を確かめる観測点 |
-| `states[].expect` | 表示が分岐する画面だけ | どちらの状態で着いたかの判定 |
+| `anchor` | 1画面に1つ | 到達判定（着いたら最初に待つ） |
+| 操作する要素（`actions` を持つ要素） | 操作する要素のぶん | フローの `tapOn` / 入力 |
+| `expect` が指す観測点 | 遷移しない操作のうち、`self` で確かめられないぶん | 操作の結果を確かめる（`visible` / `hidden` / `selected` / `value`） |
+| `ready` の目印 | 中身を読み込む画面だけ | 読み込み完了の判定（行、空表示など） |
+| `when` つきの見るだけの要素 | 表示が分かれる画面だけ | どちらの状態で着いたかの判定（空表示、エラー時の再読み込みボタンなど） |
+| 見るだけの要素 | UI 確認の対象にしたいものだけ | plan の `see:<id>` で見る（セクションの見出しなど） |
 | 自動表示の画面の `anchor` と閉じる操作 | 自動で出るダイアログがある画面だけ | 出ていたら閉じる／確かめる項目では出るまで待つ。自動表示も画面として書く（`reference/schema.md` の auto_shows） |
 
-**振る前に `reference/ids.md` を、yaml を書く前に `reference/schema.md` と `reference/route.md`（経路として効いてくる書き方: 戻る操作、複数の入口、`result` の書き方）を読む。** 書き方の実例と、下の規則の理由はそちらにある。規則だけ先に並べる。
+**振る前に `reference/ids.md` を、yaml を書く前に `reference/schema.md` と `reference/route.md`（経路として効いてくる書き方: 戻る操作、複数の入口、`when`、`summary` の書き方）を読む。** 書き方の実例と、下の規則の理由はそちらにある。規則だけ先に並べる。
 
 - **`anchor` は画面自体（コンテナ）に振る。画面内の要素を借りない** — 借りた要素を替えたり消したりすると、画面があるのに「着いていない」判定になる
 - **IDはリテラルで1箇所に書く。接頭辞と役割名を分けて合成しない** — 完成したIDがソースに無いと、ID生存チェックのgrepが生きているIDを `dead` と誤判定する
@@ -85,7 +87,7 @@ grep -rn "accessibilityIdentifier" --include="*.swift" . | head -50
 - **コードに書いた時点では未確定として扱う。** ビュー階層に出るかは手順5の実測で決まる
 - **共有コンポーネントには、まず呼び出し側の modifier で振る。届かないと実測で分かったときだけ、**コンポーネントがIDを受け取る形にする（`String?` で、空文字のデフォルトを置かない）。**予測でパラメータを足さない** — 実測すると届くことがある。どちらの形でもリテラルは画面のファイル側に置く
 - **`ForEach` の要素のIDは、画面側で `switch` して完成形を返す** — ドメインの型に持たせると、別画面で他画面のIDが振られる
-- **動的な一覧の行は表示テキスト（データ由来の文言）で補間する。`item.id` も index も入れない** — 画面にもダンプにも正しさを確かめる材料が無く、ずれても黙って別の行を叩いて通る。同名は `select.index` で選ぶ。マップ側はパターン（`item_list.cell.*`）で書き、名指しするときだけ表示テキストまで書く
+- **動的な一覧の行は表示テキスト（データ由来の文言）で補間する。`item.id` も index も入れない** — 画面にもダンプにも正しさを確かめる材料が無く、ずれても黙って別の行を叩いて通る。マップ側はパターン（`item_list.cell.*`）で書く。どの行を押すかはマップに書かない — スクリプトが実行時に決める（条件が無ければ画面に見えている1件目、条件があれば plan の `pick`）。名指しするときだけ、テストケースの側で表示テキストまで書く
 
 ### 5. 実測のビュー階層で検証する
 
@@ -98,11 +100,11 @@ xcrun simctl list devices booted
 python3 ~/.claude/skills/sim-test-report/scripts/maestrod.py inspect <UDID> <名前>
 ```
 
-**各画面へは、書いたばかりの `actions` を辿って行く。** これが**マップの最初の実地テスト**になる。辿れなかったら、IDが出ていないか `to` が間違っているかのどちらかなので、そこで直す。
+**各画面へは、書いたばかりの要素の操作を辿って行く。** これが**マップの最初の実地テスト**になる。辿れなかったら、IDが出ていないか `expect` の `screen` が間違っているかのどちらかなので、そこで直す。
 
-着いたら `anchor` / `actions[].tap` / `actions[].expect` が行として出ていることを確かめる。
+着いたら `anchor` / `elements` の `id` / `expect` と `ready` が指すID が行として出ていることを確かめる。画面外の要素は、スクロールして出るところまで見る（フローでは押す前・見る前にスクリプトがスクロールする）。
 
-出ていないIDは、付け場所を直すか、`in_tree: false` として記録する（ツリーに出ない要素は座標でしか叩けない）。
+出ていないIDは、付け場所を直すか、要素に `in_tree: false` を付けて記録する（ツリーに出ない要素は座標でしか叩けない）。
 
 **一覧の行は、IDと表示テキストが一致しているかを見る。** ダンプの1行に両方出るので、目で突き合わせられる。ずれていたら、補間元が表示している値と違う。
 
@@ -122,7 +124,7 @@ python3 ~/.claude/skills/sim-test-report/scripts/maestrod.py inspect <UDID> <名
 
 その画面を通る経路は存在しないことになるが、それが事実。**「検証されていないが、たぶんこう」を書き足すと、マップ全体が無条件に信用できなくなる。**
 
-**最後に `route.py check` を通す。** 実測はIDが出るかを見るもので、こちらは**マップが経路として成立しているか**を見る。到達できない画面、遷移先のファイルが無い `to`、`anchor` の無い画面がここで出る。
+**最後に `route.py check` を通す。** 実測はIDが出るかを見るもので、こちらは**マップが経路として成立しているか**を見る。到達できない画面、ファイルの無い遷移先、`anchor` の無い画面、`expect` や `ready` が指しているのにどの画面の要素にも無いID、知らない鍵がここで出る。
 
 ```bash
 python3 ~/.claude/skills/sim-test-report/scripts/route.py check --repo <アプリのリポジトリ>
@@ -130,7 +132,9 @@ python3 ~/.claude/skills/sim-test-report/scripts/route.py check --repo <アプ�
 
 **鮮度も出る。** `screens/<id>.yaml` より新しく `files` が触られていたら、その画面のマップは実装とずれている可能性がある（判定は git のコミット日時。mtime は clone や checkout で揃うので使わない）。リファクタやコメントの修正でも出るので不整合ではなく警告だが、**`files` が薄いと検出自体が効かない。**
 
-不整合（`to` の先が無い、`anchor` が無い）が出たら直す。**「経路が切れる／弱い箇所」に出たもの（`in_tree: false`、`by: label`、`stub`）は直す対象ではない**。事実として出ているだけなので、手順6の報告に使う。
+不整合（遷移先が無い、`anchor` が無い、指したIDが定義されていない、`via` の値や `when` の混在が違う）が出たら直す。**「書き足すもの」（`name` / `summary` / `expect` の無い要素・操作）は不整合ではない** が、書けるものは書く。`expect` を置けないなら手順6で報告する。**「経路が切れる／弱い箇所」に出たもの（`in_tree: false`、`by: label`、`stub`、条件つきの要素、`auto_shows`）は直す対象ではない**。事実として出ているだけなので、手順6の報告に使う。
+
+**古い形（画面に `actions` / `states` を持つ）のマップは `check` が読まずに止まる。** `migrate_map.py` で移してから通す（`reference/schema.md` の「古い形からの移行」）。
 
 検証に使ったデーモンは止める。
 
@@ -143,14 +147,13 @@ python3 ~/.claude/skills/sim-test-report/scripts/maestrod.py stop
 - ツリーに出なかった要素と、その対処（付け場所を直した / `in_tree: false` にした）
 - **使った一時コード**（どのファイルの何を、どの画面のために変えたか）。revert 済みであることも書く
 - **戻せなかった環境の状態**（止めたサーバー、消したデータ、立て直したプロセス）。次に何をすれば元に戻るかまで書く
-- **`actions` に載せられなかった操作とその理由**（ラベルでも指せない、目標をIDで指せない、判断が必要）。**IDが無いだけなら `by: label` で載せる。外すと「その操作ができる」こと自体が記録から消え、確認項目の候補から落ちる**
+- **マップに載せられなかった操作とその理由**（ラベルでも指せない、目標をIDで指せない、判断が必要）。**IDが無いだけなら `by: label` で載せる。外すと「その操作ができる」こと自体が記録から消え、確認項目の候補から落ちる**
 - **`by: label` を使った箇所と、IDを振れない理由**
 - **`expect` を置けなかった操作**（結果を弁別できる要素が無いもの）
 - **ドキュメントと実装の食い違い**。マップを作る過程で必ず見つかる。どちらが正かは判断せず、事実として挙げる
-- **肯定形で確かめられない状態。** 空表示のビューが無く「0件で着いた」を指せるIDが存在しないなど。`states` に入れられない理由とあわせて、**その状態を確認可能にするには実装側に何が必要か**まで書く
+- **肯定形で確かめられない状態。** 空表示のビューが無く「0件で着いた」を指せるIDが存在しないなど。`when` つきの見るだけの要素として書けない理由とあわせて、**その状態を確認可能にするには実装側に何が必要か**まで書く
 - **マップに入れなかった画面とその理由**（一時コードでも踏めなかった等）
-- **遷移先を追い切れなかった操作。** Router経由やクロージャで解決先が確定できなかったもの。**推測で `to` を書かない**
-- 判断が必要でフローに積めない操作（「どれを選ぶか」がデータ次第のもの）
+- **遷移先を追い切れなかった操作。** Router経由やクロージャで解決先が確定できなかったもの。**推測で `expect` の `screen` を書かない**
 - `stub` にした画面
 - **接頭辞の規則に合わないID**（既存IDの流用、`BackButton` や `Search` のようなOS提供のID）。lintの例外になる
 - **`route.py check` の出力**。到達できない画面と、経路が切れる箇所がそのまま確認の限界になる
@@ -161,10 +164,10 @@ python3 ~/.claude/skills/sim-test-report/scripts/maestrod.py stop
 
 ## 経路になる
 
-このスキルの成果物は、sim-test-report の `scripts/route.py` が経路を組む入力になる（`to` を辺にした最短路）。`anchor` が到達判定に、`kind: back` / `dismiss` が復路に、`in_tree: false` が経路の切れ目になる。**書く側として効いてくる点と route.py の使い方は `reference/route.md`**（`python3 ~/.claude/skills/sim-test-report/scripts/route.py --help` も参照）。
+このスキルの成果物は、sim-test-report の `scripts/route.py` が経路を組む入力になる（`expect` の `screen` を辺にした最短路）。`anchor` と `ready` が到達判定に、`screen: back` が復路に、`in_tree: false` と条件つきの要素・枝が経路の切れ目になる。**書く側として効いてくる点と route.py の使い方は `reference/route.md`**（`python3 ~/.claude/skills/sim-test-report/scripts/route.py --help` も参照）。
 
 **経路が組めないことは、マップの穴がそのまま出たもの。** `route.py` は推測して繋がない。埋めるのはこのスキルの仕事。
 
 ## スキーマ
 
-`config.yaml`（`start`: 起動直後の画面）と、1画面1ファイルの `screens/<画面id>.yaml`（`anchor` / `names` / `summary` / `files` / `actions` / `states` / `stub`）。**全体と各フィールドの規則は `reference/schema.md`。** yaml を書く前に読む。
+`config.yaml`（`start`: 起動直後の画面）と、1画面1ファイルの `screens/<画面id>.yaml`（`anchor` / `names` / `summary` / `files` / `stub` / `ready` / `elements` / `gestures` / `auto_shows`）。操作と結果は要素（`elements`）の `actions` に持つ。**全体と各フィールドの規則は `reference/schema.md`。** yaml を書く前に読む。

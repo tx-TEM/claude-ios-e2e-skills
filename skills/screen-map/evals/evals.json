@@ -12,27 +12,27 @@
         "共有コンポーネント（SearchBar）には、まず呼び出し側の modifier で ID を振っている。届かないと予測してコンポーネントに ID の引数を先回りで足していない",
         "ErrorView の中の再読み込みボタンに ID を渡す必要があるなら、それは実測で届かなかった場合の手段として扱っている（または呼び出し側 modifier で振って実測で確かめる旨）。ID の引数を足すなら String? で、空文字のデフォルトを置いていない",
         "一覧の行の ID は表示テキスト（book.title）で補間している。book.id や index を ID に入れていない",
-        "yaml では行のタップをパターン（browse.book_row.* のように末尾 *）で書き、select.index で選び、capture を入れている",
-        "行のタップは to: book_detail で、book_detail を stub として置く（anchor と、そこへ入る actions。push で入るので戻る操作は書いてよい）ことに触れている",
-        "入力（text: browse.search_field）と送信キー（tap: Search）を別のエントリにしている。Search は OS 提供の ID で、lint の例外として報告する旨がある",
+        "yaml では一覧の行をパターンの要素（browse.book_row.* のように末尾 *）で書いている。どの行を押すか（何番目か、どの作品か）をマップに書いていない（select / index / capture を持たせていない）",
+        "行のタップは expect: {screen: book_detail, via: push} で、book_detail を stub として置く（anchor と、そこから出る操作。push で入るので戻る操作 expect: {screen: back, via: back} は書いてよい）ことに触れている",
+        "入力（browse.search_field 要素の text）と送信キー（Search 要素の tap）を別の要素・アクションにしている。Search は OS 提供の ID で、lint の例外として報告する旨がある",
         "text の値（打つ文字）をマップに書いていない",
         "expect は操作で変わるものを指している。絞り込みの expect に一覧の行（元からあるもの）を置いていない。全エントリが同じ expect になっていない",
         "files に共有コンポーネント（Shared/SearchBar.swift, Shared/ErrorView.swift）を入れていない。ID を振った画面専用のファイル（BrowseView.swift、行に振ったなら BookRow.swift）は入れている",
-        "names（呼び名）と summary（できること1行）を分けて書いている。id フィールドを持たせていない",
-        "エラー表示の状態を states（expect と when）で書いている"
+        "names（呼び名）と summary（できること1行）を分けて書いている。画面に id フィールドを持たせていない",
+        "エラー表示の状態を when つきの見るだけの要素（または再読み込みボタンの要素に when）で書いている。画面に states を持たせていない"
       ]
     },
     {
       "id": "sheet-and-back",
       "prompt": "画面 book_detail（詳細画面）を書くところ。詳細画面には「本棚に追加」ボタンがあり、押すと .confirmationDialog で「お気に入り」「あとで読む」「キャンセル」の3択が出る。選ぶとシートが閉じ、ボタンの表示が「本棚にあり」に変わる。詳細画面へは さがす画面（browse）と 履歴画面（history）の両方から push で入る。ナビゲーションの戻るボタンはカスタムしていない。著者名をタップすると著者画面（author。今回は書かない）へ push する。本文の表示倍率はスライダーで変えられる。book_detail.yaml と、必要なら他の screens/*.yaml を書き、手順6で報告することがあれば挙げる。",
       "assertions": [
-        "confirmationDialog（シート）を別の画面として扱い、kind: modal で to を張り、選択肢はそのシート画面の actions に書いている",
-        "キャンセルは kind: dismiss で書いている（to は書かない）",
+        "confirmationDialog（シート）を別の画面として扱い、開く操作に expect: {screen: <シートの画面id>, via: modal} を書き、選択肢はそのシート画面の elements に書いている",
+        "キャンセルは expect: {screen: back, via: dismiss} で書いている（戻り先の画面idは書かない）",
         "シートの選択肢は ID で指せない可能性があるので、手順5で実測して駄目なら by: label を使う旨がある（または by: label で書いて理由を報告に挙げている）",
-        "戻るボタンは OS 提供の BackButton をそのまま tap に書き、kind: back にしている。戻る操作に to を書いていない。lint の例外として報告に挙げている",
-        "戻り先は来た道（browse か history か）で変わり、route.py が履歴から出すので、マップに戻り先を書かない（to を書かない）ことに触れている",
-        "著者画面（author）は stub で置き、anchor とそこへ入る actions（push で入るので戻る操作は書いてよい）に留めている。操作の網羅はしていない",
-        "スライダーは今のスキーマでは書けないので actions に載せず、手順6で「actions に載せられなかった操作」として報告している",
+        "戻るボタンは OS 提供の BackButton をそのまま要素の id に書き、expect: {screen: back, via: back} にしている。戻る操作に戻り先の画面idを書いていない。lint の例外として報告に挙げている",
+        "戻り先は来た道（browse か history か）で変わり、route.py が履歴から出すので、マップに戻り先を書かない（screen: back にする）ことに触れている",
+        "著者画面（author）は stub で置き、anchor と、そこから出る操作（push で入るので戻る操作は書いてよい）に留めている。操作の網羅はしていない",
+        "スライダーは今のスキーマでは書けないのでマップに載せず、手順6で「マップに載せられなかった操作」として報告している",
         "本棚に追加の結果の expect は操作で変わるもの（ボタンの表示が変わること）を指している",
         "各画面は「そこから行ける先」だけを書いており、詳細画面への入り口（browse → book_detail）を book_detail.yaml に書いていない"
       ]
