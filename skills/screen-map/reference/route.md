@@ -1,9 +1,9 @@
 # 経路になる
 
-マップは要素の操作の `expect: {screen, via}` で辺を持っているので、起点からの経路はグラフの最短路として機械的に組める。sim-test-report の `scripts/route.py` がそれをやる。**このスキルの成果物がそのまま sim-test-report の入力になるのは、ここを通してのこと。**
+マップは要素の操作の `expect: {screen, via}` で辺を持っているので、起点からの経路はグラフの最短路として機械的に組める。このスキルの `scripts/route.py` がそれをやる。sim-test-report はフローを作るときに同じ経路の計算（`scripts/screenmap/route.py`）を使って、テストケースの項目と項目の間を繋ぐ。**このスキルの成果物がそのまま sim-test-report の入力になるのは、ここを通してのこと。**
 
 ```bash
-R=~/.claude/skills/sim-test-report/scripts/route.py
+R=~/.claude/skills/screen-map/scripts/route.py
 
 python3 $R screens --repo <アプリ>           # 画面の一覧（呼び名・できること）
 python3 $R which <パス...> --repo <アプリ>   # 変更したファイルから対象画面を引く

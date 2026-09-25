@@ -6,8 +6,8 @@
 import os
 import re
 
-from .model import BACKWARD, auto_of, expect_kind, is_pattern, pattern_prefix
-from .route import outcome
+from screenmap.model import BACKWARD, auto_of, expect_kind, is_pattern, pattern_prefix
+from screenmap.route import outcome
 
 SHOTS_VAR = "SHOTS"   # 撮影先のディレクトリ。run_flows.py が端末ごとに埋める
 

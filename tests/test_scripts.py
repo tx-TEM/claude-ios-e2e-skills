@@ -1,4 +1,5 @@
-"""sim-test-report のスクリプト（route.py とその部品 / manifest.py / run_flows.py）のテスト。
+"""スクリプトのテスト。screen-map（route.py / migrate_map.py と screenmap/）と、
+sim-test-report（manifest.py / run_flows.py と testflow/ / device/）。
 
   python3 -m unittest discover tests            テストを走らせる
   UPDATE_SNAPSHOTS=1 python3 -m unittest ...    スナップショットを書き直す
@@ -25,13 +26,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "skills" / "sim-test-report" / "scripts"
+MAP_SCRIPTS = ROOT / "skills" / "screen-map" / "scripts"      # 画面マップの部品と route.py
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "app"
 SNAPSHOTS = Path(__file__).resolve().parent / "snapshots"
 sys.path.insert(0, str(SCRIPTS))
+sys.path.insert(0, str(MAP_SCRIPTS))
 
 from screenmap import check as map_check  # noqa: E402
 from screenmap import model as screen_map  # noqa: E402
-from screenmap import flow as flows_of  # noqa: E402
+from testflow import flow as flows_of  # noqa: E402
 
 
 def load_run_flows():
@@ -1058,7 +1061,7 @@ class Migrate(unittest.TestCase):
         sys.argv = ["migrate_map.py", "--repo", str(repo), "--write"]
         try:
             with contextlib.redirect_stdout(io.StringIO()) as o:
-                runpy.run_path(str(SCRIPTS / "migrate_map.py"), run_name="__main__")
+                runpy.run_path(str(MAP_SCRIPTS / "migrate_map.py"), run_name="__main__")
         finally:
             sys.argv = argv
         out = o.getvalue()

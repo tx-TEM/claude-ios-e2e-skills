@@ -1,7 +1,7 @@
 """plan.json から、項目ごとの Maestro のフローを作る（manifest.py から呼ぶ）。plan の形は manifest.py --help。
 
 項目1つ＝「`from` から `do` を順に叩いて、1枚撮る」。**項目は経路を持たない。**
-前の項目が終わった画面から次の項目の `from` までは route.py が繋ぐ（すでに居れば何もしない）。
+前の項目が終わった画面から次の項目の `from` までは screen-map の screenmap/route.py が繋ぐ（すでに居れば何もしない）。
 ここがするのは、項目の `do` をマップの操作に引き当ててステップにすることと、
 できたステップ列を maestro.py でフローに書くこと。
 
@@ -15,8 +15,8 @@ from pathlib import Path
 
 from .maestro import (assign_vars, emit_flow, runtime_picks, runtime_uses, shot_context,
                       split_at_shots, split_parts, var_of)
-from .model import DO_OPS, FORWARD, GESTURES, is_pattern, load_map, pattern_prefix
-from .route import Route, Unroutable, emit_path
+from screenmap.model import DO_OPS, FORWARD, GESTURES, is_pattern, load_map, pattern_prefix
+from screenmap.route import Route, Unroutable, emit_path, report_problems
 
 PLAN_KEYS = {"app", "clear_state", "items", "explore"}
 ITEM_KEYS = {"from", "do", "fresh", "title", "expect", "when"}
@@ -242,16 +242,6 @@ def check_values(steps, problems):
                              "（text:{}<表示中の名前>）".format(where, a.target, pattern_prefix(a.target))))
         elif pattern:
             st["pick"] = st.get("pick") or ""
-
-
-def report_problems(problems):
-    """組めなかった理由を stderr に出す。"""
-    print("経路を組めなかった:", file=sys.stderr)
-    for _, msg in problems:
-        print("  " + msg, file=sys.stderr)
-    if any(kind == "map" for kind, _ in problems):
-        print("\nマップの穴。埋めるのは screen-map の仕事で、"
-              "ここで推測して繋がない。", file=sys.stderr)
 
 
 # ---------- フローに書く ----------

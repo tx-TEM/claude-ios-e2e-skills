@@ -1,6 +1,6 @@
 """画面から画面への経路。テストケースの項目と項目の間を繋ぐ（橋渡し）。
 
-flow.py が plan の項目を順にフローにするとき、前の項目が終わった画面から次の項目の
+sim-test-report の testflow/flow.py が plan の項目を順にフローにするとき、前の項目が終わった画面から次の項目の
 `from` まで（最初は起動直後の画面から）をここで引く。項目の中の `do` は flow.py が扱う。
 
 経路はマップの `expect: {screen, via}` を辺にした最短路（model.py の `path_from`）。
@@ -14,6 +14,7 @@ flow.py が plan の項目を順にフローにするとき、前の項目が終
 「条件つき」と理由にする。
 """
 import os
+import sys
 
 from .model import expect_kind
 
@@ -37,7 +38,7 @@ class Route(object):
     （お気に入りから詳細に入ったなら、戻る先は一覧ではなくお気に入り）ので、マップには
     書かない。行き先が履歴に積まれていれば、戻ってから進む経路も同じ探索で比べる。
 
-    flow.py も、項目の `do` で画面を移るときに `forward()` / `back()` を使う。
+    testflow/flow.py も、項目の `do` で画面を移るときに `forward()` / `back()` を使う。
     居る画面と履歴は1つだけなので、ここに持たせる。
     """
 
@@ -304,3 +305,13 @@ def emit_path(mp, steps, notes, start=None):
     for n in notes:
         out.append("  補足: " + n)
     return "\n".join(out)
+
+
+def report_problems(problems):
+    """組めなかった理由を stderr に出す。"""
+    print("経路を組めなかった:", file=sys.stderr)
+    for _, msg in problems:
+        print("  " + msg, file=sys.stderr)
+    if any(kind == "map" for kind, _ in problems):
+        print("\nマップの穴。埋めるのは screen-map の仕事で、"
+              "ここで推測して繋がない。", file=sys.stderr)

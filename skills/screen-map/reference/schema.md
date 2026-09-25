@@ -332,8 +332,8 @@ elements:
 `actions` / `states` を画面に持つ古い形のマップは、`route.py` が読まずに止まる。変換スクリプトで移す。
 
 ```bash
-python3 ~/.claude/skills/sim-test-report/scripts/migrate_map.py --repo <アプリのリポジトリ>          # 変換結果を見る
-python3 ~/.claude/skills/sim-test-report/scripts/migrate_map.py --repo <アプリのリポジトリ> --write  # 書き換える
+python3 ~/.claude/skills/screen-map/scripts/migrate_map.py --repo <アプリのリポジトリ>          # 変換結果を見る
+python3 ~/.claude/skills/screen-map/scripts/migrate_map.py --repo <アプリのリポジトリ> --write  # 書き換える
 ```
 
 - `tap` / `text` を ID ごとにまとめて `elements` にする。`to` + `kind` は `expect: {screen, via}`、`kind: back` / `dismiss` は `screen: back`

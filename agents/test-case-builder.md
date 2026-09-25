@@ -25,7 +25,7 @@ tools: Read, Grep, Glob, Bash
 # 1. 確認項目を立てる
 
 ```bash
-R=~/.claude/skills/sim-test-report/scripts/route.py
+R=~/.claude/skills/screen-map/scripts/route.py   # 画面マップを引く・確かめる（screen-map スキル）
 M=<アプリのリポジトリ>
 ```
 
@@ -179,8 +179,8 @@ python3 $R check   --repo $M     # 到達できない画面、切れている箇
 ```
 
 **`manifest.py --help` を先に見る。** plan の形も、`from` `do` `when` の意味も、`runtime` `input` `pick` の
-使い分けも、そこに書いてある。**route.py のソースを読みに行かない** — 1000行あり、
-読んでも `--help` 以上のことは分からない。
+使い分けも、そこに書いてある。**経路やフローを作るスクリプトのソースを読みに行かない** — 合わせて
+2000行近くあり、読んでも `--help` 以上のことは分からない。
 
 `check` を先に見ておく。**到達できない画面と `in_tree: false` は、そのまま確認の限界**になる。
 
