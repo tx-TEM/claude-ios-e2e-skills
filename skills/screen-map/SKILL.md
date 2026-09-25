@@ -49,6 +49,7 @@ grep -rnc "NavigationLink\|navigationDestination\|pushViewController\|present(\|
 | `item_list` | `ItemListViewController.swift` 他2件 | `item_list` | add_button → item_new / cell.* → item_detail / favorite_button（遷移なし）/ empty_view（見るだけ、0件のとき） | |
 | `settings` | `SettingsViewController.swift` | `settings` | item_list_cell → item_list | ✓ |
 
+- **見た目を確かめたい部分があるかを聞く。** 縦に長い一覧やトップ画面のように要素が多い画面では、ソースから拾った候補（セクションの見出し、バナーなど）を表の下に並べ、見るだけの要素として振るものを選んでもらう。選ばれなかったものには振らない。後から確かめたくなったら、そのときにこのスキルでマップに足す
 - **今回書かない画面は `stub` にする。** `expect` の `screen` の先として必要なだけの画面は、最低限 `anchor` と、そこから出る操作（戻る操作など）を書いて中身は作らない。これが無いと遷移先を辿るたびに次の画面を書く羽目になり、アプリ全体に引きずられる
 - 画面idは `snake_case` で、**そのままファイル名になる**（`item_list` → `screens/item_list.yaml`）。**anchor は画面idそのもの、新しく振るIDの接頭辞も画面idそのもの**（`item_list`、`item_list.add_button`）。変換しない — 画面id・ファイル名・anchor・接頭辞が同じ文字列なら、どれからでも残りが引ける。**役割名もスネークケース**（`add_button`、`search_field`）。IDは Swift の識別子ではなくただの文字列なので、Swift の命名（lowerCamelCase）に合わせない — 1つのIDの中でスネークとキャメルが混ざらないように。OS が持つID（`BackButton`、`Search`）はそのまま使う。lintが接頭辞を検査できるようにするため、新規分はここを崩さない。既存IDを流用する場合は接頭辞が揃わないので、**手順6でその一覧を報告する**（lintの例外になる）
 
@@ -75,7 +76,7 @@ grep -rn "accessibilityIdentifier" --include="*.swift" . | head -50
 | `expect` が指す観測点 | 遷移しない操作のうち、`self` で確かめられないぶん | 操作の結果を確かめる（`visible` / `hidden` / `selected` / `value`） |
 | `ready` の目印 | 中身を読み込む画面だけ | 読み込み完了の判定（行、空表示など） |
 | `when` つきの見るだけの要素 | 表示が分かれる画面だけ | どちらの状態で着いたかの判定（空表示、エラー時の再読み込みボタンなど） |
-| 見るだけの要素 | UI 確認の対象にしたいものだけ | plan の `see:<id>` で見る（セクションの見出しなど） |
+| 見るだけの要素 | 手順2で選ばれたものだけ | plan の `see:<id>` で見る（セクションの見出しなど） |
 | 自動表示の画面の `anchor` と閉じる操作 | 自動で出るダイアログがある画面だけ | 出ていたら閉じる／確かめる項目では出るまで待つ。自動表示も画面として書く（`reference/schema.md` の auto_shows） |
 
 **振る前に `reference/ids.md` を、yaml を書く前に `reference/schema.md` と `reference/route.md`（経路として効いてくる書き方: 戻る操作、複数の入口、`when`、`summary` の書き方）を読む。** 書き方の実例と、下の規則の理由はそちらにある。規則だけ先に並べる。
