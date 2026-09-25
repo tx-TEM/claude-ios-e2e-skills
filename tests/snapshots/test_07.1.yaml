@@ -11,3 +11,9 @@ appId: jp.example.App
       id: '^list\.row\..*'
     direction: DOWN
     timeout: 60000
+    optional: true
+- scrollUntilVisible:
+    element:
+      id: '^list\.row\..*'
+    direction: UP
+    timeout: 60000

@@ -13,6 +13,12 @@ env:
       id: '^Search$'
     direction: DOWN
     timeout: 60000
+    optional: true
+- scrollUntilVisible:
+    element:
+      id: '^Search$'
+    direction: UP
+    timeout: 60000
 - tapOn:
     id: '^Search$'
 - extendedWaitUntil:

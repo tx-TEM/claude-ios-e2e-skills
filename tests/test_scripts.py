@@ -157,6 +157,46 @@ class BackUsesHistory(unittest.TestCase):
         shutil.rmtree(repo.parent)
 
 
+def ups(flow):
+    """上向きに探す要素のセレクタの並び。"""
+    return re.findall(r"id: '([^']*)'\n\s+direction: UP", flow)
+
+
+class ScrollUp(unittest.TestCase):
+    """#57: スクロールされているかもしれない画面では、押す前・見る前に上も探す。"""
+
+    def test_after_scrolling_down_searches_up(self):
+        rows, flows = write_flows([
+            {"from": "list", "title": "a", "expect": "a", "do": ["see:list.footer"]},
+            {"from": "list", "title": "b", "expect": "b",
+             "do": [{"op": "text:list.search_field", "input": "猫"}]}])
+        self.assertEqual(ups(flows["test_01.yaml"]), [])
+        self.assertEqual(ups(flows["test_02.yaml"]), ["^list\\.search_field$"])
+
+    def test_pushed_screen_starts_at_top(self):
+        rows, flows = write_flows([
+            {"from": "list", "title": "a", "expect": "a", "do": ["see:list.footer"]},
+            {"from": "list", "title": "b", "expect": "b",
+             "do": ["tap:list.row.*", "tap:detail.share_button"]}])
+        flow = "".join(flows[n] for n in flows if n.startswith("test_02"))
+        self.assertIn("^list\\.row\\..*", ups(flow))
+        self.assertNotIn("^detail\\.share_button$", ups(flow))
+
+    def test_back_keeps_position(self):
+        rows, flows = write_flows([
+            {"from": "list", "title": "a", "expect": "a",
+             "do": ["see:list.footer", "tap:list.row.*", "tap:BackButton", "see:list.footer"]}])
+        flow = "".join(flows.values())
+        self.assertEqual(ups(flow).count("^list\\.footer$"), 1)
+
+    def test_restart_starts_at_top(self):
+        rows, flows = write_flows([
+            {"from": "list", "title": "a", "expect": "a", "do": ["see:list.footer"]},
+            {"from": "list", "fresh": True, "title": "b", "expect": "b",
+             "do": [{"op": "text:list.search_field", "input": "猫"}]}])
+        self.assertEqual(ups(flows["test_02.yaml"]), [])
+
+
 class NotesPerFlow(unittest.TestCase):
     """#31: 補足は、そのフローのステップに関係するものだけが付く。"""
 
