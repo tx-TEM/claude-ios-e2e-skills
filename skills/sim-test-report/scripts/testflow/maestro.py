@@ -10,6 +10,8 @@ from dataclasses import replace
 from screenmap.model import BACKWARD, auto_of, expect_kind, is_pattern, pattern_prefix
 from screenmap.steps import Act, Await, Restart, See, Shot
 
+from .flowyaml import Comment, Raw, render
+
 SHOTS_VAR = "SHOTS"   # 撮影先のディレクトリ。run_flows.py が端末ごとに埋める
 
 
@@ -111,11 +113,6 @@ def sel_text(value):
     return ".*" + re.escape(value) + ".*"
 
 
-def q(s):
-    """yaml のシングルクォート。正規表現の `\\` を素通しするためダブルにしない。"""
-    return "'" + s.replace("'", "''") + "'"
-
-
 def element_sel(el, value=None, var=None):
     """要素のセレクタ。(キー, 値)。パターンの要素は、決まった値か実行時の変数で1つに絞る。"""
     eid = str(el.get("id"))
@@ -153,11 +150,11 @@ def reveal(key, value):
     スクロールを繰り返す。スクロール1回は実測5〜8秒（maestrod.py の実測）で、
     60秒でも8〜12回ぶんにしかならない。
     """
-    return ("- scrollUntilVisible:\n    element:\n      {}: {}\n"
-            "    direction: DOWN\n    timeout: {}".format(key, q(value), SCROLL_TIMEOUT))
+    return {"scrollUntilVisible": {"element": {key: value}, "direction": Raw("DOWN"),
+                                   "timeout": SCROLL_TIMEOUT}}
 
 
-def wait_for(selector, value, timeout, extra=""):
+def wait_for(selector, value, timeout, extra=None):
     """要素が出るまで待つ。出なければ落ちる。
 
     `assertVisible` に `timeout` は渡せない（実測で `Unknown Property`）。
@@ -165,13 +162,11 @@ def wait_for(selector, value, timeout, extra=""):
     1つあたり18秒持っていかれる。** フローが唯一の検証手段になった以上、
     壊れたフローは早く落ちてほしいので、明示できる形にする。
     """
-    return ("- extendedWaitUntil:\n    visible:\n      {}: {}{}\n    timeout: {}"
-            .format(selector, q(value), extra, timeout))
+    return {"extendedWaitUntil": {"visible": dict({selector: value}, **(extra or {})), "timeout": timeout}}
 
 
 def wait_gone(selector, value, timeout):
-    return ("- extendedWaitUntil:\n    notVisible:\n      {}: {}\n    timeout: {}"
-            .format(selector, q(value), timeout))
+    return {"extendedWaitUntil": {"notVisible": {selector: value}, "timeout": timeout}}
 
 
 def auto_checks(mp, sid, keep=None, via=None, came=None):
@@ -202,9 +197,9 @@ def auto_checks(mp, sid, keep=None, via=None, came=None):
         key, dismiss = element_sel(close.element)
         summary = (mp.screens.get(iid) or {}).get("summary")
         when = "（{} から戻ったとき）".format(came) if back else ""
-        out.append("# 自動表示: {}{}{}（出ていたら閉じる）".format(iid, when, " — " + summary if summary else ""))
-        out.append("- runFlow:\n    when:\n      visible:\n        id: {}\n    commands:\n"
-                   "      - tapOn:\n          {}: {}".format(q(sel_id(anchor)), key, q(dismiss)))
+        out.append(Comment("自動表示: {}{}{}（出ていたら閉じる）".format(iid, when, " — " + summary if summary else "")))
+        out.append({"runFlow": {"when": {"visible": {"id": sel_id(anchor)}},
+                                "commands": [{"tapOn": {key: dismiss}}]}})
     return out
 
 
@@ -214,17 +209,17 @@ def ready_lines(mp, sid, timeout):
     out = []
     if r.get("any"):
         alts = [sel_id(str(x)) for x in r["any"]]
-        out.append("# {}: 読み込み完了（どれか1つ）".format(sid))
+        out.append(Comment("{}: 読み込み完了（どれか1つ）".format(sid)))
         out.append(wait_for("id", alts[0] if len(alts) == 1 else "(" + "|".join(alts) + ")", timeout))
     if r.get("all"):
-        out.append("# {}: 読み込み完了（全部）".format(sid))
+        out.append(Comment("{}: 読み込み完了（全部）".format(sid)))
         out.extend(wait_for("id", sel_id(str(x)), timeout) for x in r["all"])
     return out
 
 
 def settle():
     """最後の落ち着き待ち。要素が出ても、ほかのセクションや画像がまだ読み込み中のことがある。"""
-    return "- waitForAnimationToEnd:\n    timeout: {}".format(SETTLE_TIMEOUT)
+    return {"waitForAnimationToEnd": {"timeout": SETTLE_TIMEOUT}}
 
 
 def anchor_of(mp, sid, notes):
@@ -248,7 +243,7 @@ def step_comment(st):
     同じ1つを読めるようにする。
     """
     a = st.action
-    head = "# {}: {}".format(st.screen, a.label())
+    head = "{}: {}".format(st.screen, a.label())
     if st.value is not None:
         head += " [{}]".format(st.value)
     elif st.pick is not None:
@@ -257,7 +252,7 @@ def step_comment(st):
         head += " — " + str(a.summary)
     if st.to:
         head += " → " + st.to
-    return head
+    return Comment(head)
 
 
 def emit_flow(mp, steps, app, clear_state, notes=None, timeout=10000,
@@ -276,7 +271,11 @@ def emit_flow(mp, steps, app, clear_state, notes=None, timeout=10000,
 
 
 class FlowWriter(object):
-    """フロー1本を書く。書いた行（`out`）・補足（`notes`）・居る画面（`at`）を持つ。"""
+    """フロー1本を書く。積んだコマンド（`out`）・補足（`notes`）・居る画面（`at`）を持つ。
+
+    `out` は Maestro のコマンドを dict で、注記を Comment で並べたもの。書き出しは
+    flowyaml.render() が最後に1回だけする。
+    """
 
     def __init__(self, mp, steps, app, clear_state, notes, timeout):
         self.mp, self.steps, self.app = mp, steps, app
@@ -285,28 +284,24 @@ class FlowWriter(object):
         self.out, self.at = [], None
 
     def write(self, start, launch, tail):
-        self.header()
         self.at = start
         if launch:
             self.relaunch(start, 0)
         else:
-            self.out.append("# 続き: " + start + " から")
+            self.out.append(Comment("続き: " + start + " から"))
             self.wait_anchor(start)
         for i, st in enumerate(self.steps):
             self.step(i, st)
         if tail is not None:
             what = "打つ文字" if tail.runtime else "押すもの"
-            self.out.append("# 次で使う {} が見えるまでスクロールして止める（ここで{}を決める）"
-                            .format(tail.action.target, what))
+            self.out.append(Comment("次で使う {} が見えるまでスクロールして止める（ここで{}を決める）"
+                                    .format(tail.action.target, what)))
             self.out.append(reveal(*element_sel(tail.action.element)))
         notes = list(dict.fromkeys(self.notes))   # 同じ画面の anchor 無しなどが重ならないように
-        if notes:
-            self.out.append("")
-            self.out.extend("# 補足: " + n for n in notes)
-        return "\n".join(self.out) + "\n", notes
+        return render(self.app, self.env(), self.out, notes), notes
 
-    def header(self):
-        """appId と env。**実行時に決める値は env に未定のまま置く。** 値を焼き込むと、
+    def env(self):
+        """env に置く変数名。**実行時に決める値は env に未定のまま置く。** 値を焼き込むと、
         データが変わったときに黙って古い値で走る。未定のままなら、埋まっていないことが
         走らせる前に分かる。撮影先も端末で変わるので焼き込まない。"""
         used = [SHOTS_VAR] if any(isinstance(st, Shot) for st in self.steps) else []
@@ -315,11 +310,7 @@ class FlowWriter(object):
                 used.append(var_of(st))
             if picks_pattern(st):
                 used.append(index_var(var_of(st)))
-        self.out.append("appId: " + self.app)
-        if used:
-            self.out.append("env:")
-            self.out.extend("  {}: ''".format(v) for v in dict.fromkeys(used))
-        self.out.append("---")
+        return list(dict.fromkeys(used))
 
     # ---- 着く ----
 
@@ -336,9 +327,9 @@ class FlowWriter(object):
     def relaunch(self, sid, i):
         # 起点に戻してから始める。launchApp だけでは前の項目の画面に居座ることがある。
         # clearState はログイン状態まで消えるので、要ると言われたときだけ。
-        self.out.append("- stopApp")
-        self.out.append("- launchApp:\n    clearState: true" if self.clear_state else "- launchApp")
-        self.out.append("# 起点: " + sid)
+        self.out.append("stopApp")
+        self.out.append({"launchApp": {"clearState": True}} if self.clear_state else "launchApp")
+        self.out.append(Comment("起点: " + sid))
         self.arrive(sid, i)
 
     def arrive(self, sid, i, via=None, came=None):
@@ -362,22 +353,22 @@ class FlowWriter(object):
 
     def step(self, i, st):
         if isinstance(st, Restart):
-            self.out.append("# ここで起動し直す（前の状態から次の前提に行けないため）")
+            self.out.append(Comment("ここで起動し直す（前の状態から次の前提に行けないため）"))
             self.relaunch(self.mp.start, i + 1)
             self.at = self.mp.start
         elif isinstance(st, Await):
             # 自動表示を確かめる項目。閉じずに、出るまで待つ（出なければ落ちる）
             summary = (self.mp.screens.get(st.to) or {}).get("summary")
-            self.out.append("# {}: 自動表示 {} を待つ{}".format(
-                st.screen, st.to, " — " + summary if summary else ""))
+            self.out.append(Comment("{}: 自動表示 {} を待つ{}".format(
+                st.screen, st.to, " — " + summary if summary else "")))
             self.wait_anchor(st.to)
             self.at = st.to
         elif isinstance(st, Shot):
-            self.out.append("- takeScreenshot: " + q("${" + SHOTS_VAR + "}/" + st.name))
+            self.out.append({"takeScreenshot": "${" + SHOTS_VAR + "}/" + st.name})
         elif isinstance(st, See):
             name = st.element.get("name")
-            self.out.append("# {}: see {}{}".format(st.screen, st.element.get("id"),
-                                                    " — " + name if name else ""))
+            self.out.append(Comment("{}: see {}{}".format(st.screen, st.element.get("id"),
+                                                            " — " + name if name else "")))
             self.out.append(reveal(*step_sel(st)))
         else:
             self.action(i, st)
@@ -403,30 +394,30 @@ class FlowWriter(object):
 
     def op_tap(self, st):
         key, val = step_sel(st)
-        line = "- tapOn:\n    {}: {}".format(key, q(val))
+        target = {key: val}
         if picks_pattern(st):
             # 同じ名前の行が複数あると ID も同じになる。どれを押すかを index で1つに絞る。
             # Maestro の index は、当たった要素を画面上の位置順（上端の y、次に x）に並べた
             # 番号で、画面外の要素も数える（Filters.index / INDEX_COMPARATOR）。index を
             # 付けないとツリー順の先頭（押せるもの優先）になり、画面に見えているとは限らない。
             # ドキュメントには書かれていない挙動なので、Maestro を上げたら確かめ直す
-            line += "\n    index: ${" + index_var(var_of(st)) + "}"
-        self.out.append(line)
+            target["index"] = Raw("${" + index_var(var_of(st)) + "}")
+        self.out.append({"tapOn": target})
 
     def op_text(self, st):
         key, val = step_sel(st)
-        self.out.append("- tapOn:\n    {}: {}".format(key, q(val)))
-        self.out.append("- eraseText")       # 前の項目の文字が残ったまま打たない
+        self.out.append({"tapOn": {key: val}})
+        self.out.append("eraseText")         # 前の項目の文字が残ったまま打たない
         if st.runtime:
-            self.out.append("- inputText: ${" + var_of(st) + "}")
+            self.out.append({"inputText": Raw("${" + var_of(st) + "}")})
         else:
-            self.out.append("- inputText: " + q(str(st.input or "")))
+            self.out.append({"inputText": str(st.input or "")})
 
     def op_scroll(self, st):
         if st.action.target == "up":
-            self.out.append("- swipe:\n    direction: DOWN")   # 内容を下へ＝上へ戻る
+            self.out.append({"swipe": {"direction": Raw("DOWN")}})   # 内容を下へ＝上へ戻る
         else:
-            self.out.append("- scroll")
+            self.out.append("scroll")
 
     # ---- 結果を確かめる ----
 
@@ -436,13 +427,13 @@ class FlowWriter(object):
             self.out.append(wait_for(*ref_sel(st, e[kind]), timeout=self.timeout))
         elif kind == "selected":
             self.out.append(wait_for(*ref_sel(st, e[kind]), timeout=self.timeout,
-                                     extra="\n      selected: true"))
+                                     extra={"selected": True}))
         elif kind == "hidden":
             self.out.append(wait_gone(*ref_sel(st, e[kind]), timeout=self.timeout))
         elif kind == "external":
             # アプリの外に出た。確かめずに、落とさずに前に戻す
-            self.out.append("# アプリの外（{}）に出る。確かめずにアプリに戻す".format(e[kind]))
-            self.out.append("- launchApp:\n    stopApp: false")
+            self.out.append(Comment("アプリの外（{}）に出る。確かめずにアプリに戻す".format(e[kind])))
+            self.out.append({"launchApp": {"stopApp": False}})
             self.wait_anchor(self.at)
 
 
