@@ -677,7 +677,8 @@ def element_sel(el, value=None, var=None):
     if is_pattern(eid) and value is not None:
         return "id", "^" + re.escape(pattern_prefix(eid) + value) + "$"
     if is_pattern(eid) and var:
-        return "id", "^" + re.escape(pattern_prefix(eid)) + "${" + var + "}$"
+        # 値はアクセシビリティ ID そのもの（`list.row.牛乳`）。ダンプの id の欄を写せば済む
+        return "id", "^${" + var + "}$"
     return "id", sel_id(eid)
 
 

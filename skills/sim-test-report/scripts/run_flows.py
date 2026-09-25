@@ -57,7 +57,8 @@
 
 **パターンの要素を押すときは、同じ ID の行のうち何番目かも数える**（`locate()`）。行の ID は
 表示中の名前なので、同じ名前の行は ID も同じになる。数えた番号を Maestro の `index` に渡して
-1件に絞る。条件つきの選択は `名前#2`（見えている同じ名前のうち上から2件目）とも書ける。
+1件に絞る。値はアクセシビリティ ID そのもの（ダンプの id の欄）。条件つきの選択は
+`<ID>#2`（見えている同じ ID の行のうち上から2件目）とも書ける。
 
 **セレクタに入る値だけ正規表現としてエスケープする**（`fill_env()`）。どれがそうかは
 マニフェストの `input_use` を見る。inputs に書く側はエスケープをかけない。
@@ -189,9 +190,9 @@ def dump_rows(dump):
 
 
 def pattern_rows(dump, pattern, exclude=()):
-    """ダンプのうちパターンに当たる行を、Maestro の index と同じ順で [(値, 画面内か)]。
+    """ダンプのうちパターンに当たる行を、Maestro の index と同じ順で [(ID, 画面内か)]。
 
-    値はパターンの `*` に当たる部分。**順は上端の y、次に x**（Maestro の Filters.index が
+    ID はアクセシビリティ ID そのもの（ダンプの id の欄）。**順は上端の y、次に x**（Maestro の Filters.index が
     当たった要素を並べる INDEX_COMPARATOR と同じ基準。x は中心で代える — 同じ ID の行は
     幅がそろう）。**画面外の行も返す** — Maestro の index はそれも数える。
 
@@ -206,20 +207,21 @@ def pattern_rows(dump, pattern, exclude=()):
         if any(rid == x or (x.endswith("*") and rid.startswith(x[:-1])) for x in exclude):
             continue
         if rid.startswith(prefix) and len(rid) > len(prefix):
-            rows.append((r["top"], r["cx"], rid[len(prefix):], r["on"]))
+            rows.append((r["top"], r["cx"], rid, r["on"]))
     return [(v, on) for _, _, v, on in sorted(rows, key=lambda x: (x[0], x[1]))]
 
 
 def locate(dump, pattern, exclude=(), value=None):
-    """押す行を決める。(値, Maestro の index, 同じ値の行の数)。決められなければ None。
+    """押す行を決める。(ID, Maestro の index, 同じ ID の行の数)。決められなければ None。
 
     `value` が None なら**画面に見えている1件目**。**Maestro のツリー順の0番目ではない** —
     ツリー順の先頭は画面外のことがあり、画面外の要素を ID で押すと Maestro はその位置を
     叩いて別の要素を押す（mobile-dev-inc/Maestro#1275 と同じ症状）。
 
-    `value` を渡すとその値の行（LLM が条件で選んだもの）。**同じ名前の行が複数あると ID も
-    同じになる**ので、`名前#2` と書けば、画面に見えている同じ名前の行のうち上から2件目。
-    名前そのものが `#2` で終わる行があれば、そちらを採る。
+    `value` を渡すとその ID の行（LLM が条件で選んだもの。ダンプの id の欄をそのまま写す）。
+    **同じ名前の行が複数あると ID も同じになる**ので、`<ID>#2` と書けば、画面に見えている
+    同じ ID の行のうち上から2件目。ID そのものが `#2` で終わる行があれば、そちらを採る。
+    パターンに当たらない ID（別の画面の ID、接頭辞の書き間違い）は None。
 
     index は、同じ ID の行を位置順（上端の y、次に x）に並べたときの番号（画面外も数える）。
     Maestro の `index` がその順で数えるため（Filters.index の INDEX_COMPARATOR）。
@@ -243,7 +245,7 @@ def locate(dump, pattern, exclude=(), value=None):
 
 
 def first_visible(dump, pattern, exclude=()):
-    """画面に見えている1件目の値。無ければ None。"""
+    """画面に見えている1件目の ID。無ければ None。"""
     found = locate(dump, pattern, exclude)
     return found[0] if found else None
 
@@ -336,14 +338,24 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, only=Non
                                  f"なぞるので、devices.{device}.inputs に前に撮ったときの値が要る")
                     logline(f"{line} 撮影せず 入力が未定（{decide}）")
                     rest = [n for n, _ in targets[targets.index((i, sec)):]]
-                    how = f"条件「{pk['pick']}」に合う {pk['pattern']} を選んで" if pk else "打つ文字を"
+                    how = (f"条件「{pk['pick']}」に合う {pk['pattern']} を選んで、その ID（ダンプの id の欄）を"
+                           if pk else "打つ文字を")
                     print(f"\n{device} {line} 入力が未定（{decide}）。")
                     print(f"いまこの画面に居る。見て {how} {decide} に決め、"
                           f"devices.{device}.inputs に書き、同じコマンドをもう一度叩けば続きから走る。")
                     if pk:
-                        print(f"同じ名前の行が複数あるなら、{decide} に「名前#2」のように書く"
-                              "（画面に見えている同じ名前の行のうち上から2件目）。")
+                        print(f"同じ ID の行が複数あるなら「<ID>#2」のように書く"
+                              "（画面に見えている同じ ID の行のうち上から2件目）。")
                     print(f"{device} のここから先の {len(rest)}件はまだ撮っていない。")
+                    return (name, k), done, lost
+                prefix = pk["pattern"][:-1] if pk and pk["pattern"].endswith("*") else None
+                if pk and pk.get("pick") and prefix and not given.startswith(prefix):
+                    # 書いた ID がこの操作のパターンに当たらない（別の画面の ID、接頭辞の書き間違い）。
+                    # 押すと別物を押すか落ちる。まだ画面は動いていないので、直して叩き直せば続きから走る
+                    logline(f"{line} 撮影せず {decide} の {given} が {pk['pattern']} に当たらない")
+                    print(f"\n{device} {line} {decide} の値 {given} が {pk['pattern']} に当たらない。"
+                          f"ダンプの id の欄（{prefix}…）をそのまま devices.{device}.inputs に書き、"
+                          "同じコマンドをもう一度叩く。")
                     return (name, k), done, lost
                 if pk is not None:
                     # どの行を押すかを決め、同じ ID の行のうち何番目か（Maestro の index）を数える。
