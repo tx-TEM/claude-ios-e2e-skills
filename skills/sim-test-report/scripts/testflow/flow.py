@@ -15,9 +15,10 @@ from pathlib import Path
 
 from .maestro import (add_reveals, assign_vars, emit_flow, runtime_picks, runtime_uses,
                       shot_context, split_at_shots, split_parts, var_of)
-from screenmap.model import DO_OPS, GESTURES, is_pattern, load_map, pattern_prefix
+from screenmap.model import DO_OPS, GESTURES, load_map, pattern_prefix
 from screenmap.bridge import Route, Unroutable, emit_path, report_problems
 from screenmap.results import resolve_result
+from screenmap.actions import resolve_action
 from screenmap.steps import Act, See, Shot
 
 PLAN_KEYS = {"app", "clear_state", "items", "explore"}
@@ -133,7 +134,10 @@ def build_steps(mp, items):
             steps += route.to(item["from"], item["when"])
             for op, how in item["do"]:
                 tag = "({}) do {}".format(name, op)
-                steps.append(do_step(mp, route, op, how, item["when"]))
+                st, wrong = do_step(mp, route, op, how, item["when"])
+                steps.append(st)
+                # 値の決め方の間違い。経路は組めるので、ほかの間違いもまとめて出す
+                problems += [("call", "({}) {}".format(name, m)) for m in wrong]
             steps.append(Shot(name))
         except Unroutable as e:
             problems += [(kind, "{}: {}".format(tag, msg)) for kind, msg in e.problems]
@@ -141,7 +145,6 @@ def build_steps(mp, items):
             st.item = name
         if problems:
             break
-    check_values(steps, problems)
     return steps, problems, route.notes
 
 
@@ -178,35 +181,37 @@ def known_ops(mp, at):
 
 
 def do_step(mp, route, op, how, given):
-    """項目の do の1つをステップにする。画面を移る操作なら route の居る画面も進める。
+    """項目の do の1つをステップにする。(ステップ, 呼び方の間違いの文の並び)。
+    画面を移る操作なら route の居る画面も進める。
 
-    `how` はテストケースが添えた値の決め方（`input` / `runtime` / `pick`）。
+    `how` はテストケースが添えた値の決め方（`input` / `runtime` / `pick`）。パターンの要素を
+    ID まで書いた操作（`tap:list.row.牛乳`）は、その ID を操作の対象にする。
     """
     at = route.at
     found, el, val = resolve(mp, at, op)
+    target = None if val is None else pattern_prefix(el.get("id")) + val
     if op.partition(":")[0] == "see" and el is not None:
-        return See(at, el, value=val)
+        return See(at, target or el.get("id"), el.get("name"), el.get("by") == "label"), []
     if found is None:
         raise Unroutable([("call", "{} に「{}」という操作がマップに無い。この画面にあるのは {}"
                                    .format(at, op, known_ops(mp, at) or "（無し）"))])
     if not found.in_tree():
         raise Unroutable([("map", "{} の「{}」は in_tree: false（座標が要る）。フローでは押せない"
                                   .format(at, found.label()))])
+    action, wrong = resolve_action(found, target, how)
     if found.is_back():
         st = route.back(found)       # 戻る先は歩いた履歴で決まる
-    else:
-        # 結果が分かれるなら、確認項目の前提（when）に合う枝だけ
-        expects = [found.branches[branch_of(found, at, given)]] if found.branches else found.expects
-        st = Act(at, found, resolve_result(found, expects))
-    st.value = val
-    for k, v in how.items():          # input / runtime / pick
-        setattr(st, k, v)
-    if found.is_back() or st.arrive is None:
-        return st
+        st.action = action
+        return st, wrong
+    # 結果が分かれるなら、確認項目の前提（when）に合う枝だけ
+    expects = [found.branches[branch_of(found, at, given)]] if found.branches else found.expects
+    st = Act(at, action, resolve_result(found, expects))
+    if st.arrive is None:
+        return st, wrong
     if st.to not in mp.screens:
         raise Unroutable([("map", "{} の「{}」の遷移先 {} のファイルが無い"
                                   .format(at, found.label(), st.to))])
-    return route.forward(st, st.to)
+    return route.forward(st, st.to), wrong
 
 
 def branch_of(action, at, given):
@@ -217,37 +222,6 @@ def branch_of(action, at, given):
                                    .format(at, action.label(),
                                            " / ".join(b.get("when") for b in action.branches)))])
     return hit[0]
-
-
-def check_values(steps, problems):
-    """値の決め方（打つ文字、どの行を押すか）を確かめる。**呼び方の間違いは走らせる前に止める。**
-
-    パターンの要素（ID の末尾が *）を押すステップには `pick` を付ける（空なら、画面に
-    見えている1件目）。どれを押すかは走らせるときに決まる。
-    """
-    for st in steps:
-        if not isinstance(st, Act):
-            continue
-        a = st.action
-        where = "({}) ".format(st.item) if st.item else ""
-        pattern = a.element is not None and is_pattern(a.element.get("id")) and st.value is None
-        if st.runtime and a.op != "text":
-            problems.append(("call", "{}{} に runtime は付けられない。どの行を押すかは"
-                             "スクリプトが決める（条件があるなら pick に書く）".format(where, a.label())))
-        if st.pick is not None and not pattern:
-            problems.append(("call", "{}{} はパターンの要素（ID の末尾が *）ではないので、"
-                             "実行時に選べない（pick を外す）".format(where, a.label())))
-        if a.op == "text" and st.input is None and not st.runtime:
-            problems.append(("call", "{}text {} に打つ文字が渡されていない（do に {{\"op\": …, \"input\": 値}} か "
-                             "{{\"op\": …, \"runtime\": true}} で書く）。"
-                             "マップは値を持たない。何を打つかはテストケースが決める"
-                             .format(where, a.target)))
-        if pattern and a.op == "text":
-            # どれに打つかと何を打つかの2つを実行時に決めることになる。変数が1つしか持てない
-            problems.append(("call", "{}text {} はパターンの要素なので、どの欄に打つかを ID まで書く"
-                             "（text:{}<表示中の名前>）".format(where, a.target, pattern_prefix(a.target))))
-        elif pattern:
-            st.pick = st.pick or ""
 
 
 # ---------- フローに書く ----------
@@ -289,19 +263,20 @@ def write_flows(plan, out_dir, repo, timeout=10000):
     written = []
     # 押す前のスクロール（Reveal）を挟んでから切る。経路の表示（emit_path）は挟む前の steps で出す
     for seg_start, seg_steps, shot, lch in split_at_shots(mp, add_reveals(steps), None):
-        assign_vars(seg_steps)
+        names = assign_vars(seg_steps)
         parts = split_parts(seg_start, seg_steps)
         files = []
         for k, (p_start, p_steps) in enumerate(parts):
             last = k == len(parts) - 1
             # 自分で起動するのは1本目と fresh の項目の、最初の本だけ。他は居る場所から続ける
-            flow, _ = emit_flow(mp, p_steps, app, clear, None, timeout, p_start, launch=lch and k == 0)
+            flow, _ = emit_flow(mp, p_steps, app, clear, None, timeout, p_start, launch=lch and k == 0,
+                                names=names)
             name = shot + ".yaml" if last else "{}.{}.yaml".format(shot, k + 1)
             (d / name).write_text(flow, encoding="utf-8")
-            files.append({"flow": name, "decide": var_of(p_steps[0]) if k > 0 else None})
+            files.append({"flow": name, "decide": var_of(p_steps[0], names) if k > 0 else None})
         screen, checked = shot_context(mp, seg_start, seg_steps)
-        uses = runtime_uses(seg_steps)
-        picks = runtime_picks(mp, seg_steps)
+        uses = runtime_uses(seg_steps, names)
+        picks = runtime_picks(mp, seg_steps, names)
         # 走らせる側（や LLM）が埋める値。見えている1件目を選ぶものは run_flows.py が埋めるので入れない
         # 何番目か（_INDEX）は run_flows.py が数えるので入れない
         inputs = {v: "" for v, use in uses.items()

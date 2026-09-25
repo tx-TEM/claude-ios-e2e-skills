@@ -1,8 +1,8 @@
-"""フローの1コマ（ステップ）の型。操作の結果の型は results.py。"""
+"""フローの1コマ（ステップ）の型。する操作の型は actions.py、起きることの型は results.py。"""
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from .model import Action
+from .actions import Action, InputLater, Tap
 from .results import Arrive, Result
 
 
@@ -12,13 +12,8 @@ from .results import Arrive, Result
 class Act:
     """`screen` で `action` をする。すると起きることが `result`。"""
     screen: str                       # 操作する時点で居る画面
-    action: Action                    # する操作（tap / text / scroll と、その対象の要素・summary）
+    action: Action                    # する操作（Tap / Input / InputLater / Scroll。このステップ専用）
     result: List[Result] = field(default_factory=list)   # action をすると起きること
-    value: Optional[str] = None       # パターンの要素を ID まで決め打ちしたときの値（`tap:list.row.牛乳` の 牛乳）
-    input: Optional[str] = None       # text で打つ文字（データに依らない値）
-    runtime: bool = False             # text で打つ文字を実行時に決める
-    pick: Optional[str] = None        # パターンの要素のどれを押すか。"" は画面に見えている1件目、文字は条件
-    var: Optional[str] = None         # 実行時に決める値を入れる env の変数名（maestro.py が振る）
     item: Optional[str] = None
 
     @property
@@ -32,16 +27,18 @@ class Act:
         return self.arrive.screen if self.arrive else None
 
     def needs_value(self):
-        """実行時に値を決めるか（打つ文字、パターンの要素のどれを押すか）。"""
-        return self.runtime or self.pick is not None
+        """走らせるときに値を決めるか（パターンの要素のどれに操作するか、打つ文字）。"""
+        a = self.action
+        return (isinstance(a, Tap) and a.pick is not None) or isinstance(a, InputLater)
 
 
 @dataclass
 class See:
     """見るだけの要素を、見えるまでスクロールして確かめる。"""
     screen: str
-    element: dict
-    value: Optional[str] = None       # パターンの要素を ID まで書いたときの値
+    target: str                       # 要素の id（ID まで書いたら、その ID）
+    name: Optional[str] = None        # 画面での見え方（フローのコメントになる）
+    by_label: bool = False
     item: Optional[str] = None
     to = None
 

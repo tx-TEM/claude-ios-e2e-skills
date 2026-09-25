@@ -17,6 +17,7 @@ import os
 import sys
 
 from .results import External, Hidden, Selected, Value, Visible, resolve_result
+from .actions import Input, Tap, resolve_action
 from .steps import Act, Await, Restart, See, Shot
 
 
@@ -60,18 +61,25 @@ class Route:
         self.at = dest
         return step
 
-    def back(self, action):
-        """戻る操作のステップ。履歴で1つ前の画面に戻る。"""
+    def back(self, spec):
+        """戻る操作（マップの定義 spec）のステップ。履歴で1つ前の画面に戻る。"""
         if len(self.stack) < 2:
             # 起点以外の画面には必ず歩いて入っているので、履歴が尽きるのは
             # 起点に居るときだけ。起動直後の画面に戻る先は無い
             self.fail("map", "起点 {} に戻る操作「{}」が書いてある。"
-                             "起動直後の画面から戻る先は無い".format(self.at, action.label()))
+                             "起動直後の画面から戻る先は無い".format(self.at, spec.label()))
         dest = self.stack[-2]
-        step = Act(self.at, action, resolve_result(action, action.expects, back_to=dest))
+        step = Act(self.at, self.action_of(spec), resolve_result(spec, spec.expects, back_to=dest))
         self.stack.pop()
         self.at = dest
         return step
+
+    def action_of(self, spec):
+        """経路の途中でする操作。テストケースは値を添えないので、足りなければ組めない。"""
+        action, problems = resolve_action(spec)
+        if problems:
+            raise Unroutable([("call", m) for m in problems])
+        return action
 
     def restart(self):
         """起動し直す。居る場所も歩いた履歴も捨てて起点に戻る。"""
@@ -139,7 +147,7 @@ class Route:
             steps.append(self.back(a))
         for sid, (a, bi, dest, via, _) in hops:
             expects = [a.branches[bi]] if bi is not None else a.expects
-            steps.append(self.forward(Act(sid, a, resolve_result(a, expects)), dest))
+            steps.append(self.forward(Act(sid, self.action_of(a), resolve_result(a, expects)), dest))
         return steps
 
     def best_route(self, goal, given):
@@ -245,15 +253,13 @@ def emit_path(mp, steps, notes, start=None):
                 "✓ {} が出ている".format(dest) if dest else "— {} に anchor が無い".format(st.to))
             continue
         if isinstance(st, See):
-            row("  {}  see {}".format(st.screen.ljust(w), st.element.get("id")),
-                "✓ {} が見える".format(st.element.get("id")))
+            row("  {}  see {}".format(st.screen.ljust(w), st.target),
+                "✓ {} が見える".format(st.target))
             continue
         a = st.action
-        extra = ' "{}"'.format(st.input) if a.op == "text" and st.input is not None else ""
-        if st.value is not None:
-            extra += " [{}]".format(st.value)
-        elif st.pick is not None:
-            extra += " [{}]".format(st.pick or "見えている1件目")
+        extra = ' "{}"'.format(a.text) if isinstance(a, Input) else ""
+        if isinstance(a, Tap) and a.pick is not None:
+            extra += " [{}]".format(a.pick.condition or "見えている1件目")
         left = "  {}  {}{}".format(st.screen.ljust(w), a.label(), extra)
         nxt = next((x for x in steps[n + 1:] if not isinstance(x, Shot)), None)
         rights = []

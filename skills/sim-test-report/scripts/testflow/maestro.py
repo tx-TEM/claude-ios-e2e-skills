@@ -10,6 +10,7 @@ from typing import Optional
 
 from screenmap.model import BACKWARD, auto_of, is_pattern, pattern_prefix
 from screenmap.results import Arrive, External, Hidden, Selected, Value, Visible
+from screenmap.actions import Input, InputLater, Scroll, Tap
 from screenmap.steps import Act, Await, Restart, See, Shot
 
 from .flowyaml import Comment, Raw, render
@@ -34,7 +35,7 @@ def add_reveals(steps):
     """要素を操作する Act の直前に Reveal を挟む。See は自分がスクロールなので挟まない。"""
     out = []
     for st in steps:
-        if isinstance(st, Act) and st.action.element is not None:
+        if isinstance(st, Act) and not isinstance(st.action, Scroll):
             out.append(Reveal(st, st.item))
         out.append(st)
     return out
@@ -51,12 +52,13 @@ def var_name(target):
 
 
 def needs_value(st):
-    """実行時に値を決めるステップか。打つ文字（runtime）か、パターンの要素のどれを押すか（pick）。"""
+    """実行時に値を決めるステップか。打つ文字か、パターンの要素のどれに操作するか。"""
     return isinstance(st, Act) and st.needs_value()
 
 
-def var_of(st):
-    return st.var or var_name(st.action.target)
+def var_of(st, names=None):
+    """その Act の値を入れる env の変数名。assign_vars() が振った名前（無ければ要素の id から作る）。"""
+    return (names or {}).get(id(st)) or var_name(st.action.target)
 
 
 def index_var(var):
@@ -66,22 +68,26 @@ def index_var(var):
 
 def picks_pattern(st):
     """パターンの要素のどれを押すかを実行時に決めるステップか（打つ文字ではなく）。"""
-    return isinstance(st, Act) and st.pick is not None
+    return isinstance(st, Act) and isinstance(st.action, Tap) and st.action.pick is not None
 
 
 def assign_vars(steps):
-    """実行時に決める値に変数名を振る。**同じ区間で同じ名前が2回要れば `_2` を付ける**
-    （同じ一覧を2回通るなど）。ここで振れば、フローとマニフェストで名前がずれない。"""
-    used = {}
+    """実行時に決める値に変数名を振る。{id(Act): 変数名}。**同じ区間で同じ名前が2回要れば `_2` を
+    付ける**（同じ一覧を2回通るなど）。ここで振れば、フローとマニフェストで名前がずれない。
+
+    変数名は Maestro のフローに書くときの都合なので、ステップには持たせず、ここで対応を持つ。
+    """
+    used, names = {}, {}
     for st in steps:
         if not needs_value(st):
             continue
         base = var_name(st.action.target)
         used[base] = used.get(base, 0) + 1
-        st.var = base if used[base] == 1 else "{}_{}".format(base, used[base])
+        names[id(st)] = base if used[base] == 1 else "{}_{}".format(base, used[base])
+    return names
 
 
-def runtime_uses(steps):
+def runtime_uses(steps, names):
     """実行時に決める値の、変数名 → 入る先。`selector`（tapOn の id。正規表現）か
     `text`（inputText。文字そのまま）。
 
@@ -93,13 +99,13 @@ def runtime_uses(steps):
     uses = {}
     for st in steps:
         if needs_value(st):
-            uses[var_of(st)] = "text" if st.runtime else "selector"
+            uses[var_of(st, names)] = "text" if isinstance(st.action, InputLater) else "selector"
         if picks_pattern(st):
-            uses[index_var(var_of(st))] = "index"   # 数字そのもの。エスケープしない
+            uses[index_var(var_of(st, names))] = "index"   # 数字そのもの。エスケープしない
     return uses
 
 
-def runtime_picks(mp, steps):
+def runtime_picks(mp, steps, names):
     """パターンの要素を押すときの選び方。変数名 → {"pattern": ID, "pick": 条件, "exclude": [ID]}。
 
     条件が空なら、走らせる側（run_flows.py）が**画面に見えている1件目**を機械的に選ぶ。
@@ -115,9 +121,9 @@ def runtime_picks(mp, steps):
             continue
         a = st.action
         prefix = pattern_prefix(a.target)
-        others = sorted(str(el.get("id")) for el in mp.elements(a.sid)
-                        if el is not a.element and str(el.get("id") or "").startswith(prefix))
-        out[var_of(st)] = {"pattern": a.target, "pick": st.pick or "", "exclude": others}
+        others = sorted(str(el.get("id")) for el in mp.elements(st.screen)
+                        if el.get("id") != a.target and str(el.get("id") or "").startswith(prefix))
+        out[var_of(st, names)] = {"pattern": a.target, "pick": a.pick.condition, "exclude": others}
     return out
 
 
@@ -138,26 +144,23 @@ def sel_text(value):
     return ".*" + re.escape(value) + ".*"
 
 
-def element_sel(el, value=None, var=None):
-    """要素のセレクタ。(キー, 値)。パターンの要素は、決まった値か実行時の変数で1つに絞る。"""
-    eid = str(el.get("id"))
-    if el.get("by") == "label":
-        return "text", sel_text(eid)
-    if is_pattern(eid) and value is not None:
-        return "id", "^" + re.escape(pattern_prefix(eid) + value) + "$"
-    if is_pattern(eid) and var:
+def element_sel(target, by_label=False, var=None):
+    """要素のセレクタ。(キー, 値)。パターンの要素は、実行時の変数で1つに絞る。"""
+    if by_label:
+        return "text", sel_text(target)
+    if is_pattern(target) and var:
         # 値はアクセシビリティ ID そのもの（`list.row.牛乳`）。ダンプの id の欄を写せば済む
         return "id", "^${" + var + "}$"
-    return "id", sel_id(eid)
+    return "id", sel_id(target)
 
 
-def step_sel(st):
+def step_sel(st, names=None):
     """ステップが指す要素のセレクタ（See は見る要素、Act は操作の要素）。"""
     if isinstance(st, See):
-        return element_sel(st.element, st.value)
-    el = st.action.element
-    var = var_of(st) if needs_value(st) and el is not None and is_pattern(el.get("id")) else None
-    return element_sel(el, st.value, var)
+        return element_sel(st.target, st.by_label)
+    a = st.action
+    var = var_of(st, names) if needs_value(st) and is_pattern(a.target) else None
+    return element_sel(a.target, a.by_label, var)
 
 
 SCROLL_TIMEOUT = 60000   # scrollUntilVisible の上限。理由は reveal()
@@ -219,7 +222,7 @@ def auto_checks(mp, sid, keep=None, via=None, came=None):
         if found is None:
             continue            # 書き間違いは check が出す
         anchor, close = found
-        key, dismiss = element_sel(close.element)
+        key, dismiss = element_sel(close.target, close.element.get("by") == "label")
         summary = (mp.screens.get(iid) or {}).get("summary")
         when = "（{} から戻ったとき）".format(came) if back else ""
         out.append(Comment("自動表示: {}{}{}（出ていたら閉じる）".format(iid, when, " — " + summary if summary else "")))
@@ -254,10 +257,10 @@ def anchor_of(mp, sid, notes):
     return a
 
 
-def result_sel(st, r):
-    """結果が指す要素のセレクタ。押した要素そのもの（own）なら、押したのと同じもの（パターンなら押した1つ）。"""
+def result_sel(st, r, names=None):
+    """結果が指す要素のセレクタ。操作した要素そのもの（own）なら、操作したのと同じもの（パターンなら操作した1つ）。"""
     if r.own:
-        return step_sel(st)
+        return step_sel(st, names)
     return "id", sel_id(r.id)
 
 
@@ -269,10 +272,8 @@ def step_comment(st):
     """
     a = st.action
     head = "{}: {}".format(st.screen, a.label())
-    if st.value is not None:
-        head += " [{}]".format(st.value)
-    elif st.pick is not None:
-        head += " [{}]".format(st.pick or "見えている1件目")
+    if isinstance(a, Tap) and a.pick is not None:
+        head += " [{}]".format(a.pick.condition or "見えている1件目")
     if a.summary:
         head += " — " + str(a.summary)
     if st.to:
@@ -281,14 +282,15 @@ def step_comment(st):
 
 
 def emit_flow(mp, steps, app, clear_state, notes=None, timeout=10000,
-              start=None, launch=True):
+              start=None, launch=True, names=None):
     """ステップ列から Maestro のフローを1本書く。(フローの中身, 補足) を返す。
 
     `launch=False` はアプリを起動し直さない。続きのフローを出すため。
+    `names` は assign_vars() が振った変数名（実行時に決める値の入れ先）。
 
     **補足はこのフローのステップに関係するものだけ。**
     """
-    return FlowWriter(mp, steps, app, clear_state, notes, timeout).write(start or mp.start, launch)
+    return FlowWriter(mp, steps, app, clear_state, notes, timeout, names).write(start or mp.start, launch)
 
 
 class FlowWriter:
@@ -298,8 +300,9 @@ class FlowWriter:
     flowyaml.render() が最後に1回だけする。
     """
 
-    def __init__(self, mp, steps, app, clear_state, notes, timeout):
+    def __init__(self, mp, steps, app, clear_state, notes, timeout, names=None):
         self.mp, self.steps, self.app = mp, steps, app
+        self.names = names or {}
         self.clear_state, self.timeout = clear_state, timeout
         self.notes = list(notes or [])
         self.out, self.at = [], None
@@ -323,9 +326,9 @@ class FlowWriter:
         used = [SHOTS_VAR] if any(isinstance(st, Shot) for st in self.steps) else []
         for st in self.steps:
             if needs_value(st):
-                used.append(var_of(st))
+                used.append(var_of(st, self.names))
             if picks_pattern(st):
-                used.append(index_var(var_of(st)))
+                used.append(index_var(var_of(st, self.names)))
         return list(dict.fromkeys(used))
 
     # ---- 着く ----
@@ -384,10 +387,10 @@ class FlowWriter:
         elif isinstance(st, Reveal):
             self.reveal(i, st)
         elif isinstance(st, See):
-            name = st.element.get("name")
-            self.out.append(Comment("{}: see {}{}".format(st.screen, st.element.get("id"),
+            name = st.name
+            self.out.append(Comment("{}: see {}{}".format(st.screen, st.target,
                                                             " — " + name if name else "")))
-            self.out.append(reveal(*step_sel(st)))
+            self.out.append(reveal(*step_sel(st, self.names)))
         else:
             self.action(i, st)
 
@@ -400,10 +403,10 @@ class FlowWriter:
         if i + 1 < len(self.steps) and self.steps[i + 1] is act:
             self.out.append(step_comment(act))
         else:
-            what = "打つ文字" if act.runtime else "押すもの"
+            what = "打つ文字" if isinstance(act.action, InputLater) else "押すもの"
             self.out.append(Comment("次で使う {} が見えるまでスクロールして止める（ここで{}を決める）"
                                     .format(act.action.target, what)))
-        self.out.append(reveal(*element_sel(act.action.element, act.value)))
+        self.out.append(reveal(*element_sel(act.action.target, act.action.by_label)))
 
     def action(self, i, st):
         a = st.action
@@ -411,11 +414,12 @@ class FlowWriter:
         prev = self.steps[i - 1] if i > 0 else None
         if not (isinstance(prev, Reveal) and prev.act is st):
             self.out.append(step_comment(st))
-        op = getattr(self, "op_" + str(a.op), None)
-        if op is None:
-            self.notes.append("種類の分からない操作を飛ばした: {}".format(a.label()))
-            return
-        op(st)
+        if isinstance(a, Tap):
+            self.tap(st)
+        elif isinstance(a, (Input, InputLater)):
+            self.type_text(st)
+        else:
+            self.scroll(a)
         # 着いたことを先に確かめる（着いた画面の上で、ほかの結果を見る）
         if st.arrive:
             self.arrive(st.to, i + 1, st.arrive.via, st.screen)
@@ -426,8 +430,8 @@ class FlowWriter:
         if not st.result:
             self.notes.append("「{}」の結果を確かめる expect がマップに無い".format(a.label()))
 
-    def op_tap(self, st):
-        key, val = step_sel(st)
+    def tap(self, st):
+        key, val = step_sel(st, self.names)
         target = {key: val}
         if picks_pattern(st):
             # 同じ名前の行が複数あると ID も同じになる。どれを押すかを index で1つに絞る。
@@ -435,20 +439,20 @@ class FlowWriter:
             # 番号で、画面外の要素も数える（Filters.index / INDEX_COMPARATOR）。index を
             # 付けないとツリー順の先頭（押せるもの優先）になり、画面に見えているとは限らない。
             # ドキュメントには書かれていない挙動なので、Maestro を上げたら確かめ直す
-            target["index"] = Raw("${" + index_var(var_of(st)) + "}")
+            target["index"] = Raw("${" + index_var(var_of(st, self.names)) + "}")
         self.out.append({"tapOn": target})
 
-    def op_text(self, st):
-        key, val = step_sel(st)
+    def type_text(self, st):
+        key, val = step_sel(st, self.names)
         self.out.append({"tapOn": {key: val}})
         self.out.append("eraseText")         # 前の項目の文字が残ったまま打たない
-        if st.runtime:
-            self.out.append({"inputText": Raw("${" + var_of(st) + "}")})
+        if isinstance(st.action, InputLater):
+            self.out.append({"inputText": Raw("${" + var_of(st, self.names) + "}")})
         else:
-            self.out.append({"inputText": str(st.input or "")})
+            self.out.append({"inputText": st.action.text})
 
-    def op_scroll(self, st):
-        if st.action.target == "up":
+    def scroll(self, a):
+        if a.direction == "up":
             self.out.append({"swipe": {"direction": Raw("DOWN")}})   # 内容を下へ＝上へ戻る
         else:
             self.out.append("scroll")
@@ -458,11 +462,11 @@ class FlowWriter:
     def check(self, st, r):
         """着く以外の結果を1つ確かめる。"""
         if isinstance(r, (Visible, Value)):
-            self.out.append(wait_for(*result_sel(st, r), timeout=self.timeout))
+            self.out.append(wait_for(*result_sel(st, r, self.names), timeout=self.timeout))
         elif isinstance(r, Selected):
-            self.out.append(wait_for(*result_sel(st, r), timeout=self.timeout, extra={"selected": True}))
+            self.out.append(wait_for(*result_sel(st, r, self.names), timeout=self.timeout, extra={"selected": True}))
         elif isinstance(r, Hidden):
-            self.out.append(wait_gone(*result_sel(st, r), timeout=self.timeout))
+            self.out.append(wait_gone(*result_sel(st, r, self.names), timeout=self.timeout))
         elif isinstance(r, External):
             # アプリの外に出た。確かめずに、落とさずに前に戻す
             self.out.append(Comment("アプリの外（{}）に出る。確かめずにアプリに戻す".format(r.name)))
@@ -476,7 +480,7 @@ def check_of(mp, st):
         sid = st.to if isinstance(st, Await) else mp.start
         return (mp.screens.get(sid) or {}).get("anchor")
     if isinstance(st, See):
-        return st.element.get("id")
+        return st.target
     checked = None
     if st.to:
         checked = (mp.screens.get(st.to) or {}).get("anchor")

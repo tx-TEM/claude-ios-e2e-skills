@@ -41,8 +41,11 @@ def expect_kind(e):
     return found[0] if len(found) == 1 else None
 
 
-class Action:
-    """マップの1つの操作。要素のアクションか、画面の gestures の1項目。
+class ActionSpec:
+    """マップに書いた1つの操作の定義。要素のアクションか、画面の gestures の1項目。
+
+    マップを読んだときに1つだけ作り、経路の計算と検査が読む。ステップは、ここから値を写した
+    自分の Action（steps.py）を持つ（どの行を押すか、何を打つかはステップごとに違うため）。
 
     **結果は `expect` だけで持つ。** 遷移も「移った先の anchor が見える」という結果の
     1つで、`screen` を持つ expect が経路の辺になる。`when` つきのリストなら結果が
@@ -108,9 +111,9 @@ class ScreenMap:
             out = []
             for el in self.elements(sid):
                 for a in el.get("actions") or []:
-                    out.append(Action(sid, a, el))
+                    out.append(ActionSpec(sid, a, el))
             for g in (self.screens.get(sid) or {}).get("gestures") or []:
-                out.append(Action(sid, g))
+                out.append(ActionSpec(sid, g))
             self._actions[sid] = out
         return self._actions[sid]
 
