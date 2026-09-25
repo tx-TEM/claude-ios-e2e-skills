@@ -35,55 +35,6 @@ def expect_kind(e):
     return found[0] if len(found) == 1 else None
 
 
-class ActionSpec:
-    """画面の1つの操作（その画面の要素の tap / text か、画面の gestures の scroll）。
-
-    画面の yaml（screens/<画面>.yaml）を読んだときに1つだけ作る。何をすると何が起きるか
-    （expect）は、書いてあるままで持つ。
-    `when` つきのリストなら結果が状態で分かれる（branches）。ステップが持つ操作と結果は、
-    ここから actions.py と results.py が作る。
-    """
-
-    def __init__(self, sid, raw, element=None):
-        self.sid = sid
-        self.raw = raw or {}
-        self.element = element
-        self.op = next((k for k in (OPS if element is not None else GESTURES) if k in self.raw), None)
-        self.target = element.get("id") if element is not None else self.raw.get(self.op)
-        self.summary = self.raw.get("summary")
-        exp = self.raw.get("expect")
-        items = exp if isinstance(exp, list) else ([exp] if isinstance(exp, dict) else [])
-        # 全部に when があれば分岐。1つも無ければ全部を確かめる。混ざっていれば check が出す
-        if items and all(isinstance(e, dict) and e.get("when") for e in items):
-            self.expects, self.branches = [], items
-        else:
-            self.expects, self.branches = [e for e in items if isinstance(e, dict)], None
-
-    def label(self):
-        if self.op is None:
-            return "(操作が無い)"
-        s = "{} {}".format(self.op, self.target)
-        if self.element is not None and self.element.get("by") == "label":
-            s += " [ラベル]"
-        return s
-
-    def when(self):
-        """要素の出る条件。無ければ None。"""
-        return self.element.get("when") if self.element is not None else None
-
-    def outcomes(self):
-        """(分岐の番号, 分岐の when, expect の並び)。分岐が無ければ1つだけで番号は None。"""
-        if self.branches:
-            return [(i, b.get("when"), [b]) for i, b in enumerate(self.branches)]
-        return [(None, None, self.expects)]
-
-    def is_back(self):
-        return any(e.get("screen") == "back" for e in self.expects)
-
-    def in_tree(self):
-        return not (self.element is not None and self.element.get("in_tree") is False)
-
-
 class Screen:
     """1つの画面。screens/<画面>.yaml を読んだもの。"""
 
@@ -165,3 +116,52 @@ class Screen:
         if not self.anchor or close is None:
             return None
         return self.anchor, close
+
+
+class ActionSpec:
+    """画面の1つの操作（その画面の要素の tap / text か、画面の gestures の scroll）。
+
+    画面の yaml（screens/<画面>.yaml）を読んだときに1つだけ作る。何をすると何が起きるか
+    （expect）は、書いてあるままで持つ。
+    `when` つきのリストなら結果が状態で分かれる（branches）。ステップが持つ操作と結果は、
+    ここから actions.py と results.py が作る。
+    """
+
+    def __init__(self, sid, raw, element=None):
+        self.sid = sid
+        self.raw = raw or {}
+        self.element = element
+        self.op = next((k for k in (OPS if element is not None else GESTURES) if k in self.raw), None)
+        self.target = element.get("id") if element is not None else self.raw.get(self.op)
+        self.summary = self.raw.get("summary")
+        exp = self.raw.get("expect")
+        items = exp if isinstance(exp, list) else ([exp] if isinstance(exp, dict) else [])
+        # 全部に when があれば分岐。1つも無ければ全部を確かめる。混ざっていれば check が出す
+        if items and all(isinstance(e, dict) and e.get("when") for e in items):
+            self.expects, self.branches = [], items
+        else:
+            self.expects, self.branches = [e for e in items if isinstance(e, dict)], None
+
+    def label(self):
+        if self.op is None:
+            return "(操作が無い)"
+        s = "{} {}".format(self.op, self.target)
+        if self.element is not None and self.element.get("by") == "label":
+            s += " [ラベル]"
+        return s
+
+    def when(self):
+        """要素の出る条件。無ければ None。"""
+        return self.element.get("when") if self.element is not None else None
+
+    def outcomes(self):
+        """(分岐の番号, 分岐の when, expect の並び)。分岐が無ければ1つだけで番号は None。"""
+        if self.branches:
+            return [(i, b.get("when"), [b]) for i, b in enumerate(self.branches)]
+        return [(None, None, self.expects)]
+
+    def is_back(self):
+        return any(e.get("screen") == "back" for e in self.expects)
+
+    def in_tree(self):
+        return not (self.element is not None and self.element.get("in_tree") is False)
