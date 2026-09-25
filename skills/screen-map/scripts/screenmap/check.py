@@ -1,8 +1,8 @@
-"""画面マップの自己テスト（mapctl.py check）。不整合・経路が切れる箇所・書き足すもの・鮮度。"""
+"""画面マップの自己テスト（mapctl.py check）。不整合・経路が切れる箇所・書き足すもの・鮮度・ID の生存。"""
 import subprocess
 
 from .screen import (ACTION_KEYS, BACKWARD, ELEMENT_KEYS, EXPECT_KEYS, FORWARD, GESTURE_KEYS,
-                        GESTURES, KINDS, OPS, SCREEN_KEYS, expect_kind, is_pattern,
+                        GESTURES, KINDS, OPS, SCREEN_KEYS, SYSTEM_IDS, expect_kind, is_pattern,
                         pattern_prefix)
 from .map import old_schema
 
@@ -52,6 +52,61 @@ def staleness(mp):
         if f > y:
             out.append((sid, y, f))
     return out
+
+
+def screen_ids(scr):
+    """その画面が持つ、ソースに書いてあるはずの ID。anchor と要素の id（ラベル指定は除く）。"""
+    out = [str(scr.anchor)] if scr.anchor else []
+    out += [str(el["id"]) for el in scr.elements if el.get("id") and el.get("by") != "label"]
+    return list(dict.fromkeys(out))
+
+
+def liveness(mp):
+    """マップの ID がソースに残っているか。(dead, elsewhere, unchecked, missing)。
+
+    **ID をリテラルとして、その画面の `files` から探す。** ID はリテラルで画面のファイルに
+    1か所だけ書く決まり（reference/ids.md）なので、合成していなければ文字列で当たる。
+    パターン（`list.row.*`）は `*` の前の固定の部分で探す。
+
+    - dead       どの画面の files にも無い。消えたか名前が変わった。不整合
+    - elsewhere  その画面の files には無いが、ほかの画面の files にある。ID が別の画面に
+                 移ったか、その画面の files が足りない。警告
+    - unchecked  files が無いか、1つも読めない画面（stub など）。確かめられない
+    - missing    files に書いてあるのにファイルが無い。マップが古い。警告（鮮度と同じ）
+
+    OS が持つ ID（共通の SYSTEM_IDS と config.yaml の `system_ids`）は探さない。**振る舞いのずれ（押した先が
+    変わった）は分からない。** 分かるのは ID の文字列が残っているかだけ。
+    """
+    repo = mp.root.parent
+    texts, missing = {}, []
+    for sid in sorted(mp.screens):
+        buf = []
+        for f in mp.screens[sid].files:
+            path = repo / str(f)
+            try:
+                buf.append(path.read_text(encoding="utf-8", errors="replace"))
+            except OSError:
+                missing.append((sid, str(f)))
+        if buf:
+            texts[sid] = "\n".join(buf)
+    everything = "\n".join(texts.values())
+    dead, elsewhere, unchecked = [], [], []
+    for sid in sorted(mp.screens):
+        ids = [i for i in screen_ids(mp.screens[sid]) if i not in mp.system_ids]
+        if sid not in texts:
+            if ids:
+                unchecked.append(sid)
+            continue
+        for i in ids:
+            lit = pattern_prefix(i) if is_pattern(i) else i
+            if lit in texts[sid]:
+                continue
+            if lit in everything:
+                others = [o for o in sorted(texts) if o != sid and lit in texts[o]]
+                elsewhere.append((sid, i, others))
+            else:
+                dead.append((sid, i))
+    return dead, elsewhere, unchecked, missing
 
 
 def defined_ids(mp):
@@ -283,6 +338,25 @@ def cmd_check(mp):
             print("  **この画面の summary と expect は実装とずれている可能性がある。**"
                   "期待値を立てる前に files を読む。\n"
                   "  リファクタやコメントの修正でもここに出るので、不整合ではなく警告。")
+
+    dead, elsewhere, unchecked, missing = liveness(mp)
+    print("\nID の生存（files の中をリテラルで探す。OS の ID は外す: {}）:".format(" / ".join(mp.system_ids)))
+    for sid, i, others in elsewhere:
+        print("  {}: {} はこの画面の files に無く、{} の files にある"
+              "（別の画面に移ったか、files が足りない）".format(sid, i, " / ".join(others)))
+    if unchecked:
+        print("  files が無い（読めない）ので確かめられない: {}".format(" ".join(unchecked)))
+    if dead:
+        print("  {}件が実装に見つからない（下の不整合）。OS が持つ ID なら config.yaml の"
+              " system_ids に足す（{} は足さなくても外れる）".format(len(dead), " / ".join(SYSTEM_IDS)))
+    if not (dead or elsewhere or unchecked or missing):
+        print("  全画面、マップの ID がソースにある")
+    for sid, f in missing:
+        print("  {}: files の {} が無い（消えたか移った。files を直す）".format(sid, f))
+    for sid, i in dead:
+        files = mp.screens[sid].files
+        bad.append("{}: {} が実装に見つからない（dead。files: {}{}）".format(
+            sid, i, files[0], " ほか{}件".format(len(files) - 1) if len(files) > 1 else ""))
 
     print("\n経路が切れる／弱い箇所:")
     for b in breaks:

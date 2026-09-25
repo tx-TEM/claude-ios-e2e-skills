@@ -10,6 +10,10 @@ GESTURES = ("scroll",)                   # 要素に紐づかない操作（マ�
 DO_OPS = OPS + GESTURES + ("see",)       # plan の do で指せる種類。see は「その要素を見る」
 FORWARD = ("push", "modal", "tab")       # 別の画面に進む
 BACKWARD = ("back", "dismiss")           # 来た画面に戻る。戻り先は歩いた履歴で決まる
+# OS が持つ ID。どのアプリでも同じで、ソースには無い（ID の生存チェックで探さない）。
+# アプリ固有のものは config.yaml の system_ids に足す
+SYSTEM_IDS = ("BackButton",   # ナビゲーションの戻る
+              "Search")       # キーボードの検索キー
 KINDS = ("screen", "visible", "hidden", "selected", "value", "external")
 
 SCREEN_KEYS = {"anchor", "names", "summary", "files", "stub", "ready", "elements",

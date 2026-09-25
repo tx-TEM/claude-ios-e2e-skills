@@ -1167,6 +1167,98 @@ class AutoPickRun(unittest.TestCase):
         self.assertEqual([a[3] for a in self.calls if a[0] == "run"], ["test_01"])
 
 
+class Liveness(unittest.TestCase):
+    """#51: check はマップの ID がその画面の files に残っているかを確かめる。"""
+
+    SOURCE = """
+struct ListView: View {
+    var body: some View {
+        VStack {
+            TextField("", text: $q).accessibilityIdentifier("list.search_field")
+            ForEach(rows) { row in
+                Row(row).accessibilityIdentifier("list.row.\\(row.title)")
+            }
+            if rows.isEmpty { EmptyView().accessibilityIdentifier("list.empty_view") }
+            Footer().accessibilityIdentifier("list.footer")
+        }
+        .accessibilityIdentifier("list")
+    }
+}
+"""
+
+    def setUp(self):
+        self.repo = Path(tempfile.mkdtemp()) / "app"
+        shutil.copytree(FIXTURE, self.repo)
+        self.map = self.repo / "screen-map"
+        (self.repo / "Sources").mkdir()
+        self.src = self.repo / "Sources" / "ListView.swift"
+        self.src.write_text(self.SOURCE, encoding="utf-8")
+        self.add_files("list.yaml", ["Sources/ListView.swift"])
+
+    def tearDown(self):
+        shutil.rmtree(self.repo.parent)
+
+    def add_files(self, name, files):
+        f = self.map / "screens" / name
+        f.write_text("files:\n" + "".join("  - {}\n".format(x) for x in files)
+                     + f.read_text(encoding="utf-8"), encoding="utf-8")
+
+    def check(self):
+        mp = screen_map.ScreenMap(screen_map.find_map(str(self.repo)))
+        with contextlib.redirect_stdout(io.StringIO()) as o:
+            code = map_check.cmd_check(mp)
+        return code, o.getvalue()
+
+    def test_all_alive(self):
+        # パターンの行（list.row.*）は補間の前の固定部分で当たる。OS の ID は探さない
+        code, out = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("dead", out)
+        self.assertIn("files が無い（読めない）ので確かめられない: detail home", out)
+
+    def test_removed_id_is_dead(self):
+        self.src.write_text(self.SOURCE.replace('"list.footer"', '"list.bottom"'), encoding="utf-8")
+        code, out = self.check()
+        self.assertEqual(code, 1)
+        self.assertIn("list: list.footer が実装に見つからない（dead。files: Sources/ListView.swift）", out)
+
+    def test_moved_to_another_screen(self):
+        self.src.write_text(self.SOURCE.replace('"list.footer"', '""'), encoding="utf-8")
+        (self.repo / "Sources" / "Home.swift").write_text('Text("").accessibilityIdentifier("list.footer")\n'
+                                                           'x.accessibilityIdentifier("home")', encoding="utf-8")
+        self.add_files("home.yaml", ["Sources/Home.swift"])
+        code, out = self.check()
+        self.assertIn("list: list.footer はこの画面の files に無く、home の files にある", out)
+        self.assertNotIn("list.footer が実装に見つからない", out)
+
+    def test_missing_file(self):
+        # 無いファイルは警告。読めるファイルが1つも無い画面は確かめられない（dead にしない）
+        self.add_files("detail.yaml", ["Sources/Gone.swift"])
+        code, out = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertIn("detail: files の Sources/Gone.swift が無い", out)
+        self.assertIn("確かめられない: detail home", out)
+
+    def test_system_ids(self):
+        # BackButton / Search は共通で外れる。アプリ固有の OS の ID は config.yaml で足す
+        code, out = self.check()
+        self.assertNotIn("BackButton が実装に見つからない", out)
+        self.edit_list("gestures:\n", "  - id: Done\n    name: 完了（キーボード）\ngestures:\n")
+        code, out = self.check()
+        self.assertEqual(code, 1)
+        self.assertIn("list: Done が実装に見つからない", out)
+        self.assertIn("config.yaml の system_ids に足す", out)
+        (self.map / "config.yaml").write_text("start: home\nsystem_ids: [Done]\n", encoding="utf-8")
+        code, out = self.check()
+        self.assertEqual(code, 0, out)
+
+    def edit_list(self, old, new):
+        f = self.map / "screens" / "list.yaml"
+        text = f.read_text(encoding="utf-8")
+        self.assertIn(old, text)
+        f.write_text(text.replace(old, new), encoding="utf-8")
+
+
 class Check(unittest.TestCase):
     """#50: check は expect / ready が指す ID と、スキーマの形を確かめる。"""
 

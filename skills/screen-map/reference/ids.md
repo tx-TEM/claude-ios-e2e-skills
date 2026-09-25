@@ -28,7 +28,7 @@ ErrorView(idPrefix: "browse.error") { ... }
 
 接頭辞を渡して中で組み立てる形にしない。IDは完成した文字列で、画面のファイルに1箇所だけ書く。
 
-**自分で振れないIDは、そのまま書く。** ナビゲーションの戻る（`BackButton`）やキーボードの検索キー（`Search`）はOSが持つIDで、接頭辞の規則に従えない。そのまま要素の `id` に書き、手順6で**lintの例外として報告する**。
+**自分で振れないIDは、そのまま書く。** ナビゲーションの戻る（`BackButton`）やキーボードの検索キー（`Search`）はOSが持つIDで、接頭辞の規則に従えない。そのまま要素の `id` に書き、ID の生存チェックから外し（ソースに無いので。`BackButton` と `Search` は共通で外れ、それ以外は `config.yaml` の `system_ids` に足す）、手順6で**lintの例外として報告する**。
 
 **`accessibilityIdentifier` は読み上げられない。** VoiceOver が読むのは `accessibilityLabel` / `value` / `hint` のほうで、identifier は自動化専用。**identifier に何を入れてもユーザー体験は変わらない**ので、命名を実利用者に配慮して曲げる必要はない。
 

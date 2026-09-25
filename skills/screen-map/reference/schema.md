@@ -7,6 +7,7 @@
 ```yaml
 # config.yaml
 start: root                # 起動直後の画面
+system_ids: [Done]         # OS が持つ ID のうち、共通の BackButton / Search 以外。check の生存チェックで探さない
 ```
 
 ```yaml
