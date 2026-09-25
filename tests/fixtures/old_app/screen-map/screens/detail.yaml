@@ -1,0 +1,7 @@
+anchor: detail
+names: [詳細]
+summary: 作品の詳細
+actions:
+  - tap: BackButton
+    to: list
+    kind: back

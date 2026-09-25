@@ -1,0 +1,40 @@
+anchor: list
+names: [一覧]
+summary: 作品を検索して開く
+files:
+  - Features/List/ListView.swift
+actions:
+  - text: list.search_field
+    result: 入力が止まると絞り込む
+    expect: list.search_field
+  - tap: Search
+    result: 絞り込みを確定し、キーボードを閉じる
+    expect: list.search_field
+  - tap: Clear text          # OS のクリアボタン
+    by: label
+    result: 入力が消え、絞り込みが解除される
+    expect: list.search_field
+  - scroll: list.footer
+    result: 末尾まで読み込む
+    expect: list.footer
+  - scroll: down
+    result: 末尾に近づくと次のページを取得する
+    expect: list.count_label
+  - tap: list.row.*
+    to: detail
+    select:
+      index: 0
+      capture: itemTitle
+  - tap: list.banner
+    to: detail
+    kind: modal
+    in_tree: false
+  - tap: list.favorite_button
+    result: ログイン中なら印が付き、未ログインならアラートが出る
+    expect: list.favorite_badge
+  - tap: BackButton
+    kind: back
+states:
+  - expect: list.empty_view
+    when: 0件のとき
+auto_shows: [review_dialog]
