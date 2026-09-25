@@ -2,6 +2,7 @@ appId: jp.example.App
 env:
   SHOTS: ''
   LIST_ROW: ''
+  LIST_ROW_INDEX: ''
 ---
 # 続き: list から
 - extendedWaitUntil:
@@ -10,7 +11,8 @@ env:
     timeout: 10000
 # list: tap list.row.* [見えている1件目] — 作品の詳細を開く → detail
 - tapOn:
-    id: '^list\.row\.${LIST_ROW}$'
+    id: '^${LIST_ROW}$'
+    index: ${LIST_ROW_INDEX}
 - extendedWaitUntil:
     visible:
       id: '^detail$'

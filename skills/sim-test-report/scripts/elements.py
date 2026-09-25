@@ -2,7 +2,17 @@
 """ビュー階層から、操作に使える要素だけを1行1要素で出す。
 
 usage: elements.py <dump.json>
-出力: 画面の識別子 / tap座標 / 画面内か / テキスト / id / 状態
+出力: 1行目に画面の識別子、2行目に欄の名前、3行目から1行1要素
+
+  tap        画面内  上端  id                         テキスト       状態
+  (201,241)  ○       208   browse.book_row.こころ     こころ, 夏目漱石
+  (108,142)  ○       126   browse.target_picker.title 作品名         選択
+
+**欄はタブで区切る。** id にもテキストにも空白が入る（`browse.book_row.BOITEUX ・ BOITEUSE`）
+ので、空白で割ると id がどこで終わるか決まらない。タブで割れば、どの欄も1回で取れる。
+無い欄は空。状態は `選択` / `非活性` / `チェック` をカンマで並べる。
+行は中心の y、次に x の順（上から）。**上端** は要素の上端の y で、Maestro の `index` が
+当たった要素を並べる基準（上端の y、次に x）と同じものを数えるために出す。
 
 入力は2種類を自動判別する。
 
@@ -85,7 +95,7 @@ explicit = []
 def walk(node, compact):
     global screen
     d = norm(node, compact)
-    t = d["text"].strip().replace("\n", " ")
+    t = d["text"].strip().replace("\n", " ").replace("\t", " ")   # タブは欄の区切り
     r = d["rid"].strip()
     m = B.match(d["bounds"] or "")
     if (t or r) and m:
@@ -96,12 +106,12 @@ def walk(node, compact):
                 and 30 <= y1 - y0 <= 120):
             screen_cands.append(r)
         if x1 - x0 > 0 and y1 - y0 > 0:
-            st = ""
-            if d["selected"]: st += " [選択]"
-            if not d["enabled"]: st += " [非活性]"
-            if d["checked"]: st += " [チェック]"
+            st = []
+            if d["selected"]: st.append("選択")
+            if not d["enabled"]: st.append("非活性")
+            if d["checked"]: st.append("チェック")
             cx, cy = (x0 + x1) // 2, (y0 + y1) // 2
-            rows.append((cx, cy, 0 <= cx <= W and 0 <= cy <= H, t, r, st))
+            rows.append((cx, cy, 0 <= cx <= W and 0 <= cy <= H, t, r, ",".join(st), y0))
     for c in d["children"]:
         walk(c, compact)
 
@@ -131,8 +141,8 @@ if screen:
 else:
     print("画面: 【不明】ナビゲーションバーが無い。遷移したかの判定には使えない")
 seen = set()
-print(f"{'tap':>12}  {'画面内':<5} テキスト / id")
-for cx, cy, on, t, r, st in sorted(rows, key=lambda v: (v[1], v[0])):
+print("\t".join(["tap", "画面内", "上端", "id", "テキスト", "状態"]))
+for cx, cy, on, t, r, st, top in sorted(rows, key=lambda v: (v[1], v[0])):
     key = (t, r, cx, cy, st)
     if key in seen:
         continue
@@ -142,5 +152,4 @@ for cx, cy, on, t, r, st in sorted(rows, key=lambda v: (v[1], v[0])):
     # その断片が実在する別レコードのidと一致して誤読された）。
     # テキストは切るが、切ったことが分かるように印を残す。
     text = t if len(t) <= 60 else t[:59] + "…"
-    label = f"{text}  #{r}" if (t and r) else (text or f"#{r}")
-    print(f"{f'({cx},{cy})':>12}  {'○' if on else '×  ':<5} {label}{st}")
+    print("\t".join([f"({cx},{cy})", "○" if on else "×", str(top), r, text, st]))

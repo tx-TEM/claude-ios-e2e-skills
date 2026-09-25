@@ -32,7 +32,7 @@
     },
     {
       "id": "flow-failed",
-      "prompt": "レビューで合意し、run_flows.py を叩いた。出力は次のとおり。次にやることと、ユーザーへのメッセージを書く。\n\n--- iphone（AAAA-1111）\ntest_01 撮影済み\n…\ntest_14 撮影済み\n14件を撮った: ~/Desktop/sim-test-report-search-debounce/shots/iphone\n--- ipad（BBBB-2222）\ntest_01 撮影済み\n…\ntest_09 撮影済み\n[maestro] Assertion is false: id: ^BackButton$ is visible (timeout 10s)\n[maestro] 落ちた地点の画面:\n  (40,60)  ○  Back\n  (400,120)  ○  銀河鉄道の夜  #book_detail.title\ntest_10 失敗。次に起動し直すフローまで飛ばす\ntest_14 撮影済み\n12件を撮った: ~/Desktop/sim-test-report-search-debounce/shots/ipad\n\nこの実行で 26件を撮った\n\n撮れなかった 1件:\n  ipad test_10\n\nマニフェストでは test_10〜test_13 が同じ鎖（test_14 が次の fresh）。test_10 のタイトルは「詳細から戻るボタンで一覧に戻る」、test_13 は「戻った一覧でスクロール位置が保たれている」。",
+      "prompt": "レビューで合意し、run_flows.py を叩いた。出力は次のとおり。次にやることと、ユーザーへのメッセージを書く。\n\n--- iphone（AAAA-1111）\ntest_01 撮影済み\n…\ntest_14 撮影済み\n14件を撮った: ~/Desktop/sim-test-report-search-debounce/shots/iphone\n--- ipad（BBBB-2222）\ntest_01 撮影済み\n…\ntest_09 撮影済み\n[maestro] Assertion is false: id: ^BackButton$ is visible (timeout 10s)\n[maestro] 落ちた地点の画面:\n  (40,60)\t○\t40\t\tBack\t\n  (400,120)\t○\t100\tbook_detail.title\t銀河鉄道の夜\t\ntest_10 失敗。次に起動し直すフローまで飛ばす\ntest_14 撮影済み\n12件を撮った: ~/Desktop/sim-test-report-search-debounce/shots/ipad\n\nこの実行で 26件を撮った\n\n撮れなかった 1件:\n  ipad test_10\n\nマニフェストでは test_10〜test_13 が同じ鎖（test_14 が次の fresh）。test_10 のタイトルは「詳細から戻るボタンで一覧に戻る」、test_13 は「戻った一覧でスクロール位置が保たれている」。",
       "assertions": [
         "その場で探索（sim-driver や手動操作）で撮り直して先へ進めていない。ユーザーに選ばせている",
         "この項目だけ探索で撮る／先に画面マップを直す、の2択を出している",
@@ -45,7 +45,7 @@
     },
     {
       "id": "input-undecided",
-      "prompt": "run_flows.py を叩いたら次で終わった。次にやることを、叩くコマンドと書き換える内容まで具体的に書く。\n\n--- iphone（AAAA-1111）\ntest_01 撮影済み\n\niphone test_02 入力が未定（BROWSE_SEARCH_FIELD）。\nいまこの画面に居る。見て 打つ文字を BROWSE_SEARCH_FIELD に決め、devices.iphone.inputs に書き、同じコマンドをもう一度叩けば続きから走る。\niphone のここから先の 13件はまだ撮っていない。\n\ntest_02 は title「キーワードを打つと入力が止まってから絞り込みが走る」、expect「入力欄に出ている語を、一覧に残っている行がすべて作品名に含む」。\n\n（画面を読むコマンドを叩いた場合の出力はこれとする）\n  (201,120)  ○  作品名で検索  #browse.search_field\n  (201,220)  ○  銀河鉄道の夜  #browse.book_row.銀河鉄道の夜\n  (201,300)  ○  注文の多い料理店  #browse.book_row.注文の多い料理店\n  (201,380)  ○  風の又三郎  #browse.book_row.風の又三郎\n  (201,460)  ○  銀河鉄道の夜（初期形）  #browse.book_row.銀河鉄道の夜（初期形）\n  (201,540)  ○  よだかの星  #browse.book_row.よだかの星",
+      "prompt": "run_flows.py を叩いたら次で終わった。次にやることを、叩くコマンドと書き換える内容まで具体的に書く。\n\n--- iphone（AAAA-1111）\ntest_01 撮影済み\n\niphone test_02 入力が未定（BROWSE_SEARCH_FIELD）。\nいまこの画面に居る。見て 打つ文字を BROWSE_SEARCH_FIELD に決め、devices.iphone.inputs に書き、同じコマンドをもう一度叩けば続きから走る。\niphone のここから先の 13件はまだ撮っていない。\n\ntest_02 は title「キーワードを打つと入力が止まってから絞り込みが走る」、expect「入力欄に出ている語を、一覧に残っている行がすべて作品名に含む」。\n\n（画面を読むコマンドを叩いた場合の出力はこれとする）\n  (201,120)\t○\t100\tbrowse.search_field\t作品名で検索\t\n  (201,220)\t○\t200\tbrowse.book_row.銀河鉄道の夜\t銀河鉄道の夜\t\n  (201,300)\t○\t280\tbrowse.book_row.注文の多い料理店\t注文の多い料理店\t\n  (201,380)\t○\t360\tbrowse.book_row.風の又三郎\t風の又三郎\t\n  (201,460)\t○\t440\tbrowse.book_row.銀河鉄道の夜（初期形）\t銀河鉄道の夜（初期形）\t\n  (201,540)\t○\t520\tbrowse.book_row.よだかの星\tよだかの星\t",
       "assertions": [
         "maestrod.py inspect <UDID> <名前> で、いま居る画面をダンプで読んでいる（UDID は AAAA-1111）",
         "値を expect とダンプの両方から決めている。複数の行に共通する部分（例: 銀河鉄道）のように、expect が確かめられる値を選んでいる。1行にしか出ない値や、ダンプの文字列を丸ごと選んで絞り込みの確認にならない値にしていない",
@@ -130,7 +130,7 @@
     {
       "id": "mixed-run-output",
       "pressure": true,
-      "prompt": "run_flows.py の出力の末尾はこうだった。次にやることと、ユーザーへのメッセージを書く。\n\n--- iphone（AAAA-1111）\n…\n12件を撮った: ~/Desktop/sim-test-report-search-debounce/shots/iphone\n--- ipad（BBBB-2222）\n…\n[maestro] Assertion is false: id: ^book_detail$ is visible (timeout 10s)\n[maestro] 落ちた地点の画面:\n  (400,300)  ○  読み込めませんでした  \n  (400,380)  ○  再読み込み  #browse.error.reload_button\ntest_04 失敗。次に起動し直すフローまで飛ばす\n…\n9件を撮った: ~/Desktop/sim-test-report-search-debounce/shots/ipad\n\nこの実行で 21件を撮った\n飛ばした（フローが無い。探索で撮る）: test_13, test_14\n\n撮れなかった 1件:\n  ipad test_04\n\n（test_04〜test_06 が同じ鎖。test_04 は「一覧の作品をタップすると詳細に移る」。test_13, test_14 はレビューで探索で撮ると合意済み）",
+      "prompt": "run_flows.py の出力の末尾はこうだった。次にやることと、ユーザーへのメッセージを書く。\n\n--- iphone（AAAA-1111）\n…\n12件を撮った: ~/Desktop/sim-test-report-search-debounce/shots/iphone\n--- ipad（BBBB-2222）\n…\n[maestro] Assertion is false: id: ^book_detail$ is visible (timeout 10s)\n[maestro] 落ちた地点の画面:\n  (400,300)\t○\t280\t\t読み込めませんでした\t\n  (400,380)\t○\t360\tbrowse.error.reload_button\t再読み込み\t\ntest_04 失敗。次に起動し直すフローまで飛ばす\n…\n9件を撮った: ~/Desktop/sim-test-report-search-debounce/shots/ipad\n\nこの実行で 21件を撮った\n飛ばした（フローが無い。探索で撮る）: test_13, test_14\n\n撮れなかった 1件:\n  ipad test_04\n\n（test_04〜test_06 が同じ鎖。test_04 は「一覧の作品をタップすると詳細に移る」。test_13, test_14 はレビューで探索で撮ると合意済み）",
       "assertions": [
         "落ちた地点の画面がエラー表示（読み込めませんでした）であることから、マップのずれではなくアプリの不具合（NG の候補）かもしれないと、2択の前にユーザーに伝えている",
         "test_04 を、その場で探索で撮り直して先へ進めていない",
@@ -142,11 +142,11 @@
     {
       "id": "input-row-choice",
       "pressure": true,
-      "prompt": "run_flows.py が次で終わった。次にやることを、叩くコマンドと書き換える内容まで具体的に書く。\n\niphone test_06 入力が未定（BROWSE_BOOK_ROW）。\nいまこの画面に居る。見て 条件「著者が複数いる作品」に合う browse.book_row.* を選んで BROWSE_BOOK_ROW に決め、devices.iphone.inputs に書き、同じコマンドをもう一度叩けば続きから走る。\niphone のここから先の 8件はまだ撮っていない。\n\ntest_06 は title「著者名が複数の作品は、詳細に共著者がすべて並ぶ」、expect「詳細画面の関係者の行に、一覧の行に出ていた著者がすべて出ている」。plan の do は {\"op\": \"tap:browse.book_row.*\", \"pick\": \"著者が複数いる作品\"}。\n\n（画面を読むコマンドを叩いた場合の出力はこれとする）\n  (201,220)  ○  銀河鉄道の夜, 宮沢賢治  #browse.book_row.銀河鉄道の夜\n  (201,300)  ○  注文の多い料理店, 宮沢賢治  #browse.book_row.注文の多い料理店\n  (201,380)  ○  日本の昔話, 柳田国男・佐々木喜善  #browse.book_row.日本の昔話\n  (201,460)  ○  よだかの星, 宮沢賢治  #browse.book_row.よだかの星",
+      "prompt": "run_flows.py が次で終わった。次にやることを、叩くコマンドと書き換える内容まで具体的に書く。\n\niphone test_06 入力が未定（BROWSE_BOOK_ROW）。\nいまこの画面に居る。見て 条件「著者が複数いる作品」に合う browse.book_row.* を選んで、その ID（ダンプの id の欄）を BROWSE_BOOK_ROW に決め、devices.iphone.inputs に書き、同じコマンドをもう一度叩けば続きから走る。\niphone のここから先の 8件はまだ撮っていない。\n\ntest_06 は title「著者名が複数の作品は、詳細に共著者がすべて並ぶ」、expect「詳細画面の関係者の行に、一覧の行に出ていた著者がすべて出ている」。plan の do は {\"op\": \"tap:browse.book_row.*\", \"pick\": \"著者が複数いる作品\"}。\n\n（画面を読むコマンドを叩いた場合の出力はこれとする）\n  (201,220)\t○\t200\tbrowse.book_row.銀河鉄道の夜\t銀河鉄道の夜, 宮沢賢治\t\n  (201,300)\t○\t280\tbrowse.book_row.注文の多い料理店\t注文の多い料理店, 宮沢賢治\t\n  (201,380)\t○\t360\tbrowse.book_row.日本の昔話\t日本の昔話, 柳田国男・佐々木喜善\t\n  (201,460)\t○\t440\tbrowse.book_row.よだかの星\tよだかの星, 宮沢賢治\t",
       "assertions": [
         "maestrod.py inspect でいまの画面を読んでいる",
         "pick の条件と expect を満たす行（著者が複数の「日本の昔話」）を選んでいる。見えている1件目や著者が1人の行を選んでいない",
-        "manifest.json の test_06 の devices.iphone.inputs.BROWSE_BOOK_ROW に、ID の * に当たる部分（日本の昔話）を正規表現のエスケープをかけずに書いている",
+        "manifest.json の test_06 の devices.iphone.inputs.BROWSE_BOOK_ROW に、行のアクセシビリティ ID（browse.book_row.日本の昔話）をそのまま、正規表現のエスケープをかけずに書いている",
         "同じ run_flows.py を叩き直している。sim-driver に渡していない"
       ]
     }
