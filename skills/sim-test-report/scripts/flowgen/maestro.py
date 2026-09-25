@@ -167,7 +167,7 @@ SCROLL_TIMEOUT = 60000   # scrollUntilVisible の上限。理由は reveal()
 SETTLE_TIMEOUT = 3000    # 着いたあとの落ち着き待ちの上限
 
 
-def reveal(key, value):
+def reveal(key, value, center=False):
     """要素が全部見えるまでスクロールする。**マップに載っている要素を操作・確認する前に必ず入れる。**
 
     画面外の要素は、フローからは見つからずに落ちる。さらに悪いことに、ツリーには
@@ -177,9 +177,17 @@ def reveal(key, value):
     **ここだけ要素を待つ時間（wait_for）より長い。** scrollUntilVisible はその間
     スクロールを繰り返す。スクロール1回は実測5〜8秒（maestrod.py の実測）で、
     60秒でも8〜12回ぶんにしかならない。
+
+    **見る要素（`see`）は `center` で画面の中ほどまで寄せる。** 寄せないと、要素が
+    画面の下端に入ったところでスクロールが止まる。セクションの見出しなら中身が
+    画面外に切れ、その部分の見た目を確かめる証跡にならない。押すだけなら下端でも
+    困らないので、操作の前には付けない。
     """
-    return {"scrollUntilVisible": {"element": {key: value}, "direction": Raw("DOWN"),
-                                   "timeout": SCROLL_TIMEOUT}}
+    body = {"element": {key: value}, "direction": Raw("DOWN")}
+    if center:
+        body["centerElement"] = True
+    body["timeout"] = SCROLL_TIMEOUT
+    return {"scrollUntilVisible": body}
 
 
 def wait_for(selector, value, timeout, extra=None):
@@ -390,7 +398,7 @@ class FlowWriter:
             name = st.name
             self.out.append(Comment("{}: see {}{}".format(st.screen, st.target,
                                                             " — " + name if name else "")))
-            self.out.append(reveal(*step_sel(st, self.names)))
+            self.out.append(reveal(*step_sel(st, self.names), center=True))
         else:
             self.action(i, st)
 
