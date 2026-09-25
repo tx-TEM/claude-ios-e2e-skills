@@ -55,7 +55,7 @@
       ],
       "assertions": [
         "plan.json の各項目に from / do / title / expect がある。from は画面マップの画面id（list）",
-        "do の操作idがマップの actions と完全一致している（text:list.search_field、tap:Search）",
+        "do の操作idが、マップの要素の id とその要素の actions の種類に完全一致している（text:list.search_field、tap:Search）",
         "打つ語は plan に焼き込まず、{\"op\": \"text:list.search_field\", \"runtime\": true} で撮影時に決める形になっている",
         "入力（text）と検索キー（tap:Search）が別の項目になっている。デバウンスと確定を分けて確かめている",
         "期待は値ではなく関係で書かれている（「入力欄に出ている語を含む行だけが並ぶ」のように）。データソース（API・DB）を引いて期待を作っていない",

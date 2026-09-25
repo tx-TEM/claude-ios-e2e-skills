@@ -9,7 +9,7 @@ iOSアプリの動作確認を、テストケースのレビューからシミ�
 | 名前 | 種類 | 概要 |
 | --- | --- | --- |
 | `sim-test-report` | Skill | iOSシミュレーターでの動作確認を、テストケースのレビュー → 実施 → 証跡レポートまで通して進める。成果物は画像をbase64で埋め込んだ単一HTMLと、PRコメント貼り付け用の1枚PNG |
-| `screen-map` | Skill | iOSアプリの画面マップを画面単位で作る。ソースを読んで画面・遷移・確認箇所を特定し、`accessibilityIdentifier` を実装に振って `screen-map/screens/*.yaml` に落とす。`sim-test-report` の `scripts/route.py` がそのマップから目的の画面までの経路を組み、動作確認のフローにする |
+| `screen-map` | Skill | iOSアプリの画面マップを画面単位で作る。ソースを読んで画面ごとの要素と、操作するとどうなるか（遷移も結果の1つ）を特定し、`accessibilityIdentifier` を実装に振って `screen-map/screens/*.yaml` に落とす。`sim-test-report` の `scripts/route.py` がそのマップから目的の画面までの経路を組み、動作確認のフローにする |
 | `test-case-builder` | Agent | 確認項目を立て、画面マップがあれば実行できるフローまで組んで返す。コードの差分と画面マップを参照する。レビューを受けるのも実施も判定もしない。`sim-test-report` から呼ばれる |
 | `sim-driver` | Agent | シミュレーターを操作して証跡スクリーンショットを撮る。判定はせず観測した事実だけ返す。`sim-test-report` から呼ばれる |
 | `evidence-judge` | Agent | 証跡を読んでOK/NGを判定し、定義ファイルに書き込む。撮影もレポート生成もしない。`sim-test-report` から呼ばれる |
@@ -47,15 +47,21 @@ clone したディレクトリで `./install.sh` を実行する。`~/.claude/` 
      "do": [{"op": "text:browse.search_field", "runtime": true}],
      "expect": "入力欄に出ている語を、一覧に残っている行がすべて作品名に含む"},
     {"from": "browse", "fresh": true,
-     "title": "一覧をスクロールすると次のページが読み込まれる",
-     "do": ["scroll:down"],
+     "title": "一覧の作品をタップすると詳細に移る",
+     "do": ["tap:browse.book_row.*"],
+     "expect": "詳細画面の作品名が、タップした行の作品名と一致する"},
+    {"from": "book_detail", "when": ["ログイン中"],
+     "title": "ログイン中に登録を押すと登録画面が開く",
+     "do": ["tap:book_detail.register_button"],
      "expect": "…"}
   ],
   "explore": []
 }
 ```
 
-期待は値ではなく、証跡の中で確かめられる関係で書く。打つ文字のようにデータに依る値は、`do` に `"runtime": true` を添えて未定のまま残し、撮影時に画面を見て埋める。
+`do` はマップの要素を `tap:<id>` / `text:<id>` / `see:<id>`（見るだけの要素を見る）で、要素に紐づかない操作を `scroll:down` で指す。前提（`when`）はマップの `when` の文言をそのまま写し、条件つきの要素や、状態で結果が分かれる操作の枝を選ぶのに使う。
+
+期待は値ではなく、証跡の中で確かめられる関係で書く。データに依る値は plan に焼き込まない。打つ文字は `do` に `"runtime": true` を添えて未定のまま残し、撮影時に画面を見て埋める。一覧の行のように同じ種類が並ぶ要素（ID の末尾が `*`）は、何も添えなければスクリプトが画面に見えている1件目を押し、条件があるときだけ `"pick": 条件` を添えて撮影時に選ぶ。
 
 ### 2. フローとテストの定義ファイルを作る（`manifest.py`）
 
@@ -67,13 +73,36 @@ python3 ~/.claude/skills/sim-test-report/scripts/manifest.py \
   --repo <アプリのリポジトリ> --device iphone=<iPhoneのUDID> --device ipad=<iPadのUDID>
 ```
 
-中で `route.py` の経路計算を使う。plan の各項目について、前の項目が終わった画面から `from` までの経路を画面マップから計算し、`do` の操作と撮影を繋いで、項目ごとのフローとして書き出す。
+中で `route.py` の経路計算を使う。plan の各項目について、前の項目が終わった画面から `from` までの経路を画面マップから計算し、`do` の操作と撮影を繋いで、項目ごとのフローとして書き出す。押す前・見る前には必ず見えるまでスクロールし（`scrollUntilVisible`）、画面に着いたら anchor → 読み込み完了の目印（`ready`）→ アニメーションの落ち着きの順に待つ。経路は同じ長さならタブバーを通る方を採る。
+
+実行時に値を決める操作（打つ文字、どの行を押すか）があると、項目のフローはその手前で割れる。前の本は対象が見えるまでスクロールして止まり、次の本がその値を使う。
 
 ```yaml
+# test_02.1.yaml — 検索欄が見えるまで運んで止まる
+appId: tx-tem.AozoraReaderClient
+---
+- extendedWaitUntil:
+    visible:
+      id: '^browse$'
+    timeout: 10000
+- scrollUntilVisible:
+    element:
+      id: '^browse\.search_field$'
+    direction: DOWN
+    timeout: 60000
+```
+
+```yaml
+# test_02.yaml — 決めた値で打って撮る
 appId: tx-tem.AozoraReaderClient
 env:
+  SHOTS: ''
   BROWSE_SEARCH_FIELD: ''
 ---
+- extendedWaitUntil:
+    visible:
+      id: '^browse$'
+    timeout: 10000
 - tapOn:
     id: '^browse\.search_field$'
 - eraseText
@@ -82,7 +111,7 @@ env:
     visible:
       id: '^browse\.search_field$'
     timeout: 10000
-- takeScreenshot: '<出力先>/shots/iphone/test_02'
+- takeScreenshot: '${SHOTS}/test_02'
 ```
 
 画面マップが無いアプリでは全項目が plan の `explore` になり、フローは書かない。マップはあっても経路が組めない項目（未マップの画面、座標が要る操作）は理由つきで返り、`explore` に移る。どちらも LLM（`sim-driver`）が画面を見ながら探索して撮る。
@@ -94,15 +123,21 @@ env:
   "name": "test_02",
   "title": "キーワード入力でデバウンス絞り込みが走る",
   "from": "browse",
+  "when": [],
   "screen": "browse",
   "expect": "入力欄に出ている語を、一覧に残っている行がすべて作品名に含む",
   "checked": "browse.search_field",
   "launch": false,
+  "parts": [
+    { "flow": "test_02.1.yaml", "decide": null },
+    { "flow": "test_02.yaml", "decide": "BROWSE_SEARCH_FIELD" }
+  ],
   "flow": "test_02.yaml",
+  "picks": {},
   "input_use": { "BROWSE_SEARCH_FIELD": "text" },
   "devices": {
-    "iphone": { "inputs": { "BROWSE_SEARCH_FIELD": "" } },
-    "ipad":   { "inputs": { "BROWSE_SEARCH_FIELD": "" } }
+    "iphone": { "inputs": { "BROWSE_SEARCH_FIELD": "" }, "picked": {} },
+    "ipad":   { "inputs": { "BROWSE_SEARCH_FIELD": "" }, "picked": {} }
   },
   "images": [
     { "src": "shots/iphone/test_02.png", "label": "iPhone" },
@@ -112,6 +147,8 @@ env:
   "result": "PENDING"
 }
 ```
+
+`inputs` は撮影する側（LLM）が画面を見て埋める値（`runtime` の打つ文字と、`pick` の選択）。条件の無い行の選択は `picks` に選び方だけがあり、撮影時にスクリプトが選んだ値が `picked` に入る。
 
 経路が組めなかった項目（plan の `explore`）も、フローを持たないセクションとして同じファイルに並べる。
 
@@ -127,6 +164,8 @@ python3 ~/.claude/skills/sim-test-report/scripts/run_flows.py \
 ```
 
 どのシミュレーターで撮るかは、手順2でマニフェストに記録してある。
+
+割れたフローは順に走らせ、切れ目で値を決める。条件の無い行の選択は、その場で画面を読んで見えている1件目を選び、そのまま続ける（LLM は関与しない）。打つ文字と条件つきの選択は、その画面で止まって終わる。値を `inputs` に書いて同じコマンドを叩けば、止まった項目の止まった本から続きを走る。
 
 判定で撮り直し（`RETAKE`）になった項目は、`--only test_07` でその項目だけ撮り直せる。同じ鎖の頭から手前の項目を撮らずになぞってから撮るので、ほかの項目の証跡と判定はそのまま残る。
 

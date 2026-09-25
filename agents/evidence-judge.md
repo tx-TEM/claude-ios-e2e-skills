@@ -31,9 +31,10 @@ tools: Read, Bash
   "expect": "入力欄に出ている語を、一覧に残っている行がすべて作品名に含む",
   "checked": "browse.search_field",
   "flow": "test_02.yaml",
+  "when": [],
   "devices": {
-    "iphone": { "inputs": { "BROWSE_SEARCH_FIELD": "春" } },
-    "ipad":   { "inputs": { "BROWSE_SEARCH_FIELD": "春" } }
+    "iphone": { "inputs": { "BROWSE_SEARCH_FIELD": "春" }, "picked": {} },
+    "ipad":   { "inputs": { "BROWSE_SEARCH_FIELD": "春" }, "picked": {} }
   },
   "images": [
     { "src": "shots/iphone/test_02.png", "label": "iPhone" },
@@ -45,6 +46,15 @@ tools: Read, Bash
 ```
 
 証跡のパスは**マニフェストのある場所からの相対**。**ダンプは証跡と同名の `.txt`**（`shots/iphone/test_02.txt`）。
+
+**`when` はその項目の前提**（「ログイン中」）。結果が前提で分かれる項目は、その前提のときの結果として読む。
+
+**一覧の行のうちどれを押したかは、端末ごとの値にある。** 押す行を撮るときに決めた項目は、変数名 → 押した行の ID の `*` の部分で入っている（`"BROWSE_BOOK_ROW": "銀河鉄道の夜"`）。
+
+- 条件つきで止めて選んだもの（plan の `pick`）は `inputs`
+- 条件なしで、画面に見えている1件目を選んだものは `picked`。`run_flows.py` が撮るたびに選び直す
+
+「開いた詳細が押した行の作品か」のような期待は、この値と着いた先のダンプを突き合わせる。**画像から押した行を推測しない。** 端末ごとに選ぶので、端末で違う行を押していることがある。
 
 **複数の端末で撮った項目は、端末ぶんの証跡とダンプを全部読む。** `result` は項目に1つで、**全部の端末で期待どおりだったときだけ `OK`**。どれか1台で違えば `NG`、どれか1台で決められなければ `RETAKE`。`desc` には端末ごとの違いがあれば書く（「iPad は2カラムで、一覧の右に詳細が並ぶ」）。
 
