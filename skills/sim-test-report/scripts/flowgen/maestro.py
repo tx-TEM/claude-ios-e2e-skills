@@ -35,6 +35,41 @@ class Reveal:
 FRESH = ("push", "modal")   # 新しく開く画面。上端から始まる
 
 
+@dataclass
+class Return:
+    """アプリの外から、`screen` に戻す。外に出たまま撮った次のフローの頭に置く（add_returns）。"""
+    screen: str
+    item: Optional[str] = None
+    to = None
+
+
+def goes_out(st):
+    """アプリの外に出る操作か。"""
+    return isinstance(st, Act) and any(isinstance(r, External) for r in st.result)
+
+
+def add_returns(steps):
+    """アプリの外に出る操作のすぐ後で撮るなら、撮ったあとに Return を挟む。
+
+    **外に出たこと自体を確かめる項目は、外に出たまま撮る。** 外に出る操作は確かめようが
+    無いので、フローはすぐアプリに戻していた。それでは項目の `do` が外に出る操作で
+    終わると、証跡にアプリに戻った画面が写る（#58）。撮るまでは外に居て、戻すのは
+    次のフローの頭に回す。フローは撮る地点で切れるので、Return は次のフローの
+    1つ目になる。
+
+    次の項目が起動し直す（Restart）なら挟まない。起動し直しで戻る。項目の途中で外に
+    出るなら、今までどおりその場で戻す（FlowWriter.check）。
+    """
+    out = []
+    for k, st in enumerate(steps):
+        out.append(st)
+        prev = next((p for p in reversed(steps[:k]) if not isinstance(p, Reveal)), None)
+        nxt = steps[k + 1] if k + 1 < len(steps) else None
+        if isinstance(st, Shot) and goes_out(prev) and nxt is not None and not isinstance(nxt, Restart):
+            out.append(Return(prev.screen, prev.item))
+    return out
+
+
 def add_reveals(steps):
     """要素を操作する Act の直前に Reveal を挟む。See は自分がスクロールなので挟まない。
 
@@ -366,6 +401,8 @@ class FlowWriter:
         self.at = start
         if launch:
             self.relaunch(start, 0)
+        elif self.steps and isinstance(self.steps[0], Return):
+            self.out.append(Comment("続き: アプリの外から"))   # anchor は戻してから待つ
         else:
             self.out.append(Comment("続き: " + start + " から"))
             self.wait_anchor(start)
@@ -439,6 +476,11 @@ class FlowWriter:
             self.at = st.to
         elif isinstance(st, Shot):
             self.out.append({"takeScreenshot": "${" + SHOTS_VAR + "}/" + st.name})
+        elif isinstance(st, Return):
+            self.out.append(Comment("アプリの外から {} に戻す".format(st.screen)))
+            self.out.append({"launchApp": {"stopApp": False}})
+            self.wait_anchor(st.screen)
+            self.at = st.screen
         elif isinstance(st, Reveal):
             self.reveal(i, st)
         elif isinstance(st, See):
@@ -479,9 +521,11 @@ class FlowWriter:
         if st.arrive:
             self.arrive(st.to, i + 1, st.arrive.via, st.screen)
             self.at = st.to
+        # すぐ後で撮るなら、外に出たまま撮る（add_returns）
+        stay = i + 1 < len(self.steps) and isinstance(self.steps[i + 1], Shot)
         for r in st.result:
             if not isinstance(r, Arrive):
-                self.check(st, r)
+                self.check(st, r, stay)
         if not st.result:
             self.notes.append("「{}」の結果を確かめる expect がマップに無い".format(a.label()))
 
@@ -514,14 +558,18 @@ class FlowWriter:
 
     # ---- 結果を確かめる ----
 
-    def check(self, st, r):
-        """着く以外の結果を1つ確かめる。"""
+    def check(self, st, r, stay=False):
+        """着く以外の結果を1つ確かめる。`stay` なら、外に出る操作のあとアプリに戻さない。"""
         if isinstance(r, (Visible, Value)):
             self.out.append(wait_for(*result_sel(st, r, self.names), timeout=self.timeout))
         elif isinstance(r, Selected):
             self.out.append(wait_for(*result_sel(st, r, self.names), timeout=self.timeout, extra={"selected": True}))
         elif isinstance(r, Hidden):
             self.out.append(wait_gone(*result_sel(st, r, self.names), timeout=self.timeout))
+        elif isinstance(r, External) and stay:
+            # 外に出たまま撮る。外のアプリに anchor は無いので、動きが止まるのだけ待つ
+            self.out.append(Comment("アプリの外（{}）に出る。確かめずに、外に居るまま撮る".format(r.name)))
+            self.out.append(settle())
         elif isinstance(r, External):
             # アプリの外に出た。確かめずに、落とさずに前に戻す
             self.out.append(Comment("アプリの外（{}）に出る。確かめずにアプリに戻す".format(r.name)))
@@ -556,7 +604,7 @@ def shot_context(mp, seg_start, seg_steps):
     """
     at, checked = seg_start, mp.anchor(seg_start)
     for st in seg_steps:
-        if isinstance(st, (Shot, Reveal)):
+        if isinstance(st, (Shot, Reveal, Return)):
             continue
         if isinstance(st, Restart):
             at = mp.start

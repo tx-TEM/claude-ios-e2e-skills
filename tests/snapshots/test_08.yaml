@@ -2,7 +2,10 @@ appId: jp.example.App
 env:
   SHOTS: ''
 ---
-# 続き: detail から
+# 続き: アプリの外から
+# アプリの外から detail に戻す
+- launchApp:
+    stopApp: false
 - extendedWaitUntil:
     visible:
       id: '^detail$'

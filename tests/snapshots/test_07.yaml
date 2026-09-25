@@ -51,11 +51,7 @@ env:
     timeout: 60000
 - tapOn:
     id: '^detail\.share_button$'
-# アプリの外（safari）に出る。確かめずにアプリに戻す
-- launchApp:
-    stopApp: false
-- extendedWaitUntil:
-    visible:
-      id: '^detail$'
-    timeout: 10000
+# アプリの外（safari）に出る。確かめずに、外に居るまま撮る
+- waitForAnimationToEnd:
+    timeout: 3000
 - takeScreenshot: '${SHOTS}/test_07'

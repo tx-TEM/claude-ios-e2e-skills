@@ -766,14 +766,36 @@ class Flows(unittest.TestCase):
         self.assertEqual(rows[0]["checked"], "list.footer")
 
     def test_hidden_and_external(self):
+        # 項目の途中で外に出るなら、その場でアプリに戻す
         rows, flows = write_flows([{"from": "detail", "title": "a", "expect": "a",
-                                    "do": ["tap:detail.follow_button", "tap:detail.share_button"]}])
+                                    "do": ["tap:detail.share_button", "tap:detail.follow_button"]}])
         flow = flows["test_01.yaml"]
         self.assertIn("notVisible:\n      id: '^detail\\.follow_button$'", flow)
-        ext = flow[flow.index("# アプリの外（safari）に出る"):]
+        ext = flow[flow.index("# アプリの外（safari）に出る"):flow.index("follow_button")]
         self.assertIn("- launchApp:\n    stopApp: false", ext)
         self.assertIn("id: '^detail$'", ext)
+
+    def test_ending_outside_is_shot_outside(self):
+        # #58: 外に出る操作で終わる項目は、外に居るまま撮る。戻すのは次のフローの頭
+        rows, flows = write_flows([
+            {"from": "detail", "title": "a", "expect": "a", "do": ["tap:detail.share_button"]},
+            {"from": "detail", "title": "b", "expect": "b", "do": ["tap:detail.follow_button"]}])
+        first, second = flows["test_01.yaml"], flows["test_02.yaml"]
+        ext = first[first.index("# アプリの外（safari）に出る"):]
+        self.assertNotIn("launchApp", ext)
+        self.assertIn("waitForAnimationToEnd", ext)
         self.assertIsNone(rows[0]["checked"])
+        head = second[:second.index("follow_button")]
+        self.assertIn("# 続き: アプリの外から", head)
+        self.assertLess(head.index("- launchApp:\n    stopApp: false"), head.index("id: '^detail$'"))
+
+    def test_ending_outside_before_restart(self):
+        # 次の項目が起動し直すなら、戻す操作は挟まない
+        rows, flows = write_flows([
+            {"from": "detail", "title": "a", "expect": "a", "do": ["tap:detail.share_button"]},
+            {"from": "list", "fresh": True, "title": "b", "expect": "b", "do": []}])
+        self.assertNotIn("アプリの外から", flows["test_02.yaml"])
+        self.assertIn("- stopApp", flows["test_02.yaml"])
 
     def test_gesture(self):
         rows, flows = write_flows([{"from": "list", "title": "a", "expect": "a", "do": ["scroll:down"]}])

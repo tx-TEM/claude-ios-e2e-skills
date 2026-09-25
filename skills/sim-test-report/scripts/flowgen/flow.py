@@ -13,7 +13,7 @@ import json
 import sys
 from pathlib import Path
 
-from .maestro import (add_reveals, assign_vars, emit_flow, runtime_picks, runtime_uses,
+from .maestro import (add_returns, add_reveals, assign_vars, emit_flow, runtime_picks, runtime_uses,
                       shot_context, split_at_shots, split_parts, var_of)
 from screenmap.map import load_map
 from screenmap.screen import DO_OPS, GESTURES, pattern_prefix
@@ -273,8 +273,8 @@ def write_flows(plan, out_dir, timeout=10000):
     d = Path(out_dir)
     d.mkdir(parents=True, exist_ok=True)
     written = []
-    # 押す前のスクロール（Reveal）を挟んでから切る。経路の表示（emit_path）は挟む前の steps で出す
-    for seg_start, seg_steps, shot, lch in split_at_shots(mp, add_reveals(steps), None):
+    # 押す前のスクロール（Reveal）と、外から戻す操作（Return）を挟んでから切る。経路の表示（emit_path）は挟む前の steps で出す
+    for seg_start, seg_steps, shot, lch in split_at_shots(mp, add_returns(add_reveals(steps)), None):
         names = assign_vars(seg_steps)
         parts = split_parts(seg_start, seg_steps)
         files = []
