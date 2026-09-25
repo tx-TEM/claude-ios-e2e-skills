@@ -16,7 +16,7 @@ from pathlib import Path
 from .maestro import (add_returns, add_reveals, assign_vars, emit_flow, runtime_picks, runtime_uses,
                       shot_context, split_at_shots, split_parts, var_of)
 from screenmap.map import load_map
-from screenmap.screen import DO_OPS, GESTURES, pattern_prefix
+from screenmap.screen import DO_OPS, GESTURES, is_pattern, pattern_prefix
 from .actions import resolve_action
 from .bridge import Route, Unroutable, emit_path, report_problems
 from .results import resolve_result
@@ -200,10 +200,25 @@ def do_step(mp, route, op, how, given):
     ID まで書いた操作（`tap:list.row.牛乳`）は、その ID を操作の対象にする。
     """
     at = route.at
+    kind, _, rest = op.partition(":")
+    if kind == "see" and rest.startswith("text:"):
+        if how:
+            raise Unroutable([("call", "「{}」に値は添えられない（待つ文言は op に書く）".format(op))])
+        words = rest[len("text:"):]
+        if not words.strip():
+            raise Unroutable([("call", "「{}」に待つ文言が無い".format(op))])
+        return See(at, words, None, by_label=True, text=True), []
     found, el, val = resolve(mp, at, op)
     target = None if val is None else pattern_prefix(el.get("id")) + val
-    if op.partition(":")[0] == "see" and el is not None:
-        return See(at, target or el.get("id"), el.get("name"), el.get("by") == "label"), []
+    if kind == "see" and el is not None:
+        st = See(at, target or el.get("id"), el.get("name"), el.get("by") == "label")
+        if how:
+            if "pick" in how or not is_pattern(st.target) or st.by_label:
+                raise Unroutable([("call", "「{}」に添えられるのは input か runtime で、パターンの要素"
+                                           "（`*` で終わる ID）にだけ。その語を含む行を待つ".format(op))])
+            st.contains = str(how["input"]) if "input" in how else None
+            st.later = bool(how.get("runtime"))
+        return st, []
     if found is None:
         raise Unroutable([("call", "{} に「{}」という操作がマップに無い。この画面にあるのは {}"
                                    .format(at, op, known_ops(mp, at) or "（無し）"))])

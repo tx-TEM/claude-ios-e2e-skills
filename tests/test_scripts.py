@@ -197,6 +197,51 @@ class ScrollUp(unittest.TestCase):
         self.assertEqual(ups(flows["test_02.yaml"]), [])
 
 
+class SeeWaits(unittest.TestCase):
+    """#39: see でマップに無い文言と、撮るときに決まる語を待てる。"""
+
+    def test_text_outside_the_app(self):
+        # 外に出て、外のページの文言を待ってから撮る。アプリには次のフローの頭で戻す
+        rows, flows = write_flows([
+            {"from": "detail", "title": "a", "expect": "a",
+             "do": ["tap:detail.share_button", "see:text:図書カード"]},
+            {"from": "detail", "title": "b", "expect": "b", "do": []}])
+        first = flows["test_01.yaml"]
+        ext = first[first.index("# アプリの外（safari）に出る"):]
+        self.assertNotIn("launchApp", ext)
+        self.assertIn("visible:\n      text: '.*図書カード.*'", ext)
+        self.assertLess(ext.index("図書カード"), ext.index("takeScreenshot"))
+        self.assertNotIn("scrollUntilVisible", ext)
+        self.assertEqual(rows[0]["checked"], "図書カード")
+        self.assertIn("# 続き: アプリの外から", flows["test_02.yaml"])
+
+    def test_row_containing_a_word(self):
+        rows, flows = write_flows([
+            {"from": "list", "title": "a", "expect": "a",
+             "do": [{"op": "text:list.search_field", "input": "猫"},
+                    {"op": "see:list.row.*", "input": "猫"}]}])
+        self.assertIn("id: '^list\\.row\\..*猫.*'", flows["test_01.yaml"])
+
+    def test_row_containing_a_word_decided_later(self):
+        rows, flows = write_flows([
+            {"from": "list", "title": "a", "expect": "a",
+             "do": [{"op": "text:list.search_field", "runtime": True},
+                    {"op": "see:list.row.*", "runtime": True}]}])
+        flow = flows["test_01.yaml"]
+        self.assertIn("id: '^list\\.row\\..*${LIST_ROW}.*'", flow)
+        self.assertEqual(rows[0]["input_use"],
+                         {"LIST_SEARCH_FIELD": "text", "LIST_ROW": "selector"})
+        self.assertEqual(set(rows[0]["inputs"]), {"LIST_SEARCH_FIELD", "LIST_ROW"})
+
+    def test_values_only_on_patterns(self):
+        code, err = build_err([{"from": "list", "title": "a", "expect": "a",
+                                "do": [{"op": "see:list.footer", "input": "x"}]}])
+        self.assertIn("パターンの要素", err)
+        code, err = build_err([{"from": "list", "title": "a", "expect": "a",
+                                "do": [{"op": "see:text:猫", "input": "x"}]}])
+        self.assertIn("値は添えられない", err)
+
+
 class NotesPerFlow(unittest.TestCase):
     """#31: 補足は、そのフローのステップに関係するものだけが付く。"""
 

@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 from .actions import Action, InputLater, Tap
-from .results import Arrive, Result
+from .results import Arrive, External, Result
 
 
 # ---------- ステップ ----------
@@ -34,14 +34,27 @@ class Act:
 
 @dataclass
 class See:
-    """見るだけの要素を、見えるまでスクロールして確かめる。"""
+    """見るだけの要素を、見えるまでスクロールして確かめる。
+
+    `text` なら、マップの要素ではなく画面の文言（`see:text:<文言>`）を、スクロールせずに待つ。
+    アプリの外（Safari など）はマップに無いので、ID の代わりに文言で待つしかない。
+
+    パターンの要素（`list.row.*`）には、その語を含む行を待つ語を添えられる。`contains` は
+    plan に書いた語（`input`）、`later` は撮るときに決める語（`runtime`）。
+    """
     screen: str
-    target: str                       # 要素の id（ID まで書いたら、その ID）
+    target: str                       # 要素の id（ID まで書いたら、その ID）。text なら文言
     name: Optional[str] = None        # 画面での見え方（フローのコメントになる）
     by_label: bool = False
     item: Optional[str] = None
     up: bool = False                  # 下で見つからなければ上も探すか（maestro.add_reveals が決める）
+    text: bool = False                # マップに無い文言を待つ（see:text:<文言>）
+    contains: Optional[str] = None    # この語を含む行を待つ（input）
+    later: bool = False               # 含む語を撮るときに決める（runtime）
     to = None
+
+    def needs_value(self):
+        return self.later
 
 
 @dataclass
@@ -65,3 +78,25 @@ class Restart:
     """アプリを起動し直す（`fresh` の項目の前）。起点に戻る。"""
     item: Optional[str] = None
     to = None
+
+
+def goes_out(st):
+    """アプリの外に出る操作か。"""
+    return isinstance(st, Act) and any(isinstance(r, External) for r in st.result)
+
+
+def waits_text(st):
+    """マップに無い文言を待つステップか（see:text:<文言>）。アプリの外でも使える。"""
+    return isinstance(st, See) and st.text
+
+
+def stays_out(steps, i, skip=()):
+    """steps[i]（アプリの外に出る操作）のあと、外に居るまま撮るか。
+
+    撮るまでの間が、文言を待つステップ（外のページの見出しなど）だけならそう。
+    `skip` は間にあっても構わないステップの型（maestro.py の Reveal）。
+    """
+    j = i + 1
+    while j < len(steps) and (waits_text(steps[j]) or isinstance(steps[j], skip)):
+        j += 1
+    return j < len(steps) and isinstance(steps[j], Shot)

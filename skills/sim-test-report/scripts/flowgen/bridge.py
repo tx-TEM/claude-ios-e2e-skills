@@ -18,7 +18,7 @@ import sys
 
 from .results import External, Hidden, Selected, Value, Visible, resolve_result
 from .actions import Input, Tap, resolve_action
-from .steps import Act, Await, Restart, See, Shot
+from .steps import Act, Await, Restart, See, Shot, stays_out
 
 
 class Unroutable(Exception):
@@ -241,8 +241,15 @@ def emit_path(mp, steps, notes, start=None):
             row("  {}  自動表示 {} を待つ".format(st.screen.ljust(w), st.to),
                 "✓ {} が出ている".format(dest) if dest else "— {} に anchor が無い".format(st.to))
             continue
+        if isinstance(st, See) and st.text:
+            row("  {}  see text「{}」".format(st.screen.ljust(w), st.target),
+                "✓ 「{}」が出ている（文言で待つ）".format(st.target))
+            continue
         if isinstance(st, See):
-            row("  {}  see {}".format(st.screen.ljust(w), st.target),
+            word = st.contains if st.contains is not None else ("撮るときに決める語" if st.later else None)
+            row("  {}  see {}{}".format(st.screen.ljust(w), st.target,
+                                         " [「{}」を含む行]".format(word) if st.contains is not None
+                                         else " [{}を含む行]".format(word) if word else ""),
                 "✓ {} が見える".format(st.target))
             continue
         a = st.action
@@ -265,7 +272,7 @@ def emit_path(mp, steps, notes, start=None):
                 rights.append("✓ {} が選択状態".format(r.id))
             elif isinstance(r, Hidden):
                 rights.append("✓ {} が消えた".format(r.id))
-            elif isinstance(r, External) and n + 1 < len(steps) and isinstance(steps[n + 1], Shot):
+            elif isinstance(r, External) and stays_out(steps, n):
                 rights.append("— アプリの外（{}）に出る。確かめずに、外に居るまま撮る".format(r.name))
             elif isinstance(r, External):
                 rights.append("— アプリの外（{}）に出る。確かめずに戻す".format(r.name))

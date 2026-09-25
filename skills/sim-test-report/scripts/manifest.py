@@ -37,6 +37,11 @@ plan.json の形。**項目1つ＝ from から do を順に叩いて、1枚撮�
        {"from": "browse",
         "do": [{"op": "tap:browse.book_row.*", "pick": "貸出中の本"}]},
        {"from": "browse", "do": ["see:browse.section.recommend"]},
+       {"from": "browse",
+        "do": [{"op": "text:browse.search_field", "input": "猫"},
+               {"op": "see:browse.book_row.*", "input": "猫"}]},
+       {"from": "book_detail",
+        "do": ["tap:book_detail.card_link", "see:text:図書カード"]},
        {"from": "book_detail", "when": ["ログイン中"],
         "do": ["tap:book_detail.register_button"]}]}
   repo      アプリのリポジトリ（必須）。画面マップはその下の screen-map/。
@@ -48,6 +53,14 @@ plan.json の形。**項目1つ＝ from から do を順に叩いて、1枚撮�
             ように種類を頭に付けて指す。**並び順がそのまま実行順。**
             遷移する操作も書いてよく、行き先はマップの `expect` で追う。
             `see:<id>` は「その要素を見る」（見えるまでスクロールして確かめる）。
+            **撮る前に何かが出るのを待つのも see。** 見えるまで最大60秒待つ。
+            パターンの要素には、その語を含む行を待つ語を添えられる
+              {"op": "see:<パターン>", "input": 語}     その語を含む行（絞り込みの結果など）
+              {"op": "see:<パターン>", "runtime": true} 含む語を撮るときに決める
+                   （打った語と同じとは限らない。作者で絞り込めば行の ID は作品名）
+            `see:text:<文言>` はマップに無い文言が出るまで待つ（スクロールしない）。
+            アプリの外（Safari など）はマップに無いので、ここでしか待てない。
+            文言はローカライズや表記揺れで壊れるので、ID で書けるときは使わない。
             着いた状態を見るだけの項目は空。
             **パターンの要素（ID の末尾が *）は、どれを押すかをスクリプトが決める。**
             何も添えなければ画面に見えている1件目。選ぶ条件があるときだけ
