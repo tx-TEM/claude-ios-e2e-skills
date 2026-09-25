@@ -1,6 +1,6 @@
-"""操作をすると起きることを、マップから読み解く。
+"""操作をすると起きることを、画面仕様から読み解く。
 
-マップの expect を、Arrive / Visible などの型に変換する（resolve_result）。
+画面の yaml に書いた操作の expect を、Arrive / Visible などの型に変換する（resolve_result）。
 """
 from dataclasses import dataclass
 from typing import Union
@@ -55,7 +55,7 @@ OWN_RESULTS = {"visible": Visible, "value": Value, "selected": Selected, "hidden
 
 
 def resolve_result(action, expects, back_to=None):
-    """マップに書いた `expect` の並びを、結果の型の並びに解く。
+    """画面の操作に書いた `expect` の並びを、結果の型の並びに解く。
 
     `screen: back` は `back_to`（歩いた履歴で決めた、実際に戻る画面）に、`self` は操作した
     要素の ID にする。分かれる結果は、呼ぶ側が選んだ枝の expect だけを渡す。
