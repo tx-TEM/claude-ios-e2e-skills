@@ -11,7 +11,7 @@
 条件つきの要素や枝（マップの `when`）も、前提に同じ文言が無ければ通さず、
 「条件つき」と理由にする。
 """
-from screen_map import DO_OPS, FORWARD, GESTURES, is_pattern, pattern_prefix
+from .model import DO_OPS, FORWARD, GESTURES, is_pattern, pattern_prefix
 
 
 def resolve(mp, at, wanted):

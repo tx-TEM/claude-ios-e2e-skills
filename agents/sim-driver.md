@@ -71,7 +71,7 @@ python3 $M stop    <UDID>                                         # 撮影が終
 
 **生のJSON（`.work/dumps/`）を自分で読まない。** 1回2千トークンを超える。`inspect` が出す抽出後で判断する。
 
-MCP が使えない環境では `dump.sh <UDID> <名前>` が退避路になる（`maestro hierarchy` を都度起動する。1回16.6秒）。`elements.py` は両方の形式を受ける。
+MCP が使えない環境では `dump.sh <UDID> <名前>` が退避路になる（`maestro hierarchy` を都度起動する。1回16.6秒）。`device/elements.py` は両方の形式を受ける。
 
 ## 落ちたとき
 

@@ -1,14 +1,14 @@
 """画面マップ（screen-map/）を読む。画面・要素・操作と、そこから引ける辺。
 
 マップの形は screen-map スキルの reference/schema.md。ここはそれを読んで、経路の計算
-（walk.py）・フローの書き出し（flow.py）・検査（map_check.py）が使う形にするだけ。
+（walk.py）・フローの書き出し（flow.py）・検査（check.py）が使う形にするだけ。
 """
 import heapq
 import sys
 from pathlib import Path
 
 # PyYAML を入れさせないための最小パーサ（理由は mini_yaml.py）
-from mini_yaml import load_yaml
+from .mini_yaml import load_yaml
 
 
 OPS = ("tap", "text")                    # 要素に対する操作。マップのアクションはこのどれか1つを持つ

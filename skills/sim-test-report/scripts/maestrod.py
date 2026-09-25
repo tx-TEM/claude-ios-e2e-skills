@@ -306,7 +306,7 @@ def cmd_inspect(udid, name, save_to=None):
     dumps.mkdir(parents=True, exist_ok=True)
     raw = dumps / f"{name}.json"
     raw.write_text(r["text"])
-    out = subprocess.run([sys.executable, str(HERE / "elements.py"), str(raw)],
+    out = subprocess.run([sys.executable, str(HERE / "device" / "elements.py"), str(raw)],
                          capture_output=True, text=True)
     (dumps / f"{name}.txt").write_text(out.stdout)
     # 証跡と同じ場所に同じ名前で置くと、判定する側が画像と対で読める。

@@ -4,10 +4,10 @@ import re
 import sys
 from pathlib import Path
 
-from flow import (assign_vars, emit_flow, emit_path, runtime_picks, runtime_uses, shot_context,
+from .flow import (assign_vars, emit_flow, emit_path, runtime_picks, runtime_uses, shot_context,
                   split_at_shots, split_parts, var_of)
-from screen_map import load_map
-from walk import build
+from .model import load_map
+from .walk import build
 
 
 PLAN_KEYS = {"app", "clear_state", "items", "explore"}

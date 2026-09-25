@@ -9,16 +9,10 @@
   --repo <dir>       アプリのリポジトリ。画面マップはその下の screen-map/。必ず渡す
   --when <文言>      path の前提（マップの when の文言そのまま）。条件つきの辺を通す。並べてよい
 
-**ここにあるのは CLI だけ。** 中身は役割ごとのモジュールにある。
-
-  screen_map.py   マップを読む（画面・要素・操作と、そこから引ける辺）
-  walk.py         マップの上を歩いて、経路をステップ列にする（build）
-  flow.py         ステップ列から Maestro のフローと、人が読む経路を書く
-  map_check.py    マップの自己テスト（check）
-  plans.py        plan.json を読み、項目ごとのフローを書く（manifest.py が呼ぶ）
+**ここにあるのは CLI だけ。** 中身は screenmap/ にある（一覧は screenmap/__init__.py）。
 
 **フローはここでは書かない。** plan.json から項目ごとのフローを書くのは `manifest.py` で、
-中で plans.py の `write_flows()` を呼ぶ。plan の形は `manifest.py --help`。
+中で screenmap/plans.py の `write_flows()` を呼ぶ。plan の形は `manifest.py --help`。
 
 **どの画面が目標かを決めるのはここの仕事ではない。** `screens` が出すのは
 一覧で、絞るのは読む側。ここにキーワード一致を足さない。**文字列の一致は
@@ -27,11 +21,11 @@
 """
 import sys
 
-from flow import emit_flow, emit_path
-from map_check import cmd_check
-from plans import report_problems
-from screen_map import load_map
-from walk import build
+from screenmap.check import cmd_check
+from screenmap.flow import emit_flow, emit_path
+from screenmap.model import load_map
+from screenmap.plans import report_problems
+from screenmap.walk import build
 
 
 def cmd_screens(mp):

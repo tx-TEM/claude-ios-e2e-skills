@@ -2,7 +2,7 @@
 import os
 import re
 
-from screen_map import BACKWARD, auto_of, expect_kind, is_pattern, pattern_prefix
+from .model import BACKWARD, auto_of, expect_kind, is_pattern, pattern_prefix
 
 SHOTS_VAR = "SHOTS"   # 撮影先のディレクトリ。run_flows.py が端末ごとに埋める
 

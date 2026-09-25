@@ -8,7 +8,7 @@
 挙動になる。書き直したら、差分を読んでから入れる。
 
 シミュレーターも Maestro も要らない。manifest.py が UDID から機種を引く
-`simulators.lookup()` だけ差し替える。
+`device.simulators.lookup()` だけ差し替える（`run_manifest()`）。
 """
 import contextlib
 import io
@@ -19,7 +19,7 @@ import runpy
 import shutil
 import sys
 import tempfile
-import types
+from unittest import mock
 import unittest
 from pathlib import Path
 
@@ -29,9 +29,9 @@ FIXTURE = Path(__file__).resolve().parent / "fixtures" / "app"
 SNAPSHOTS = Path(__file__).resolve().parent / "snapshots"
 sys.path.insert(0, str(SCRIPTS))
 
-import map_check  # noqa: E402
-import plans  # noqa: E402
-import screen_map  # noqa: E402
+from screenmap import check as map_check  # noqa: E402
+from screenmap import model as screen_map  # noqa: E402
+from screenmap import plans  # noqa: E402
 
 
 def load_run_flows():
@@ -54,6 +54,20 @@ def write_flows(items, repo=FIXTURE):
     flows = {p.name: p.read_text(encoding="utf-8") for p in sorted(out.glob("*.yaml"))}
     shutil.rmtree(out)
     return rows, flows
+
+
+def run_manifest(args):
+    """manifest.py を叩いて標準出力を返す。UDID から機種を引くところだけ差し替える。"""
+    argv = sys.argv
+    sys.argv = ["manifest.py"] + [str(a) for a in args]
+    try:
+        with mock.patch("device.simulators.lookup",
+                        lambda udid: {"model": "iPhone 17 Pro", "os": "iOS 26.5"}), \
+                contextlib.redirect_stdout(io.StringIO()) as o:
+            runpy.run_path(str(SCRIPTS / "manifest.py"), run_name="__main__")
+    finally:
+        sys.argv = argv
+    return o.getvalue()
 
 
 def waits(flow):
@@ -217,19 +231,7 @@ class Manifest(unittest.TestCase):
             "explore": [{"from": "settings", "title": "b", "expect": "b",
                          "reason": "画面 settings がマップに無い"}]}), encoding="utf-8")
         out = work / "out"
-        fake = types.ModuleType("simulators")
-        fake.lookup = lambda udid: {"model": "iPhone 17 Pro", "os": "iOS 26.5"}
-        argv, mods = sys.argv, dict(sys.modules)
-        sys.modules["simulators"] = fake
-        sys.argv = ["manifest.py", str(plan), str(out), "--repo", str(FIXTURE),
-                    "--device", "iphone=AAAA", "--device", "ipad=BBBB"]
-        try:
-            with contextlib.redirect_stdout(io.StringIO()):
-                runpy.run_path(str(SCRIPTS / "manifest.py"), run_name="__main__")
-        finally:
-            sys.argv = argv
-            sys.modules.clear()
-            sys.modules.update(mods)
+        run_manifest([plan, out, "--repo", FIXTURE, "--device", "iphone=AAAA", "--device", "ipad=BBBB"])
         m = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
         shutil.rmtree(Path(m["flows"]), ignore_errors=True)
         shutil.rmtree(work)
@@ -258,20 +260,8 @@ class Manifest(unittest.TestCase):
 
         def build(items):
             plan.write_text(json.dumps({"app": "x", "items": items}), encoding="utf-8")
-            fake = types.ModuleType("simulators")
-            fake.lookup = lambda udid: {"model": "iPhone 17 Pro", "os": "iOS 26.5"}
-            argv, mods = sys.argv, dict(sys.modules)
-            sys.modules["simulators"] = fake
-            sys.argv = ["manifest.py", str(plan), str(out), "--repo", str(FIXTURE),
-                        "--device", "iphone=AAAA"]
-            try:
-                with contextlib.redirect_stdout(io.StringIO()) as o:
-                    runpy.run_path(str(SCRIPTS / "manifest.py"), run_name="__main__")
-            finally:
-                sys.argv = argv
-                sys.modules.clear()
-                sys.modules.update(mods)
-            return json.loads((out / "manifest.json").read_text(encoding="utf-8")), o.getvalue()
+            printed = run_manifest([plan, out, "--repo", FIXTURE, "--device", "iphone=AAAA"])
+            return json.loads((out / "manifest.json").read_text(encoding="utf-8")), printed
 
         text = {"from": "list", "title": "a", "expect": "a",
                 "do": [{"op": "text:list.search_field", "runtime": True}]}
@@ -864,7 +854,7 @@ class ElementsOutput(unittest.TestCase):
         f = Path(tempfile.mkdtemp()) / "d.json"
         f.write_text(json.dumps(dump, ensure_ascii=False), encoding="utf-8")
         import subprocess
-        out = subprocess.run([sys.executable, str(SCRIPTS / "elements.py"), str(f)],
+        out = subprocess.run([sys.executable, str(SCRIPTS / "device" / "elements.py"), str(f)],
                              capture_output=True, text=True).stdout.splitlines()
         shutil.rmtree(f.parent)
         self.assertEqual(out[1].split("\t"), ["tap", "画面内", "上端", "id", "テキスト", "状態"])
@@ -1091,7 +1081,7 @@ class Migrate(unittest.TestCase):
 
 class MiniYaml(unittest.TestCase):
     def test_flow_mapping(self):
-        from mini_yaml import load_yaml
+        from screenmap.mini_yaml import load_yaml
         f = Path(tempfile.mkdtemp()) / "x.yaml"
         f.write_text("a:\n  - tap:\n    expect: {screen: x, via: push}\n"
                      "b: [c, {screen: d, after: [e, f]}]\n"

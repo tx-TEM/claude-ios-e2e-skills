@@ -16,7 +16,7 @@
 そこから出す。撮るときに手で渡し直さない。
 
 1. plan の項目ごとに Maestro のフローを、スキル側の `.work/flows/<出力先の名前>/` に書く
-   （plans.py の `write_flows()`）。経路が組めなければ理由を出して止まる
+   （screenmap/plans.py の `write_flows()`）。経路が組めなければ理由を出して止まる
    （manifest は書かない）。組めたら読める経路を出す
 2. 返ってきた項目ごとの行から manifest.json を組む。証跡1枚＝1セクション
 
@@ -124,8 +124,8 @@ import json
 import sys
 from pathlib import Path
 
-import plans   # 同じディレクトリ。plan を読み、フローを書く
-import simulators
+from device import simulators
+from screenmap import plans   # plan を読み、フローを書く
 
 
 LABELS = {"iphone": "iPhone", "ipad": "iPad"}

@@ -1,7 +1,7 @@
 """画面マップの自己テスト（route.py check）。不整合・経路が切れる箇所・書き足すもの・鮮度。"""
 import subprocess
 
-from screen_map import (ACTION_KEYS, BACKWARD, ELEMENT_KEYS, EXPECT_KEYS, FORWARD, GESTURE_KEYS,
+from .model import (ACTION_KEYS, BACKWARD, ELEMENT_KEYS, EXPECT_KEYS, FORWARD, GESTURE_KEYS,
                         GESTURES, KINDS, OPS, SCREEN_KEYS, auto_of, expect_kind, is_pattern,
                         old_schema, pattern_prefix)
 

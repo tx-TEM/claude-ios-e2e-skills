@@ -86,7 +86,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-import simulators   # 同じディレクトリ。UDID から起動しているかを引く
+from device import simulators   # UDID から起動しているかを引く
 
 HERE = Path(__file__).resolve().parent
 MAESTROD = HERE / "maestrod.py"
