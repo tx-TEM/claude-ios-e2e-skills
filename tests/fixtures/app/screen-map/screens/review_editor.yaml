@@ -1,0 +1,9 @@
+anchor: review_editor
+stub: true
+elements:
+  - id: review_editor.close_button
+    name: 閉じる
+    actions:
+      - tap:
+        summary: 書かずに閉じる
+        expect: {screen: back, via: dismiss}

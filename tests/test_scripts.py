@@ -70,14 +70,19 @@ class Snapshot(unittest.TestCase):
             {"from": "list", "title": "検索キーで確定", "expect": "キーボードが閉じる",
              "do": ["tap:Search"]},
             {"from": "list", "title": "末尾まで読む", "expect": "フッターが出る",
-             "do": ["scroll:list.footer"]},
+             "do": ["see:list.footer"]},
             {"from": "list", "fresh": True, "title": "行を開く", "expect": "詳細が開く",
-             "do": [{"op": "tap:list.row.*", "runtime": True}]},
+             "do": ["tap:list.row.*"]},
             {"from": "detail", "title": "戻る", "expect": "一覧に戻る",
              "do": ["tap:BackButton"]},
+            {"from": "detail", "title": "お気に入り", "expect": "印が付く",
+             "do": ["tap:detail.favorite_button", "tap:detail.share_button"]},
+            {"from": "detail", "when": ["未ログイン"], "title": "レビュー", "expect": "案内が出る",
+             "do": ["tap:detail.review_button"]},
         ])
         self.assertEqual([r["name"] for r in rows],
-                         ["test_01", "test_02", "test_03", "test_04", "test_05", "test_06"])
+                         ["test_01", "test_02", "test_03", "test_04", "test_05", "test_06",
+                          "test_07", "test_08"])
         for name, body in flows.items():
             snap = SNAPSHOTS / name
             if os.environ.get("UPDATE_SNAPSHOTS"):
@@ -101,29 +106,29 @@ class BackUsesHistory(unittest.TestCase):
         flow = flows["test_01.yaml"]
         self.assertEqual(waits(flow)[-1], "^home$")
         self.assertEqual(rows[0]["checked"], "home")
-        # マップの to: list と食い違ったことは補足に出る
-        self.assertIn("to: list と書いてあるが、歩いてきた履歴では home に戻る", flow)
 
     def test_back_via_list_returns_list_without_note(self):
         rows, flows = write_flows([
             {"from": "list", "title": "a", "expect": "a",
              "do": ["tap:list.row.*", "tap:BackButton"]}])
         flow = flows["test_01.yaml"]
-        self.assertEqual(waits(flow)[-1], "^list$")
+        self.assertEqual(waits(flow)[-1], "(^list\\.row\\..*|^list\\.empty_view$)")
+        self.assertIn("id: '^list$'", flow[flow.index("^BackButton$"):])
         self.assertNotIn("# 補足", flow)
 
-    def test_back_without_to_is_a_back(self):
-        # list の戻るには to が無い。それでも戻る操作として履歴から戻る
+    def test_back_from_list_returns_home(self):
         rows, flows = write_flows([
             {"from": "list", "title": "a", "expect": "a", "do": ["tap:BackButton"]}])
         self.assertEqual(waits(flows["test_01.yaml"])[-1], "^home$")
+        self.assertNotIn("# 補足", flows["test_01.yaml"])
 
     def test_back_on_start_screen_stops(self):
         repo = Path(tempfile.mkdtemp()) / "app"
         shutil.copytree(FIXTURE, repo)
         home = repo / "screen-map" / "screens" / "home.yaml"
         home.write_text(home.read_text(encoding="utf-8")
-                        + "  - tap: home.close\n    kind: dismiss\n", encoding="utf-8")
+                        + "  - id: home.close\n    name: 閉じる\n    actions:\n      - tap:\n"
+                        "        expect: {screen: back, via: dismiss}\n", encoding="utf-8")
         with contextlib.redirect_stderr(io.StringIO()) as err, \
                 self.assertRaises(SystemExit) as cm:
             write_flows([{"from": "home", "title": "a", "expect": "a",
@@ -137,11 +142,19 @@ class NotesPerFlow(unittest.TestCase):
     """#31: 補足は、そのフローのステップに関係するものだけが付く。"""
 
     def test_note_only_on_its_flow(self):
+        repo = Path(tempfile.mkdtemp()) / "app"
+        shutil.copytree(FIXTURE, repo)
+        detail = repo / "screen-map" / "screens" / "detail.yaml"
+        detail.write_text(detail.read_text(encoding="utf-8").replace(
+            "elements:\n", "elements:\n  - id: detail.noop\n    name: 何もしない\n"
+            "    actions:\n      - tap:\n        summary: 何も起きない\n", 1), encoding="utf-8")
         rows, flows = write_flows([
-            {"from": "detail", "title": "a", "expect": "a", "do": ["tap:BackButton"]},
-            {"from": "list", "title": "b", "expect": "b"}])
-        self.assertIn("# 補足", flows["test_01.yaml"])
+            {"from": "detail", "title": "a", "expect": "a", "do": ["tap:detail.noop"]},
+            {"from": "list", "title": "b", "expect": "b"}], repo)
+        self.assertIn("# 補足: 「tap detail.noop」の結果を確かめる expect がマップに無い",
+                      flows["test_01.yaml"])
         self.assertNotIn("# 補足", flows["test_02.yaml"])
+        shutil.rmtree(repo.parent)
 
 
 class RuntimeInputs(unittest.TestCase):
@@ -152,13 +165,17 @@ class RuntimeInputs(unittest.TestCase):
             {"from": "list", "title": "a", "expect": "a",
              "do": [{"op": "text:list.search_field", "runtime": True}]},
             {"from": "list", "fresh": True, "title": "b", "expect": "b",
-             "do": [{"op": "tap:list.row.*", "runtime": True}]}])
+             "do": [{"op": "tap:list.row.*", "pick": "いちばん長い名前"}]}])
         return rows, flows
 
     def test_input_use_is_recorded(self):
         rows, _ = self.rows()
         self.assertEqual(rows[0]["input_use"], {"LIST_SEARCH_FIELD": "text"})
         self.assertEqual(rows[1]["input_use"], {"LIST_ROW": "selector"})
+        self.assertEqual(rows[0]["inputs"], {"LIST_SEARCH_FIELD": ""})
+        self.assertEqual(rows[1]["inputs"], {"LIST_ROW": ""})
+        self.assertEqual(rows[1]["picks"], {"LIST_ROW": {"pattern": "list.row.*", "pick": "いちばん長い名前",
+                                                        "exclude": []}})
 
     def fill(self, flow, var, value, use):
         body = RF["fill_env"](flow, RF["required_env"](flow),
@@ -192,7 +209,7 @@ class Manifest(unittest.TestCase):
         plan = work / "plan.json"
         plan.write_text(json.dumps({"app": "jp.example.App", "items": [
             {"from": "list", "title": "a", "expect": "a",
-             "do": [{"op": "tap:list.row.*", "runtime": True}]}],
+             "do": ["tap:list.row.*"]}],
             "explore": [{"from": "settings", "title": "b", "expect": "b",
                          "reason": "画面 settings がマップに無い"}]}), encoding="utf-8")
         out = work / "out"
@@ -217,7 +234,11 @@ class Manifest(unittest.TestCase):
         first, explore = m["sections"]
         self.assertEqual(first["name"], "test_01")
         self.assertEqual(first["input_use"], {"LIST_ROW": "selector"})
-        self.assertEqual(first["devices"]["iphone"]["inputs"], {"LIST_ROW": ""})
+        # 条件の無い選択は run_flows.py が決めるので、inputs には入らない
+        self.assertEqual(first["devices"]["iphone"], {"inputs": {}, "picked": {}})
+        self.assertEqual(first["picks"], {"LIST_ROW": {"pattern": "list.row.*", "pick": "", "exclude": []}})
+        self.assertEqual(first["parts"], [{"flow": "test_01.1.yaml", "decide": None},
+                                          {"flow": "test_01.yaml", "decide": "LIST_ROW"}])
         self.assertEqual([i["src"] for i in first["images"]],
                          ["shots/iphone/test_01.png", "shots/ipad/test_01.png"])
         self.assertEqual(first["result"], "PENDING")
@@ -262,7 +283,7 @@ class Manifest(unittest.TestCase):
 
         # 変数が変わったら空に戻す
         m, _ = build([{"from": "list", "title": "a", "expect": "a",
-                       "do": [{"op": "tap:list.row.*", "runtime": True}]}])
+                       "do": [{"op": "tap:list.row.*", "pick": "x"}]}])
         self.assertEqual(m["sections"][0]["devices"]["iphone"]["inputs"], {"LIST_ROW": ""})
         shutil.rmtree(Path(m["flows"]), ignore_errors=True)
         shutil.rmtree(work)
@@ -322,8 +343,13 @@ class RetakeRun(unittest.TestCase):
             (self.flows / f"{n}.yaml").write_text(
                 "appId: x\nenv:\n" + "".join(f"  {k}: ''\n" for k in names)
                 + "---\n- takeScreenshot: '${SHOTS}/" + n + "'\n", encoding="utf-8")
+            parts = [{"flow": f"{n}.yaml", "decide": None}]
+            if env.get(n):
+                (self.flows / f"{n}.1.yaml").write_text("appId: x\n---\n", encoding="utf-8")
+                parts = [{"flow": f"{n}.1.yaml", "decide": None},
+                         {"flow": f"{n}.yaml", "decide": env[n][0]}]
             self.sections.append({
-                "name": n, "flow": f"{n}.yaml", "launch": launch, "pre_flow": None,
+                "name": n, "flow": f"{n}.yaml", "launch": launch, "parts": parts,
                 "input_use": {k: "text" for k in env.get(n, [])},
                 "devices": {"iphone": {"inputs": {k: "" for k in env.get(n, [])}}},
                 "desc": f"{n} の前の判定", "note": "", "result": "OK"})
@@ -359,7 +385,8 @@ class RetakeRun(unittest.TestCase):
         self.assertEqual((stopped, done, lost), (None, 1, []))
         runs = [(c, n, d) for c, n, d, _ in self.calls]
         # 手前の2本は作業用の置き場（replay の下の端末名）に撮り、ダンプは取らない
-        self.assertEqual(runs, [("run", "test_01", "iphone"), ("run", "test_02", "iphone"),
+        self.assertEqual(runs, [("run", "test_01", "iphone"), ("run", "test_02.1", "iphone"),
+                                ("run", "test_02", "iphone"),
                                 ("run", "test_03", "iphone"), ("inspect", "test_03", "iphone")])
         replay_dest = self.tmp / ".work" / "replay" / "out" / "iphone"
         self.assertTrue(replay_dest.is_dir())
@@ -371,7 +398,7 @@ class RetakeRun(unittest.TestCase):
         self.assertEqual(self.sec("test_03")["result"], "PENDING")
         self.assertEqual(self.sec("test_04")["result"], "OK")
         # なぞる項目にも実行時の値が入る
-        self.assertIn("X: '牛乳'", self.calls[1][3])
+        self.assertIn("X: '牛乳'", self.calls[2][3])
         log = (self.out / "progress_iphone.log").read_text(encoding="utf-8")
         self.assertIn("test_01 なぞった", log)
         self.assertIn("test_03 撮影済み", log)
@@ -426,9 +453,13 @@ class Interrupts(unittest.TestCase):
             "anchor: review_dialog\n"
             "names: [レビュー依頼]\n"
             "summary: 起動3回目以降にランダムで出る\n"
-            "actions:\n"
-            "  - tap: review_dialog.later_button\n"
-            "    kind: dismiss\n", encoding="utf-8")
+            "elements:\n"
+            "  - id: review_dialog.later_button\n"
+            "    name: 後で\n"
+            "    actions:\n"
+            "      - tap:\n"
+            "        summary: 閉じる\n"
+            "        expect: {screen: back, via: dismiss}\n", encoding="utf-8")
         detail = screens / "detail.yaml"
         detail.write_text(detail.read_text(encoding="utf-8") + "auto_shows: [review_dialog]\n",
                           encoding="utf-8")
@@ -469,18 +500,20 @@ class Interrupts(unittest.TestCase):
         self.assertNotIn("runFlow", flows["test_01.yaml"])
 
     def test_checked_in_pre_flow(self):
-        # 値を決める手前で詳細に着く。前半のフローでも閉じる
+        # 値を決める手前で詳細に着く。割れた途中の本でも閉じる
+        # （1本目: 一覧まで / 2本目: 行を押して詳細、戻る / 3本目: 入力）
         rows, flows = write_flows([
             {"from": "list", "title": "a", "expect": "a",
              "do": ["tap:list.row.*", "tap:BackButton",
                     {"op": "text:list.search_field", "runtime": True}]}], self.repo)
-        self.assertIn("runFlow", flows[rows[0]["pre_flow"]])
+        self.assertEqual([p["decide"] for p in rows[0]["parts"]], [None, "LIST_ROW", "LIST_SEARCH_FIELD"])
+        self.assertIn("runFlow", flows[rows[0]["parts"][1]["flow"]])
 
     def test_label_dismiss(self):
         # 閉じるボタンに ID が振れない（UIAlertAction など）ときは、ほかの操作と同じく by: label
         self.dialog.write_text(self.dialog.read_text(encoding="utf-8").replace(
-            "  - tap: review_dialog.later_button\n    kind: dismiss\n",
-            "  - tap: 後で\n    by: label\n    kind: dismiss\n"), encoding="utf-8")
+            "  - id: review_dialog.later_button\n    name: 後で\n",
+            "  - id: 後で\n    name: 後で\n    by: label\n"), encoding="utf-8")
         rows, flows = write_flows([{"from": "detail", "title": "a", "expect": "a"}], self.repo)
         self.assertIn("tapOn:\n          text: '.*後で.*'", flows["test_01.yaml"])
 
@@ -505,7 +538,7 @@ class Interrupts(unittest.TestCase):
              "expect": "詳細画面に戻っている",
              "do": ["tap:review_dialog.later_button"]}], self.repo)
         flow = flows["test_01.yaml"]
-        self.assertEqual(waits(flow)[-3:], ["^home$", "^review_dialog$", "^detail$"])
+        self.assertEqual(waits(flow)[-4:], ["^home$", "^review_dialog$", "^detail$", "^detail\\.title$"])
         self.assertEqual(rows[0]["screen"], "detail")
         # 戻る操作で戻った画面では、自動表示を確かめない（入ったときに出るもの）
         self.assertNotIn("runFlow", flow)
@@ -530,10 +563,10 @@ class Interrupts(unittest.TestCase):
         self.assertIn("自動表示 review_dialog のファイルが無い", out)
 
     def test_check_reports_missing_dismiss(self):
-        self.dialog.write_text("anchor: review_dialog\nactions: []\n", encoding="utf-8")
+        self.dialog.write_text("anchor: review_dialog\nelements: []\n", encoding="utf-8")
         code, out = self.check()
         self.assertEqual(code, 1)
-        self.assertIn("anchor と閉じる操作（kind: dismiss）の両方が要る", out)
+        self.assertIn("anchor と閉じる操作（screen: back）の両方が要る", out)
 
 
 class ReportShape(unittest.TestCase):
@@ -566,6 +599,399 @@ class ReportShape(unittest.TestCase):
         self.assertEqual(self.problems({"sections": [
             {"name": "test_01", "title": "a", "desc": "x", "result": "NG"}],
             "footer": "確認していないこと: エラー系\n作成したデータ: 無し"}), [])
+
+def build_err(items, repo=FIXTURE):
+    """組めない plan。stderr に出た理由を返す。"""
+    with contextlib.redirect_stderr(io.StringIO()) as err, \
+            contextlib.redirect_stdout(io.StringIO()):
+        try:
+            write_flows(items, repo)
+        except SystemExit as e:
+            return e.code, err.getvalue()
+    raise AssertionError("組めてしまった")
+
+
+class Routing(unittest.TestCase):
+    """#50: 経路は expect の screen を辺にして引く。"""
+
+    def mp(self, repo=FIXTURE):
+        return route.load_map(str(repo))
+
+    def test_tab_is_preferred_at_same_length(self):
+        # home からの settings は、メニュー（push）とタブの2通り。同じ長さならタブ
+        hops = self.mp().path_from("home", "settings")
+        self.assertEqual([e[0].target for _, e in hops], ["tab_bar.settings"])
+
+    def test_conditional_edge_needs_when(self):
+        code, err = build_err([{"from": "login_alert", "title": "a", "expect": "a"}])
+        self.assertEqual(code, 2)
+        self.assertIn("条件つき（when: 未ログイン）", err)
+        self.assertIn("項目の when に同じ文言を書く", err)
+        rows, _ = write_flows([{"from": "login_alert", "when": ["未ログイン"], "title": "a", "expect": "a"}])
+        self.assertEqual(rows[0]["screen"], "login_alert")
+
+    def test_branch_in_do_needs_when(self):
+        code, err = build_err([{"from": "detail", "title": "a", "expect": "a",
+                                "do": ["tap:detail.review_button"]}])
+        self.assertIn("結果が分かれる（ログイン中 / 未ログイン）", err)
+        rows, flows = write_flows([{"from": "detail", "when": ["ログイン中"], "title": "a",
+                                    "expect": "a", "do": ["tap:detail.review_button"]}])
+        self.assertEqual(rows[0]["screen"], "review_editor")
+
+    def test_element_when_is_not_used_for_routing_but_ok_in_do(self):
+        repo = Path(tempfile.mkdtemp()) / "app"
+        shutil.copytree(FIXTURE, repo)
+        detail = repo / "screen-map" / "screens" / "detail.yaml"
+        # フォローボタンを押すと設定に移ることにする（条件つきの要素の辺）
+        detail.write_text(detail.read_text(encoding="utf-8").replace(
+            "expect: {hidden: self}", "expect: {screen: settings, via: push}"), encoding="utf-8")
+        hops = route.load_map(str(repo)).path_from("detail", "settings")
+        self.assertIsNone(hops)
+        hops = route.load_map(str(repo)).path_from("detail", "settings", ("フォローしていないとき",))
+        self.assertEqual([e[0].target for _, e in hops], ["detail.follow_button"])
+        rows, _ = write_flows([{"from": "detail", "title": "a", "expect": "a",
+                                "do": ["tap:detail.follow_button"]}], repo)
+        self.assertEqual(rows[0]["screen"], "settings")
+        shutil.rmtree(repo.parent)
+
+    def test_unknown_op_lists_what_the_screen_has(self):
+        code, err = build_err([{"from": "list", "title": "a", "expect": "a", "do": ["tap:list.nothing"]}])
+        self.assertIn("see:list.empty_view", err)
+        self.assertIn("scroll:down", err)
+
+
+class Flows(unittest.TestCase):
+    """#50: フローに積むもの。"""
+
+    def test_scroll_before_every_tap(self):
+        rows, flows = write_flows([{"from": "detail", "title": "a", "expect": "a",
+                                    "do": ["tap:detail.favorite_button"]}])
+        flow = flows["test_01.yaml"]
+        block = flow[flow.index("# detail: tap detail.favorite_button"):]
+        self.assertLess(block.index("scrollUntilVisible:\n    element:\n      id: '^detail\\.favorite_button$'"),
+                        block.index("- tapOn"))
+        self.assertIn("id: '^detail\\.favorite_button$'\n      selected: true", block)
+
+    def test_arrival_waits_anchor_then_ready_then_settles(self):
+        rows, flows = write_flows([{"from": "list", "title": "a", "expect": "a"}])
+        flow = flows["test_01.yaml"]
+        tail = flow[flow.index("id: '^list$'"):]
+        self.assertLess(tail.index("id: '^list$'"), tail.index("list\\.empty_view"))
+        self.assertLess(tail.index("list\\.empty_view"), tail.index("waitForAnimationToEnd"))
+        self.assertLess(tail.index("waitForAnimationToEnd"), tail.index("takeScreenshot"))
+
+    def test_see_scrolls_to_the_element(self):
+        rows, flows = write_flows([{"from": "list", "title": "a", "expect": "a", "do": ["see:list.footer"]}])
+        self.assertIn("# list: see list.footer — 一覧の末尾\n- scrollUntilVisible:", flows["test_01.yaml"])
+        self.assertEqual(rows[0]["checked"], "list.footer")
+
+    def test_hidden_and_external(self):
+        rows, flows = write_flows([{"from": "detail", "title": "a", "expect": "a",
+                                    "do": ["tap:detail.follow_button", "tap:detail.share_button"]}])
+        flow = flows["test_01.yaml"]
+        self.assertIn("notVisible:\n      id: '^detail\\.follow_button$'", flow)
+        ext = flow[flow.index("# アプリの外（safari）に出る"):]
+        self.assertIn("- launchApp:\n    stopApp: false", ext)
+        self.assertIn("id: '^detail$'", ext)
+        self.assertIsNone(rows[0]["checked"])
+
+    def test_gesture(self):
+        rows, flows = write_flows([{"from": "list", "title": "a", "expect": "a", "do": ["scroll:down"]}])
+        self.assertIn("- scroll\n- extendedWaitUntil:\n    visible:\n      id: '^list\\.footer$'",
+                      flows["test_01.yaml"])
+
+    def test_pattern_value_can_be_fixed(self):
+        rows, flows = write_flows([{"from": "list", "title": "a", "expect": "a",
+                                    "do": ["tap:list.row.C++入門"]}])
+        self.assertEqual(rows[0]["parts"], [{"flow": "test_01.yaml", "decide": None}])
+        self.assertIn("id: '^list\\.row\\.C\\+\\+入門$'", flows["test_01.yaml"])
+
+    def test_pattern_on_the_way_is_picked(self):
+        # from までの途中で一覧の行を押す。見えている1件目を選ぶので、そこで割れる
+        rows, _ = write_flows([{"from": "list", "title": "a", "expect": "a"},
+                               {"from": "detail", "title": "b", "expect": "b"}])
+        self.assertEqual(rows[1]["picks"], {"LIST_ROW": {"pattern": "list.row.*", "pick": "", "exclude": []}})
+        self.assertEqual(rows[1]["inputs"], {})
+
+    def test_elements_under_the_pattern_are_excluded(self):
+        repo = Path(tempfile.mkdtemp()) / "app"
+        shutil.copytree(FIXTURE, repo)
+        lst = repo / "screen-map" / "screens" / "list.yaml"
+        lst.write_text(lst.read_text(encoding="utf-8").replace(
+            "  - id: list.empty_view\n", "  - id: list.row.title\n    name: 行の題名\n  - id: list.empty_view\n"),
+            encoding="utf-8")
+        rows, _ = write_flows([{"from": "list", "title": "a", "expect": "a", "do": ["tap:list.row.*"]}], repo)
+        self.assertEqual(rows[0]["picks"]["LIST_ROW"]["exclude"], ["list.row.title"])
+        shutil.rmtree(repo.parent)
+
+    def test_runtime_on_tap_is_refused(self):
+        code, err = build_err([{"from": "list", "title": "a", "expect": "a",
+                                "do": [{"op": "tap:list.row.*", "runtime": True}]}])
+        self.assertIn("runtime は付けられない", err)
+
+    def test_pick_on_non_pattern_is_refused(self):
+        code, err = build_err([{"from": "list", "title": "a", "expect": "a",
+                                "do": [{"op": "tap:Search", "pick": "x"}]}])
+        self.assertIn("パターンの要素（ID の末尾が *）ではないので、実行時に選べない", err)
+
+    def test_same_pattern_twice_gets_two_vars(self):
+        rows, flows = write_flows([{"from": "list", "title": "a", "expect": "a",
+                                    "do": ["tap:list.row.*", "tap:BackButton", "tap:list.row.*"]}])
+        self.assertEqual([p["decide"] for p in rows[0]["parts"]], [None, "LIST_ROW", "LIST_ROW_2"])
+
+
+class AutoShowAfter(unittest.TestCase):
+    """#50: after つきの自動表示は、after の画面から戻ったときだけ確かめる。"""
+
+    def setUp(self):
+        self.repo = Path(tempfile.mkdtemp()) / "app"
+        shutil.copytree(FIXTURE, self.repo)
+        screens = self.repo / "screen-map" / "screens"
+        (screens / "review_dialog.yaml").write_text(
+            "anchor: review_dialog\nsummary: 詳細から戻ったときに出る\nelements:\n"
+            "  - id: review_dialog.later_button\n    name: 後で\n    actions:\n      - tap:\n"
+            "        summary: 閉じる\n        expect: {screen: back, via: dismiss}\n", encoding="utf-8")
+        lst = screens / "list.yaml"
+        lst.write_text(lst.read_text(encoding="utf-8")
+                       + "auto_shows:\n  - {screen: review_dialog, after: detail}\n", encoding="utf-8")
+
+    def tearDown(self):
+        shutil.rmtree(self.repo.parent)
+
+    def test_checked_only_when_back_from_after(self):
+        rows, flows = write_flows([
+            {"from": "list", "title": "a", "expect": "a"},
+            {"from": "list", "title": "b", "expect": "b", "do": ["tap:list.row.*", "tap:BackButton"]}],
+            self.repo)
+        self.assertNotIn("runFlow", flows["test_01.yaml"])
+        flow = flows["test_02.yaml"]
+        self.assertIn("# 自動表示: review_dialog（detail から戻ったとき）", flow)
+        back = flow[flow.index("^BackButton$"):]
+        self.assertLess(back.index("runFlow"), back.index("id: '^list$'"))
+
+    def test_as_target_goes_to_after_and_back(self):
+        rows, flows = write_flows([{"from": "review_dialog", "title": "a", "expect": "a"}], self.repo)
+        flow = flows["test_01.yaml"]
+        self.assertIn("# list: 自動表示 review_dialog を待つ", flow)
+        self.assertNotIn("runFlow", flow)
+        self.assertEqual(rows[0]["screen"], "review_dialog")
+
+    def test_check(self):
+        mp = route.load_map(str(self.repo))
+        with contextlib.redirect_stdout(io.StringIO()) as o:
+            code = route.cmd_check(mp)
+        self.assertEqual(code, 0, o.getvalue())
+        self.assertIn("自動表示 review_dialog を detail から戻るたびに確かめる", o.getvalue())
+        lst = self.repo / "screen-map" / "screens" / "list.yaml"
+        lst.write_text(lst.read_text(encoding="utf-8").replace("after: detail", "after: viewer"),
+                       encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()) as o:
+            code = route.cmd_check(route.load_map(str(self.repo)))
+        self.assertEqual(code, 1)
+        self.assertIn("自動表示 review_dialog の after viewer の画面が無い", o.getvalue())
+
+
+class FirstVisible(unittest.TestCase):
+    """#50: パターンの要素は、ツリー順ではなく画面に見えている1件目を選ぶ。"""
+
+    DUMP = ("画面: list\n"
+            "         tap  画面内   テキスト / id\n"
+            "   (195,-40)  ×     吾輩は猫である  #list.row.吾輩は猫である\n"
+            "    (195,60)  ○     一覧  #list\n"
+            "   (195,300)  ○     C++入門  #list.row.C++入門 [選択]\n"
+            "   (195,380)  ○     #list.row.こころ\n"
+            "   (195,900)  ×     坊っちゃん  #list.row.坊っちゃん\n")
+
+    def test_skips_offscreen_and_strips_state(self):
+        self.assertEqual(RF["first_visible"](self.DUMP, "list.row.*"), "C++入門")
+
+    def test_elements_inside_the_row_are_excluded(self):
+        # 行の中のタイトル（list.row.title）も行のパターンに当たる。マップで別の要素なら選ばない
+        dump = ("    (195,280)  ○     吾輩は猫である  #list.row.title\n"
+                "    (195,300)  ○     #list.row.こころ\n")
+        self.assertEqual(RF["first_visible"](dump, "list.row.*"), "title")
+        self.assertEqual(RF["first_visible"](dump, "list.row.*", ["list.row.title"]), "こころ")
+        self.assertEqual(RF["first_visible"](dump, "list.row.*", ["list.row.t*"]), "こころ")
+
+    def test_none_when_nothing_visible(self):
+        self.assertIsNone(RF["first_visible"](self.DUMP, "detail.cell.*"))
+
+
+class AutoPickRun(unittest.TestCase):
+    """#50: 条件の無い選択は run_flows.py が画面を読んで決め、picked に書く。"""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.out = self.tmp / "out"
+        self.flows = self.tmp / "flows"
+        self.flows.mkdir(parents=True)
+        self.out.mkdir()
+        (self.flows / "test_01.1.yaml").write_text("appId: x\n---\n", encoding="utf-8")
+        (self.flows / "test_01.yaml").write_text(
+            "appId: x\nenv:\n  SHOTS: ''\n  LIST_ROW: ''\n---\n- tapOn:\n    id: '^list\\.row\\.${LIST_ROW}$'\n",
+            encoding="utf-8")
+        self.sec = {"name": "test_01", "flow": "test_01.yaml", "launch": True,
+                    "parts": [{"flow": "test_01.1.yaml", "decide": None},
+                              {"flow": "test_01.yaml", "decide": "LIST_ROW"}],
+                    "input_use": {"LIST_ROW": "selector"},
+                    "picks": {"LIST_ROW": {"pattern": "list.row.*", "pick": ""}},
+                    "devices": {"iphone": {"inputs": {}, "picked": {}}},
+                    "desc": "", "note": "", "result": "PENDING"}
+        self.saved = {k: RF[k] for k in ("sh", "HERE")}
+        RF["HERE"] = self.tmp / "scripts"
+        self.calls = []
+        self.dump = FirstVisible.DUMP
+
+        def fake_sh(args, quiet=True):
+            self.calls.append(args)
+            if args[0] == "inspect" and len(args) == 3:
+                state = self.tmp / ".work" / "state"
+                state.mkdir(parents=True, exist_ok=True)
+                (state / "last_dump_AAAA.txt").write_text(self.dump, encoding="utf-8")
+            return 0
+        RF["sh"] = fake_sh
+
+    def tearDown(self):
+        RF.update(self.saved)
+        shutil.rmtree(self.tmp)
+
+    def run_device(self):
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            return RF["run_device"]({"sections": [self.sec]}, self.out / "manifest.json",
+                                    self.flows, "iphone", "AAAA", None)
+
+    def test_picks_first_visible_and_fills_env(self):
+        stopped, done, lost = self.run_device()
+        self.assertEqual((stopped, done, lost), (None, 1, []))
+        self.assertEqual(self.sec["devices"]["iphone"]["picked"], {"LIST_ROW": "C++入門"})
+        body = [a[2] for a in self.calls if a[0] == "run" and a[3] == "test_01"][0]
+        self.assertIn("LIST_ROW: 'C\\+\\+入門'", body)
+        log = (self.out / "progress_iphone.log").read_text(encoding="utf-8")
+        self.assertIn("test_01 撮影済み（選んだ: LIST_ROW=C++入門）", log)
+
+    def test_nothing_visible_loses_the_item(self):
+        self.dump = "画面: list\n"
+        stopped, done, lost = self.run_device()
+        self.assertEqual((done, lost), (0, ["iphone test_01"]))
+        self.assertIn("押す list.row.* が画面に見えていない",
+                      (self.out / "progress_iphone.log").read_text(encoding="utf-8"))
+
+    def test_conditional_pick_stops_for_input(self):
+        self.sec["picks"]["LIST_ROW"]["pick"] = "いちばん長い名前"
+        self.sec["devices"]["iphone"]["inputs"] = {"LIST_ROW": ""}
+        stopped, done, lost = self.run_device()
+        self.assertEqual(stopped, ("test_01", 1))
+        self.assertEqual([a[3] for a in self.calls if a[0] == "run"], ["test_01.1"])
+
+    def test_resume_starts_from_the_stopped_part(self):
+        self.sec["picks"]["LIST_ROW"]["pick"] = "いちばん長い名前"
+        self.sec["devices"]["iphone"]["inputs"] = {"LIST_ROW": "こころ"}
+        with contextlib.redirect_stdout(io.StringIO()):
+            RF["run_device"]({"sections": [self.sec]}, self.out / "manifest.json",
+                             self.flows, "iphone", "AAAA", ("test_01", 1))
+        self.assertEqual([a[3] for a in self.calls if a[0] == "run"], ["test_01"])
+
+
+class Check(unittest.TestCase):
+    """#50: check は expect / ready が指す ID と、スキーマの形を確かめる。"""
+
+    def setUp(self):
+        self.repo = Path(tempfile.mkdtemp()) / "app"
+        shutil.copytree(FIXTURE, self.repo)
+        self.screens = self.repo / "screen-map" / "screens"
+
+    def tearDown(self):
+        shutil.rmtree(self.repo.parent)
+
+    def check(self):
+        mp = route.ScreenMap(route.find_map(str(self.repo)))
+        with contextlib.redirect_stdout(io.StringIO()) as o:
+            code = route.cmd_check(mp)
+        return code, o.getvalue()
+
+    def edit(self, name, old, new):
+        f = self.screens / name
+        text = f.read_text(encoding="utf-8")
+        self.assertIn(old, text)
+        f.write_text(text.replace(old, new), encoding="utf-8")
+
+    def test_fixture_passes(self):
+        code, out = self.check()
+        self.assertEqual(code, 0, out)
+
+    def test_undefined_expect_id(self):
+        self.edit("list.yaml", "expect: {visible: list.footer}", "expect: {visible: list.count_label}")
+        code, out = self.check()
+        self.assertEqual(code, 1)
+        self.assertIn("expect が指す list.count_label がどの画面の要素にも無い", out)
+
+    def test_undefined_ready_id(self):
+        self.edit("detail.yaml", "all: [detail.title]", "all: [detail.body]")
+        code, out = self.check()
+        self.assertIn("ready の detail.body がどの画面の要素にも無い", out)
+
+    def test_bad_via_and_mixed_when(self):
+        self.edit("home.yaml", "expect: {screen: list, via: push}", "expect: {screen: list, via: back}")
+        self.edit("detail.yaml", "          - when: 未ログイン\n", "          - ")
+        code, out = self.check()
+        self.assertIn("via は push / modal / tab（戻る操作は screen: back）", out)
+        self.assertIn("when のある項目と無い項目が混ざっている", out)
+
+    def test_old_schema_is_refused(self):
+        shutil.rmtree(self.repo / "screen-map")
+        shutil.copytree(Path(__file__).resolve().parent / "fixtures" / "old_app" / "screen-map",
+                        self.repo / "screen-map")
+        code, out = self.check()
+        self.assertEqual(code, 1)
+        self.assertIn("migrate_map.py", out)
+        with self.assertRaises(SystemExit) as cm:
+            route.load_map(str(self.repo))
+        self.assertIn("migrate_map.py", str(cm.exception.code))
+
+
+class Migrate(unittest.TestCase):
+    """#50: 古い形のマップを変換し、そのまま check と経路計算が通る。"""
+
+    def test_migrate_old_fixture(self):
+        repo = Path(tempfile.mkdtemp()) / "app"
+        shutil.copytree(Path(__file__).resolve().parent / "fixtures" / "old_app", repo)
+        argv = sys.argv
+        sys.argv = ["migrate_map.py", "--repo", str(repo), "--write"]
+        try:
+            with contextlib.redirect_stdout(io.StringIO()) as o:
+                runpy.run_path(str(SCRIPTS / "migrate_map.py"), run_name="__main__")
+        finally:
+            sys.argv = argv
+        out = o.getvalue()
+        self.assertIn("移した画面: detail home list review_dialog", out)
+        self.assertIn("select（index: 0, capture: itemTitle）を捨てた", out)
+        self.assertIn("に条件が書いてある", out)
+        mp = route.load_map(str(repo))
+        lst = {el["id"]: el for el in mp.elements("list")}
+        self.assertEqual(lst["list.empty_view"]["when"], "0件のとき")
+        self.assertIn("list.count_label", lst)          # 観測点だった ID も要素になる
+        self.assertEqual(lst["Clear text"]["by"], "label")
+        self.assertIs(lst["list.banner"]["in_tree"], False)
+        self.assertEqual(mp.screens["list"]["gestures"][0]["scroll"], "down")
+        self.assertEqual(mp.screens["list"]["auto_shows"], ["review_dialog"])
+        with contextlib.redirect_stdout(io.StringIO()) as o:
+            self.assertEqual(route.cmd_check(mp), 0, o.getvalue())
+        self.assertEqual([e[0].target for _, e in mp.path_from("home", "detail")], ["home.fav"])
+        shutil.rmtree(repo.parent)
+
+
+class MiniYaml(unittest.TestCase):
+    def test_flow_mapping(self):
+        from mini_yaml import load_yaml
+        f = Path(tempfile.mkdtemp()) / "x.yaml"
+        f.write_text("a:\n  - tap:\n    expect: {screen: x, via: push}\n"
+                     "b: [c, {screen: d, after: [e, f]}]\n"
+                     "c: \"x, y: z\"\n", encoding="utf-8")
+        self.assertEqual(load_yaml(f), {
+            "a": [{"tap": None, "expect": {"screen": "x", "via": "push"}}],
+            "b": ["c", {"screen": "d", "after": ["e", "f"]}],
+            "c": "x, y: z"})
+        shutil.rmtree(f.parent)
 
 
 if __name__ == "__main__":

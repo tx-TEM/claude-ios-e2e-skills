@@ -8,6 +8,11 @@ env:
       id: '^list$'
     timeout: 10000
 # list: tap Search — 絞り込みを確定し、キーボードを閉じる
+- scrollUntilVisible:
+    element:
+      id: '^Search$'
+    direction: DOWN
+    timeout: 60000
 - tapOn:
     id: '^Search$'
 - extendedWaitUntil:

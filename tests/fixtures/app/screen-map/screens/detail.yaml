@@ -1,7 +1,45 @@
 anchor: detail
 names: [詳細]
-summary: 作品の詳細
-actions:
-  - tap: BackButton
-    to: list
-    kind: back
+summary: 作品の詳細。お気に入り・フォロー・レビューができる
+ready:
+  all: [detail.title]
+elements:
+  - id: detail.title
+    name: 作品名
+  - id: detail.favorite_button
+    name: お気に入り（右上）
+    actions:
+      - tap:
+        summary: 作品をお気に入りに登録する（アカウントに保存される）
+        expect: {selected: self}
+  - id: detail.follow_button
+    name: 作者をフォロー（下部）
+    when: フォローしていないとき
+    actions:
+      - tap:
+        summary: 作者をフォローする（アカウントのフォロー状態が変わる）
+        expect: {hidden: self}
+  - id: detail.share_button
+    name: 共有
+    actions:
+      - tap:
+        summary: Safari で作品のページを開く
+        expect: {external: safari}
+  - id: detail.review_button
+    name: レビューを書く
+    actions:
+      - tap:
+        summary: レビューを書く画面を開く
+        expect:
+          - when: ログイン中
+            screen: review_editor
+            via: modal
+          - when: 未ログイン
+            screen: login_alert
+            via: modal
+  - id: BackButton
+    name: 戻る（左上）
+    actions:
+      - tap:
+        summary: 前の画面に戻る
+        expect: {screen: back, via: back}

@@ -1,19 +1,39 @@
 anchor: list
 names: [一覧]
 summary: 作品を検索して開く
-actions:
-  - text: list.search_field
-    result: 入力が止まると絞り込む
-    expect: list.search_field
-  - tap: Search
-    result: 絞り込みを確定し、キーボードを閉じる
-    expect: list.search_field
-  - scroll: list.footer
-    result: 末尾まで読み込む
-    expect: list.footer
-  - tap: list.row.*
-    to: detail
-    select:
-      index: 0
-  - tap: BackButton
-    kind: back
+ready:
+  any: [list.row.*, list.empty_view]
+elements:
+  - id: list.search_field
+    name: 検索欄（上部）
+    actions:
+      - text:
+        summary: 入力が止まると絞り込む
+        expect: {value: self}
+  - id: Search
+    name: 検索（キーボードのキー）
+    actions:
+      - tap:
+        summary: 絞り込みを確定し、キーボードを閉じる
+        expect: {value: list.search_field}
+  - id: list.row.*
+    name: 作品の行（ID は作品名）
+    actions:
+      - tap:
+        summary: 作品の詳細を開く
+        expect: {screen: detail, via: push}
+  - id: list.empty_view
+    name: 該当なしの表示
+    when: 絞り込みで0件のとき
+  - id: list.footer
+    name: 一覧の末尾
+  - id: BackButton
+    name: 戻る（左上）
+    actions:
+      - tap:
+        summary: 前の画面に戻る
+        expect: {screen: back, via: back}
+gestures:
+  - scroll: down
+    summary: 末尾に近づくと次のページを読み込む
+    expect: {visible: list.footer}

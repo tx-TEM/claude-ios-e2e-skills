@@ -1,16 +1,13 @@
 appId: jp.example.App
-env:
-  SHOTS: ''
 ---
 # 続き: list から
 - extendedWaitUntil:
     visible:
       id: '^list$'
     timeout: 10000
-# list: see list.footer — 一覧の末尾
+# 次で使う list.search_field が見えるまでスクロールして止める（ここで打つ文字を決める）
 - scrollUntilVisible:
     element:
-      id: '^list\.footer$'
+      id: '^list\.search_field$'
     direction: DOWN
     timeout: 60000
-- takeScreenshot: '${SHOTS}/test_04'

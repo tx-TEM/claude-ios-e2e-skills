@@ -31,22 +31,35 @@ plan.json の形。**項目1つ＝ from から do を順に叩いて、1枚撮�
        {"from": "browse",
         "do": [{"op": "text:browse.search_field", "input": "zzzz"}]},
        {"from": "browse", "fresh": true,
-        "do": ["tap:browse.book_row.*"]}]}
+        "do": ["tap:browse.book_row.*"]},
+       {"from": "browse",
+        "do": [{"op": "tap:browse.book_row.*", "pick": "貸出中の本"}]},
+       {"from": "browse", "do": ["see:browse.section.recommend"]},
+       {"from": "book_detail", "when": ["ログイン中"],
+        "do": ["tap:book_detail.register_button"]}]}
   from      その項目の操作を始める画面。**項目は経路を持たない** —
             前の項目が終わった画面から from までは、ここで計算して
             繋ぐ（すでに居れば何もしない）
-  do        確かめる操作。`tap:<id>` `scroll:down` のように種類を頭に
-            付けて指せる（scroll は必須）。**並び順がそのまま実行順。**
-            遷移する操作も書いてよく、行き先はマップの `to` で追う。
-            着いた状態を見るだけの項目は空。入れる値の要る操作は
-            {"op": 操作id, …} にして、次のどちらかを添える
+  do        確かめる操作。`tap:<id>` `text:<id>` `see:<id>` `scroll:down` の
+            ように種類を頭に付けて指す。**並び順がそのまま実行順。**
+            遷移する操作も書いてよく、行き先はマップの `expect` で追う。
+            `see:<id>` は「その要素を見る」（見えるまでスクロールして確かめる）。
+            着いた状態を見るだけの項目は空。
+            **パターンの要素（ID の末尾が *）は、どれを押すかをスクリプトが決める。**
+            何も添えなければ画面に見えている1件目。選ぶ条件があるときだけ
+              {"op": 操作id, "pick": 条件}  止めて、ダンプと条件から選ばせる
+            具体的な1つを決め打つなら ID まで書く（`tap:browse.book_row.吾輩は猫である`）。
+            text は打つ文字を {"op": 操作id, …} で添える
               "runtime": true  **値を実行時に決める。** フローには値を
                    焼き込まず、`env` の未定のまま残す。着いた画面を
-                   見ないと決まらないときに（打つ文字、どの行を叩くか）。
-                   焼き込むと、データが変わっても古い値で黙って走る
+                   見ないと決まらないときに。焼き込むと、データが
+                   変わっても古い値で黙って走る
               "input": 値      データに依らない値（一致しない語など）
-            from までの経路の途中で叩く操作は位置で選ぶ。どれを選ぶかを
-            気にするなら、それは確かめる操作なので do に書く
+            from までの経路の途中でパターンの要素を押すときも、見えている1件目。
+            どれを選ぶかを気にするなら、それは確かめる操作なので do に書く
+  when      項目の前提。マップの `when` の文言をそのまま写す（["ログイン中"]）。
+            条件つきの要素と、結果が分かれる操作の枝は、ここに同じ文言が
+            あるときだけ使う。意味は読まない — 文字列が一致するかだけ
   fresh     その項目はアプリを起動し直した直後から始める。**項目の前提で
             あって、フローの切り方ではない** — 前の項目の状態（絞り込み、
             変えたデータ）が残ると前提が崩れるときだけ付ける
@@ -72,9 +85,15 @@ plan.json の形。**項目1つ＝ from から do を順に叩いて、1枚撮�
 起動し直ることを知らないと証跡を読み違える**（前の項目の状態が続いているのか、
 まっさらなのか）。
 
-**`inputs` は実行時に決める値。** plan で `runtime` を書いた項目に付く。打つ文字
-にも、どの行を叩くかにも付く。値が空のうちはフローを走らせられない（`run_flows.py`
+**`parts` は項目のフローを割ったもの。** 実行時に値を決める操作（打つ文字、パターンの
+要素のどれを押すか）があると、その手前で割れる。`decide` がその本の前に決める値で、
+`run_flows.py` は前の本を走らせてから値を決め、次の本を走らせる。
+
+**`inputs` は撮影する側（LLM）が決める値。** plan で `runtime` を書いた打つ文字と、
+`pick`（条件つきで選ぶ）の行に付く。値が空のうちはその本を走らせられない（`run_flows.py`
 がそこで止まる）。着いた画面を見ないと決まらないものなので、埋めるのは撮影する側。
+**条件の無いパターンの要素は `inputs` に入らない。** `picks` に選び方だけがあり、
+`run_flows.py` が画面に見えている1件目を選んで `devices.<端末>.picked` に書く。
 **埋める側は正規表現のエスケープをかけない。** 各値がセレクタ（正規表現）に入るか
 inputText に入るかは `input_use` に書いてあり、エスケープは run_flows.py がする。
 
@@ -173,6 +192,7 @@ def main():
     entries = list(rows) + [{"name": route.shot_name(len(items) + n),
                              "title": it.get("title", ""), "from": it.get("from"),
                              "fresh": bool(it.get("fresh")), "do": it.get("do") or [],
+                             "when": it.get("when") or [],
                              "expect": it.get("expect", "")}
                             for n, it in enumerate(explore, 1)]
 
@@ -190,15 +210,20 @@ def main():
             "expect": e.get("expect", ""),     # 証跡の中で何を確かめるか。plan が正
             "checked": e.get("checked"),       # None なら証跡だけが根拠
             "launch": e.get("launch"),         # true なら、ここでアプリを起動し直す
-            "pre_flow": e.get("pre_flow"),     # 値を決める操作の手前まで。先に走らせる
-            "flow": e.get("flow"),             # 全端末で同じフロー
+            "when": e.get("when") or [],       # 項目の前提（plan）
+            "parts": e.get("parts") or [],     # 割ったフロー。decide はその本の前に決める値
+            "flow": e.get("flow"),             # 撮るフロー（parts の最後）。全端末で同じ
+            # パターンの要素の選び方。pick が空なら run_flows.py が見えている1件目を選ぶ
+            "picks": dict(e.get("picks") or {}),
             # 実行時に決める値の入る先（selector / text）。端末によらない。run_flows.py が
             # これを見て、セレクタに入る値だけ正規表現としてエスケープする
             "input_use": dict(e.get("input_use") or {}),
-            # 実行時に決める値は端末ごと（その端末の画面を見て決める）
+            # 実行時に決める値は端末ごと（その端末の画面を見て決める）。picked は
+            # run_flows.py が見えている1件目を選んだ結果で、撮るたびに選び直す
             "devices": {d: {"inputs": {k: ((prev.get("devices") or {}).get(d) or {})
                                            .get("inputs", {}).get(k, "")
-                                       for k in (e.get("inputs") or {})}}
+                                       for k in (e.get("inputs") or {})},
+                            "picked": {}}
                         for d in devices},
             # 証跡は端末ごとに1枚。ダンプは同名の .txt
             "images": [{"src": f"shots/{d}/{name}.png", "label": LABELS.get(d, d)}
