@@ -1,15 +1,4 @@
-"""ステップ。フローの1コマ分の「何をして、何が起きるか」で、Maestro の書き方はまだ含まない。
-
-積むのは bridge.py（項目と項目の間の経路）と、sim-test-report の testflow/flow.py（項目の do）。
-testflow/maestro.py がこれを Maestro のフロー（yaml）に書く。
-
-**種類ごとにクラスを分け、持つものを固定する。** どのステップが何を持つかは、ここの定義を
-読めば分かる。`item` はどの項目のステップか（plan の項目の名前。経路を表示するだけのときは None）。
-
-**操作（Act）は「何を押すか」と「押すと何が起きるか（result）」を分けて持つ。** 起きることは
-ステップを作る時点で解ききる — 戻る操作は実際に戻る画面に、分かれる結果は選んだ枝に、
-`self` は押す要素の ID にする。マップに書いた `expect` をあとから読み直さない。
-"""
+"""フローの1コマ（ステップ）と、操作の結果の型。"""
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
