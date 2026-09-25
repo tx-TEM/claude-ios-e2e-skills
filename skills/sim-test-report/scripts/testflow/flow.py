@@ -1,12 +1,12 @@
 """plan.json から、項目ごとの Maestro のフローを作る（manifest.py から呼ぶ）。plan の形は manifest.py --help。
 
 項目1つ＝「`from` から `do` を順に叩いて、1枚撮る」。**項目は経路を持たない。**
-前の項目が終わった画面から次の項目の `from` までは screen-map の screenmap/route.py が繋ぐ（すでに居れば何もしない）。
+前の項目が終わった画面から次の項目の `from` までは screen-map の screenmap/bridge.py が繋ぐ（すでに居れば何もしない）。
 ここがするのは、項目の `do` をマップの操作に引き当ててステップにすることと、
 できたステップ列を maestro.py でフローに書くこと。
 
   plan の項目 ──→ build_steps() ──→ ステップ列 ──→ write_flows() ──→ フロー（撮影ごとに1本）
-                   ├ 項目の間: route.py（Route.to）
+                   ├ 項目の間: bridge.py（Route.to）
                    └ 項目の do: do_step()
 """
 import json
@@ -16,7 +16,7 @@ from pathlib import Path
 from .maestro import (add_reveals, assign_vars, emit_flow, runtime_picks, runtime_uses,
                       shot_context, split_at_shots, split_parts, var_of)
 from screenmap.model import DO_OPS, FORWARD, GESTURES, is_pattern, load_map, pattern_prefix
-from screenmap.route import Route, Unroutable, emit_path, report_problems
+from screenmap.bridge import Route, Unroutable, emit_path, report_problems
 from screenmap.steps import Act, See, Shot
 
 PLAN_KEYS = {"app", "clear_state", "items", "explore"}
@@ -80,7 +80,7 @@ def read_items(plan):
             if "shot" in unknown:
                 hint = "。証跡の名前は並び順から振る"
             elif unknown & {"steps", "goto"}:
-                hint = "。経路は書かない — from に着くまでは route.py が計算する"
+                hint = "。経路は書かない — from に着くまではスクリプトが計算する"
             elif unknown & {"runtime", "inputs"}:
                 hint = "。値の決め方は do の操作に書く（{\"op\": …, \"runtime\": true}）"
             elif "screen" in unknown:
@@ -117,7 +117,7 @@ def read_items(plan):
 def build_steps(mp, items):
     """項目を順にステップ列にする。(ステップ列, 組めなかった理由, 補足)。
 
-    項目ごとに: `fresh` なら起動し直す → route.py で `from` まで繋ぐ → `do` を1つずつ
+    項目ごとに: `fresh` なら起動し直す → bridge.py で `from` まで繋ぐ → `do` を1つずつ
     ステップにする → 撮る。**組めなかったらそこで止める**（先の項目は、手前の項目が
     終わった画面を前提にしているので、組んでも意味が無い）。
     """

@@ -1,6 +1,6 @@
 """ステップを Maestro のフロー（yaml）にする。セレクタ、待ち、フローの切り方、実行時に決める値の名前。
 
-どのステップを積むかは flow.py（項目の do）と route.py（項目の間の経路）が決める。
+どのステップを積むかは flow.py（項目の do）と bridge.py（項目の間の経路）が決める。
 ここはそれを Maestro のコマンドに書くだけ。
 """
 import os
@@ -200,7 +200,7 @@ def auto_checks(mp, sid, keep=None, via=None, came=None):
 
     **閉じるのは既定の扱い。** マップは「出ることがある」という事実だけを持ち、
     邪魔か確かめたいかはテストケースが決める。確かめたい項目（`from` にその画面）
-    では、`keep` に渡した画面は閉じずに待つ（route.py が積む `await`）。
+    では、`keep` に渡した画面は閉じずに待つ（bridge.py が積む `await`）。
 
     **出ていないときに1つあたり約7秒かかる**（Maestro が「無い」と決めるまで
     `optionalLookupTimeoutMs` の既定7秒を待つ。下げる設定は無い）。だから

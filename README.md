@@ -73,7 +73,7 @@ python3 ~/.claude/skills/sim-test-report/scripts/manifest.py \
   --repo <アプリのリポジトリ> --device iphone=<iPhoneのUDID> --device ipad=<iPadのUDID>
 ```
 
-中で screen-map の経路計算（`scripts/screenmap/route.py`）を使う。plan の各項目について、前の項目が終わった画面から `from` までの経路を画面マップから計算し、`do` の操作と撮影を繋いで、項目ごとのフローとして書き出す。押す前・見る前には必ず見えるまでスクロールし（`scrollUntilVisible`）、画面に着いたら anchor → 読み込み完了の目印（`ready`）→ アニメーションの落ち着きの順に待つ。経路は同じ長さならタブバーを通る方を採る。
+中で screen-map の経路計算（`scripts/screenmap/bridge.py`）を使う。plan の各項目について、前の項目が終わった画面から `from` までの経路を画面マップから計算し、`do` の操作と撮影を繋いで、項目ごとのフローとして書き出す。押す前・見る前には必ず見えるまでスクロールし（`scrollUntilVisible`）、画面に着いたら anchor → 読み込み完了の目印（`ready`）→ アニメーションの落ち着きの順に待つ。経路は同じ長さならタブバーを通る方を採る。
 
 実行時に値を決める操作（打つ文字、どの行を押すか）があると、項目のフローはその手前で割れる。前の本は対象が見えるまでスクロールして止まり、次の本がその値を使う。
 

@@ -12,7 +12,7 @@
 **ここにあるのは CLI だけ。** 中身は screenmap/ にある（一覧は screenmap/__init__.py）。
 
 **フローはここでは書かない。** plan.json から項目ごとのフローを書くのは sim-test-report の
-`manifest.py` で、中で testflow/flow.py の `write_flows()` を呼ぶ（項目の間は screenmap/route.py が繋ぐ）。plan の形は `manifest.py --help`。
+`manifest.py` で、中で testflow/flow.py の `write_flows()` を呼ぶ（項目の間は screenmap/bridge.py が繋ぐ）。plan の形は `manifest.py --help`。
 
 **どの画面が目標かを決めるのはここの仕事ではない。** `screens` が出すのは
 一覧で、絞るのは読む側。ここにキーワード一致を足さない。**文字列の一致は
@@ -23,7 +23,7 @@ import sys
 
 from screenmap.check import cmd_check
 from screenmap.model import load_map
-from screenmap.route import emit_path, report_problems, walk
+from screenmap.bridge import emit_path, report_problems, walk
 
 
 def cmd_screens(mp):

@@ -1,6 +1,6 @@
 """ステップ。フローの1コマ分の「何をするか」で、Maestro の書き方はまだ含まない。
 
-積むのは route.py（項目と項目の間の経路）と、sim-test-report の testflow/flow.py（項目の do）。
+積むのは bridge.py（項目と項目の間の経路）と、sim-test-report の testflow/flow.py（項目の do）。
 testflow/maestro.py がこれを Maestro のフロー（yaml）に書く。
 
 **種類ごとにクラスを分け、持つものを固定する。** どのステップが何を持つかは、ここの定義を

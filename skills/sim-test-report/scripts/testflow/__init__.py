@@ -1,7 +1,7 @@
 """plan から Maestro のフローを作る部品。叩くのは scripts/ 直下の manifest.py。
 
   flow.py      plan からフローを作る主体。項目の do をステップにし、項目の間は
-               screen-map の screenmap/route.py で繋ぎ、maestro.py で書く
+               screen-map の screenmap/bridge.py で繋ぎ、maestro.py で書く
   maestro.py   ステップを Maestro のフロー（yaml）にする
 
 **画面マップを読む部品は screen-map スキルにある**（screen-map/scripts/screenmap/）。
