@@ -29,7 +29,7 @@ R=~/.claude/skills/screen-map/scripts/map.py   # 画面マップを引く・確�
 M=<アプリのリポジトリ>
 ```
 
-**map.py にも manifest.py にも `--repo $M`（アプリのリポジトリ）を必ず渡す。** 画面マップはその下の `screen-map/` を読む。カレントからは探さない。
+**map.py には `--repo $M`（アプリのリポジトリ）を必ず渡し、plan には `"repo"` に同じパスを書く。** 画面マップはその下の `screen-map/` を読む。カレントからは探さない。manifest.py はどのマップで組むかを plan の `repo` から読む（引数では受け取らない）。
 
 **入口は2つ。呼び出し元から何が来たかで決まる。**
 
@@ -203,6 +203,7 @@ python3 $R check   --repo $M     # 到達できない画面、切れている箇
 ```json
 {
   "app": "<bundle id>",
+  "repo": "<アプリのリポジトリ（$M）>",
   "items": [
     {"from": "browse",
      "title": "一覧画面が初期表示で一覧を出す",
@@ -237,7 +238,7 @@ python3 $R check   --repo $M     # 到達できない画面、切れている箇
 ```
 
 ```bash
-python3 ~/.claude/skills/sim-test-report/scripts/manifest.py <plan.json> <出力先> --repo $M --device iphone=<UDID> [--device ipad=<UDID>]
+python3 ~/.claude/skills/sim-test-report/scripts/manifest.py <plan.json> <出力先> --device iphone=<UDID> [--device ipad=<UDID>]
 ```
 
 `<出力先>` は証跡の出力先ディレクトリ（証跡は `<出力先>/shots/<端末>/` に撮る）。フローはスキル側の `.work/flows/<出力先の名前>/` に、端末によらず1組書かれる（撮影先だけを撮るときに端末に合わせて埋める）。経路が組めなければ manifest.py が理由を出して止まる。

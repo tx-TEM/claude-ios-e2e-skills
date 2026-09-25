@@ -51,9 +51,9 @@ RF = load_run_flows()
 def write_flows(items, repo=FIXTURE):
     """plan から フローを書いて、(行, {ファイル名: 中身}) を返す。経路の表示は捨てる。"""
     out = Path(tempfile.mkdtemp())
-    plan = {"app": "jp.example.App", "items": items}
+    plan = {"app": "jp.example.App", "repo": str(repo), "items": items}
     with contextlib.redirect_stdout(io.StringIO()):
-        rows = flows_of.write_flows(plan, out, str(repo))
+        rows = flows_of.write_flows(plan, out)
     flows = {p.name: p.read_text(encoding="utf-8") for p in sorted(out.glob("*.yaml"))}
     shutil.rmtree(out)
     return rows, flows
@@ -228,18 +228,19 @@ class Manifest(unittest.TestCase):
     def test_manifest_from_plan(self):
         work = Path(tempfile.mkdtemp())
         plan = work / "plan.json"
-        plan.write_text(json.dumps({"app": "jp.example.App", "items": [
+        plan.write_text(json.dumps({"app": "jp.example.App", "repo": str(FIXTURE), "items": [
             {"from": "list", "title": "a", "expect": "a",
              "do": ["tap:list.row.*"]}],
             "explore": [{"from": "settings", "title": "b", "expect": "b",
                          "reason": "画面 settings がマップに無い"}]}), encoding="utf-8")
         out = work / "out"
-        run_manifest([plan, out, "--repo", FIXTURE, "--device", "iphone=AAAA", "--device", "ipad=BBBB"])
+        run_manifest([plan, out, "--device", "iphone=AAAA", "--device", "ipad=BBBB"])
         m = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
         shutil.rmtree(Path(m["flows"]), ignore_errors=True)
         shutil.rmtree(work)
 
         self.assertEqual(sorted(m["devices"]), ["ipad", "iphone"])
+        self.assertEqual(m["repo"], str(FIXTURE.resolve()))   # どのマップで組んだかを残す
         first, explore = m["sections"]
         self.assertEqual(first["name"], "test_01")
         self.assertEqual(first["input_use"], {"LIST_ROW": "selector", "LIST_ROW_INDEX": "index"})
@@ -262,8 +263,8 @@ class Manifest(unittest.TestCase):
         out = work / "out"
 
         def build(items):
-            plan.write_text(json.dumps({"app": "x", "items": items}), encoding="utf-8")
-            printed = run_manifest([plan, out, "--repo", FIXTURE, "--device", "iphone=AAAA"])
+            plan.write_text(json.dumps({"app": "x", "repo": str(FIXTURE), "items": items}), encoding="utf-8")
+            printed = run_manifest([plan, out, "--device", "iphone=AAAA"])
             return json.loads((out / "manifest.json").read_text(encoding="utf-8")), printed
 
         text = {"from": "list", "title": "a", "expect": "a",
@@ -284,6 +285,40 @@ class Manifest(unittest.TestCase):
         self.assertEqual(m["sections"][0]["devices"]["iphone"]["inputs"], {"LIST_ROW": ""})
         shutil.rmtree(Path(m["flows"]), ignore_errors=True)
         shutil.rmtree(work)
+
+
+class PlanRepo(unittest.TestCase):
+    """plan が、どのアプリの画面マップを前提にしたかを持つ（repo）。manifest.py は引数で受け取らない。"""
+
+    def setUp(self):
+        self.work = Path(tempfile.mkdtemp())
+
+    def tearDown(self):
+        shutil.rmtree(self.work)
+
+    def load(self, plan):
+        f = self.work / "plans" / "plan.json"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps(plan), encoding="utf-8")
+        return flows_of.load_plan(f)
+
+    def test_repo_is_required(self):
+        with self.assertRaises(SystemExit) as cm:
+            self.load({"app": "x", "items": []})
+        self.assertIn("plan に repo（アプリのリポジトリ）が要る", str(cm.exception.code))
+
+    def test_relative_repo_is_read_from_the_plan_file(self):
+        app = self.work / "app"
+        app.mkdir()
+        plan = self.load({"app": "x", "repo": "../app", "items": []})
+        self.assertEqual(plan["repo"], str(app.resolve()))
+
+    def test_manifest_refuses_repo_argument(self):
+        f = self.work / "plan.json"
+        f.write_text(json.dumps({"app": "x", "repo": str(FIXTURE), "items": []}), encoding="utf-8")
+        with self.assertRaises(SystemExit) as cm:
+            run_manifest([f, self.work / "out", "--repo", FIXTURE, "--device", "iphone=AAAA"])
+        self.assertIn("plan の repo に書く", str(cm.exception.code))
 
 
 class RetakeRuns(unittest.TestCase):

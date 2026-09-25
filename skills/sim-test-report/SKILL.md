@@ -46,7 +46,7 @@ description: iOSシミュレーターでの動作確認を、テストケース�
 ```bash
 python3 <このスキルのディレクトリ>/scripts/manifest.py \
   <このスキルのディレクトリ>/.work/flows/<slug>/plan.json <出力先> \
-  --repo <アプリのリポジトリ> --device iphone=<UDID> [--device ipad=<UDID>]
+  --device iphone=<UDID> [--device ipad=<UDID>]
 ```
 
 項目の名前は並び順（`test_01`, …）。フローは端末によらず1組で、証跡だけが `shots/<端末>/<名前>.png` に分かれる。**作業用のファイルはスキル側の `.work/flows/<slug>/` に置き、アプリのリポジトリの下に作らない**（誰も片付けない）。`<slug>` は実行ごとに変える。

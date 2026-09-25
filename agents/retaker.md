@@ -17,7 +17,6 @@ evidence-judge が `RETAKE` を付けた項目だけを撮り直す。**原因�
 
 - **マニフェストのパス**（`<出力先>/manifest.json`）と、撮り直す項目の名前（`test_15`）
 - **plan.json のパス**（`<スキルのディレクトリ>/.work/flows/<slug>/plan.json`）
-- **アプリのリポジトリのパス**（manifest.py の `--repo` に渡す。画面マップはその下の `screen-map/`）
 
 **RETAKE の理由はマニフェストに入っている。** その項目の `desc` に、judge が「何が見えていれば判定できたか」「どう直せば撮れるか」を書いている。証跡は `<出力先>/shots/<端末>/<名前>.png`、ダンプは同名の `.txt`。
 
@@ -43,7 +42,7 @@ evidence-judge が `RETAKE` を付けた項目だけを撮り直す。**原因�
 
 ```bash
 python3 <スキルのディレクトリ>/scripts/manifest.py <plan.json> <出力先> \
-  --repo <アプリのリポジトリ> --device <端末>=<UDID> [...]
+  --device <端末>=<UDID> [...]
 ```
 
 端末と UDID はマニフェストの `devices` にある。前と同じものを渡す。**実行時に決めた値（`inputs`）と、ほかの項目の判定は引き継がれる**（出力に「引き継いだ実行時の値」が出る）。条件なしで見えている1件目を選んだ行（`picked`）は引き継がず、撮るときに選び直す。
