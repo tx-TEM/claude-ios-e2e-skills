@@ -31,7 +31,7 @@
     },
     {
       "id": "outside-app",
-      "prompt": "撮り直す項目: test_16\n\nマニフェストの test_16:\n  title: 図書カードのリンクをタップすると Safari で図書カードが開く\n  expect: Safari に作品の図書カードのページが表示されている\n  fresh: true\n  result: RETAKE\n  desc: Safari ではなく、アプリの詳細画面が写っている。フローはリンクを押したあとアプリに戻してから撮っている。読み込み後の Safari のページが写っていれば判定できる。\n\nフロー test_16.yaml（抜粋）:\n  - tapOn:\n      id: '^detail\\.card_link$'\n  # アプリの外（safari）に出る。確かめずにアプリに戻す\n  - launchApp:\n      stopApp: false\n  - extendedWaitUntil:\n      visible:\n        id: '^detail$'\n      timeout: 10000\n  - takeScreenshot: '${SHOTS}/test_16'\n\n画面マップの detail.yaml:\n  - id: detail.card_link\n    name: 図書カード（リンク）\n    actions:\n      - tap:\n        summary: Safari で図書カードのページを開く\n        expect: {external: safari}\n    （Safari の中はマップの対象外で、待てる要素は無い）",
+      "prompt": "撮り直す項目: test_16\n\nマニフェストの test_16:\n  title: 図書カードのリンクをタップすると Safari で図書カードが開く\n  expect: Safari に作品の図書カードのページが表示されている\n  fresh: true\n  result: RETAKE\n  desc: Safari は開いているが、ページが白いまま（読み込み前）。読み込み後の図書カードのページが写っていれば判定できる。\n\nフロー test_16.yaml（抜粋）:\n  - tapOn:\n      id: '^detail\\.card_link$'\n  # アプリの外（safari）に出る。確かめずに、外に居るまま撮る\n  - waitForAnimationToEnd:\n      timeout: 3000\n  - takeScreenshot: '${SHOTS}/test_16'\n\n画面マップの detail.yaml:\n  - id: detail.card_link\n    name: 図書カード（リンク）\n    actions:\n      - tap:\n        summary: Safari で図書カードのページを開く\n        expect: {external: safari}\n    （Safari の中はマップの対象外で、待てる要素は無い）",
       "assertions": [
         "Safari はアプリの外で、画面マップにも待つ要素が無い（expect は external だけ）ことに触れている",
         "撮れるかを確かめないまま、待ちを足したことにして撮れたと報告していない。Safari の中の要素を待てるか分からないなら、そう書いている",

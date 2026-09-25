@@ -265,6 +265,8 @@ def emit_path(mp, steps, notes, start=None):
                 rights.append("✓ {} が選択状態".format(r.id))
             elif isinstance(r, Hidden):
                 rights.append("✓ {} が消えた".format(r.id))
+            elif isinstance(r, External) and n + 1 < len(steps) and isinstance(steps[n + 1], Shot):
+                rights.append("— アプリの外（{}）に出る。確かめずに、外に居るまま撮る".format(r.name))
             elif isinstance(r, External):
                 rights.append("— アプリの外（{}）に出る。確かめずに戻す".format(r.name))
         if not rights:
