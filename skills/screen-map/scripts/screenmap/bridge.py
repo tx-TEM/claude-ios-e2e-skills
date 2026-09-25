@@ -182,7 +182,7 @@ class Route:
         if not broken:
             self.fail("call", "{} から {} へは、途中で戻ってからまた進む経路になる。"
                               "一度には繋げないので、折り返す画面を間に挟む（plan ならその画面を from に"
-                              "した項目を前に置く。map.py path なら画面を並べる）".format(self.at, goal))
+                              "した項目を前に置く。mapctl.py path なら画面を並べる）".format(self.at, goal))
         out = []
         for sid, e, why in broken:
             kind = "call" if why.startswith("条件つき") else "map"
@@ -192,7 +192,7 @@ class Route:
 
 
 def walk(mp, goals, given=()):
-    """起点から画面を順にたどる経路。(ステップ列, 組めなかった理由, 補足)。map.py path が使う。"""
+    """起点から画面を順にたどる経路。(ステップ列, 組めなかった理由, 補足)。mapctl.py path が使う。"""
     route, steps = Route(mp), []
     for n, goal in enumerate(goals, 1):
         try:

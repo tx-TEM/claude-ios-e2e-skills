@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """画面マップ（screen-map/）を引く・確かめる CLI。
 
-  map.py screens                       画面の一覧（id / 呼び名 / できること）
-  map.py path  <画面id>...             そこまでの経路を人が読む形で出す。並べると順にたどる
-  map.py which <パス...>               変更したファイルから対象画面を引く（`-` で標準入力）
-  map.py check                         マップ全体の自己テスト
+  mapctl.py screens                    画面の一覧（id / 呼び名 / できること）
+  mapctl.py path  <画面id>...          そこまでの経路を人が読む形で出す。並べると順にたどる
+  mapctl.py which <パス...>            変更したファイルから対象画面を引く（`-` で標準入力）
+  mapctl.py check                      マップ全体の自己テスト
 
   --repo <dir>       アプリのリポジトリ。画面マップはその下の screen-map/。必ず渡す
   --when <文言>      path の前提（マップの when の文言そのまま）。条件つきの辺を通す。並べてよい
@@ -142,8 +142,8 @@ def main():
 
     # 画面idを並べると、順にたどる。どう行くかを見るだけなので操作は挟まない
     if not rest:
-        sys.exit("行き先が要る。`map.py path <画面id>`。\n"
-                 "画面の一覧は `map.py screens`。")
+        sys.exit("行き先が要る。`mapctl.py path <画面id>`。\n"
+                 "画面の一覧は `mapctl.py screens`。")
     steps, problems, notes = walk(mp, rest, tuple(when))
     if problems:
         report_problems(problems)

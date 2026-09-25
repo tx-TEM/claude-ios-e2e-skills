@@ -260,7 +260,7 @@ def main():
         for t in todo:
             print("  " + t)
     if moved:
-        print("\n直したら map.py check --repo <アプリ> で確かめる")
+        print("\n直したら mapctl.py check --repo <アプリ> で確かめる")
 
 
 if __name__ == "__main__":

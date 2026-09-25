@@ -1,4 +1,4 @@
-"""スクリプトのテスト。screen-map（map.py / migrate_map.py と screenmap/）と、
+"""スクリプトのテスト。screen-map（mapctl.py / migrate_map.py と screenmap/）と、
 sim-test-report（manifest.py / run_flows.py と testflow/ / device/）。
 
   python3 -m unittest discover tests            テストを走らせる
@@ -26,7 +26,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "skills" / "sim-test-report" / "scripts"
-MAP_SCRIPTS = ROOT / "skills" / "screen-map" / "scripts"      # 画面マップの部品と map.py
+MAP_SCRIPTS = ROOT / "skills" / "screen-map" / "scripts"      # 画面マップの部品と mapctl.py
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "app"
 SNAPSHOTS = Path(__file__).resolve().parent / "snapshots"
 sys.path.insert(0, str(SCRIPTS))
