@@ -5,7 +5,7 @@
 """
 import os
 import re
-from dataclasses import replace
+from dataclasses import dataclass
 
 from screenmap.model import BACKWARD, auto_of, expect_kind, is_pattern, pattern_prefix
 from screenmap.steps import Act, Await, Restart, See, Shot
@@ -13,6 +13,29 @@ from screenmap.steps import Act, Await, Restart, See, Shot
 from .flowyaml import Comment, Raw, render
 
 SHOTS_VAR = "SHOTS"   # 撮影先のディレクトリ。run_flows.py が端末ごとに埋める
+
+
+@dataclass
+class Reveal(object):
+    """`act` の要素が全部見えるまでスクロールする。要素を操作する Act の直前に必ず挟む（add_reveals）。
+
+    **独立したステップにしておくと、フローを割るときに何もしなくてよい。** 値を決める操作の
+    手前で割ると、そのスクロールは前の本の最後に残る。run_flows.py は前の本を走らせてから
+    画面を読んで値を決めるので、そのとき対象が見えている。
+    """
+    act: Act
+    item: object = None
+    to = None
+
+
+def add_reveals(steps):
+    """要素を操作する Act の直前に Reveal を挟む。See は自分がスクロールなので挟まない。"""
+    out = []
+    for st in steps:
+        if isinstance(st, Act) and st.action.element is not None:
+            out.append(Reveal(st, st.item))
+        out.append(st)
+    return out
 
 
 def var_name(target):
@@ -256,18 +279,14 @@ def step_comment(st):
 
 
 def emit_flow(mp, steps, app, clear_state, notes=None, timeout=10000,
-              start=None, launch=True, tail=None):
+              start=None, launch=True):
     """ステップ列から Maestro のフローを1本書く。(フローの中身, 補足) を返す。
 
     `launch=False` はアプリを起動し直さない。続きのフローを出すため。
 
-    `tail` は、次のフローの頭で値を決めて押すステップ。**その要素までのスクロールを
-    このフローの最後に置く** — 値を決めるときに、選ぶ対象が画面に見えていないと
-    選べない（見えている1件目を選ぶのも、条件で選ぶのも同じ）。
-
     **補足はこのフローのステップに関係するものだけ。**
     """
-    return FlowWriter(mp, steps, app, clear_state, notes, timeout).write(start or mp.start, launch, tail)
+    return FlowWriter(mp, steps, app, clear_state, notes, timeout).write(start or mp.start, launch)
 
 
 class FlowWriter(object):
@@ -283,7 +302,7 @@ class FlowWriter(object):
         self.notes = list(notes or [])
         self.out, self.at = [], None
 
-    def write(self, start, launch, tail):
+    def write(self, start, launch):
         self.at = start
         if launch:
             self.relaunch(start, 0)
@@ -292,11 +311,6 @@ class FlowWriter(object):
             self.wait_anchor(start)
         for i, st in enumerate(self.steps):
             self.step(i, st)
-        if tail is not None:
-            what = "打つ文字" if tail.runtime else "押すもの"
-            self.out.append(Comment("次で使う {} が見えるまでスクロールして止める（ここで{}を決める）"
-                                    .format(tail.action.target, what)))
-            self.out.append(reveal(*element_sel(tail.action.element)))
         notes = list(dict.fromkeys(self.notes))   # 同じ画面の anchor 無しなどが重ならないように
         return render(self.app, self.env(), self.out, notes), notes
 
@@ -365,6 +379,8 @@ class FlowWriter(object):
             self.at = st.to
         elif isinstance(st, Shot):
             self.out.append({"takeScreenshot": "${" + SHOTS_VAR + "}/" + st.name})
+        elif isinstance(st, Reveal):
+            self.reveal(i, st)
         elif isinstance(st, See):
             name = st.element.get("name")
             self.out.append(Comment("{}: see {}{}".format(st.screen, st.element.get("id"),
@@ -373,11 +389,26 @@ class FlowWriter(object):
         else:
             self.action(i, st)
 
+    def reveal(self, i, st):
+        """押す前のスクロール。操作の説明（コメント）もここで先に書く。
+
+        この本がここで終わるなら、次の本の頭で値を決めて押す。そう書いて止める。
+        """
+        act = st.act
+        if i + 1 < len(self.steps) and self.steps[i + 1] is act:
+            self.out.append(step_comment(act))
+        else:
+            what = "打つ文字" if act.runtime else "押すもの"
+            self.out.append(Comment("次で使う {} が見えるまでスクロールして止める（ここで{}を決める）"
+                                    .format(act.action.target, what)))
+        self.out.append(reveal(*element_sel(act.action.element, act.value)))
+
     def action(self, i, st):
         a = st.action
-        self.out.append(step_comment(st))
-        if a.element is not None and not st.revealed:
-            self.out.append(reveal(*step_sel(st)))
+        # 直前の Reveal が説明を書いていなければ（割った本の頭）、ここで書く
+        prev = self.steps[i - 1] if i > 0 else None
+        if not (isinstance(prev, Reveal) and prev.act is st):
+            self.out.append(step_comment(st))
         op = getattr(self, "op_" + str(a.op), None)
         if op is None:
             self.notes.append("種類の分からない操作を飛ばした: {}".format(a.label()))
@@ -466,7 +497,7 @@ def shot_context(mp, seg_start, seg_steps):
     """
     at, checked = seg_start, (mp.screens.get(seg_start) or {}).get("anchor")
     for st in seg_steps:
-        if isinstance(st, Shot):
+        if isinstance(st, (Shot, Reveal)):
             continue
         if isinstance(st, Restart):
             at = mp.start
@@ -512,18 +543,13 @@ def split_parts(seg_start, seg_steps):
     **値を決めるには、目的の画面に着いていて、選ぶ対象が見えている必要がある。**
     手前までを1本にして先に走らせ、止まったところで画面を見て決める。
     切る箇所ごとに1本増える（途中の一覧で1件選び、着いた先でまた選ぶ、など）。
-    2本目以降の頭のステップは、前の本の最後でスクロール済み（`revealed`）。
+    操作の直前には Reveal（対象までのスクロール）があるので、それが前の本の最後に残る。
     """
     parts, cur, at, start = [], [], seg_start, seg_start
     for st in seg_steps:
-        if needs_value(st) and (cur or parts):
+        if needs_value(st):
             parts.append((start, cur))
             cur, start = [], at
-            st = replace(st, revealed=True)
-        elif needs_value(st):
-            # 区間の頭で値が要る。スクロールだけの本を先に置く
-            parts.append((start, []))
-            st = replace(st, revealed=True)
         cur.append(st)
         if st.to:
             at = st.to

@@ -13,8 +13,8 @@ import json
 import sys
 from pathlib import Path
 
-from .maestro import (assign_vars, emit_flow, runtime_picks, runtime_uses, shot_context,
-                      split_at_shots, split_parts, var_of)
+from .maestro import (add_reveals, assign_vars, emit_flow, runtime_picks, runtime_uses,
+                      shot_context, split_at_shots, split_parts, var_of)
 from screenmap.model import DO_OPS, FORWARD, GESTURES, is_pattern, load_map, pattern_prefix
 from screenmap.route import Route, Unroutable, emit_path, report_problems
 from screenmap.steps import Act, See, Shot
@@ -290,16 +290,15 @@ def write_flows(plan, out_dir, repo, timeout=10000):
     d = Path(out_dir)
     d.mkdir(parents=True, exist_ok=True)
     written = []
-    for seg_start, seg_steps, shot, lch in split_at_shots(mp, steps, None):
+    # 押す前のスクロール（Reveal）を挟んでから切る。経路の表示（emit_path）は挟む前の steps で出す
+    for seg_start, seg_steps, shot, lch in split_at_shots(mp, add_reveals(steps), None):
         assign_vars(seg_steps)
         parts = split_parts(seg_start, seg_steps)
         files = []
         for k, (p_start, p_steps) in enumerate(parts):
             last = k == len(parts) - 1
-            tail = None if last else parts[k + 1][1][0]
             # 自分で起動するのは1本目と fresh の項目の、最初の本だけ。他は居る場所から続ける
-            flow, _ = emit_flow(mp, p_steps, app, clear, None, timeout,
-                                p_start, launch=lch and k == 0, tail=tail)
+            flow, _ = emit_flow(mp, p_steps, app, clear, None, timeout, p_start, launch=lch and k == 0)
             name = shot + ".yaml" if last else "{}.{}.yaml".format(shot, k + 1)
             (d / name).write_text(flow, encoding="utf-8")
             files.append({"flow": name, "decide": var_of(p_steps[0]) if k > 0 else None})

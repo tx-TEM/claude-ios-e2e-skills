@@ -24,7 +24,6 @@ class Act(object):
     runtime: bool = False             # text で打つ文字を実行時に決める
     pick: Optional[str] = None        # パターンの要素のどれを押すか。"" は画面に見えている1件目、文字は条件
     var: Optional[str] = None         # 実行時に決める値を入れる env の変数名（maestro.py が振る）
-    revealed: bool = False            # 前の本の最後で、もう対象までスクロールしてある
     item: Optional[str] = None
 
     def outcome(self):
