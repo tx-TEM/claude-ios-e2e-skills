@@ -1,6 +1,8 @@
 """フローの1コマ（ステップ）と、操作の結果の型。"""
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import List, Optional, Union
+
+from .model import Action
 
 
 # ---------- 操作の結果（Act.result の1項目） ----------
@@ -46,14 +48,17 @@ class External:
     name: str
 
 
+Result = Union[Arrive, Visible, Value, Selected, Hidden, External]
+
+
 # ---------- ステップ ----------
 
 @dataclass
 class Act:
     """`screen` で `action` をする。すると起きることが `result`。"""
     screen: str                       # 操作する時点で居る画面
-    action: Any                       # する操作（マップの model.Action。tap / text / scroll と、その対象の要素・summary）
-    result: List[Any] = field(default_factory=list)   # action をすると起きること（Arrive / Visible / ...）
+    action: Action                    # する操作（tap / text / scroll と、その対象の要素・summary）
+    result: List[Result] = field(default_factory=list)   # action をすると起きること
     value: Optional[str] = None       # パターンの要素を ID まで決め打ちしたときの値（`tap:list.row.牛乳` の 牛乳）
     input: Optional[str] = None       # text で打つ文字（データに依らない値）
     runtime: bool = False             # text で打つ文字を実行時に決める

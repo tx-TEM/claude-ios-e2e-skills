@@ -6,6 +6,7 @@
 import os
 import re
 from dataclasses import dataclass
+from typing import Optional
 
 from screenmap.model import BACKWARD, auto_of, is_pattern, pattern_prefix
 from screenmap.steps import (Act, Arrive, Await, External, Hidden, Restart, See, Selected, Shot,
@@ -25,7 +26,7 @@ class Reveal:
     画面を読んで値を決めるので、そのとき対象が見えている。
     """
     act: Act
-    item: object = None
+    item: Optional[str] = None
     to = None
 
 
