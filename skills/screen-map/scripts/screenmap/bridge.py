@@ -17,7 +17,30 @@ import os
 import sys
 
 from .model import expect_kind
-from .steps import Act, Await, Restart, See, Shot
+from .steps import (Act, Arrive, Await, External, Hidden, Restart, See, Selected, Shot, Value,
+                    Visible)
+
+OWN_RESULTS = {"visible": Visible, "value": Value, "selected": Selected, "hidden": Hidden}
+
+
+def resolve_result(action, expects, back_to=None):
+    """マップに書いた `expect` の並びを、ステップの結果（Arrive / Visible / ...）に解く。
+
+    `screen: back` は `back_to`（歩いた履歴で決めた、実際に戻る画面）に、`self` は押す
+    要素の ID にする。分かれる結果は、呼ぶ側が選んだ枝の expect だけを渡す。
+    """
+    out = []
+    for e in expects:
+        kind = expect_kind(e)
+        if kind == "screen":
+            out.append(Arrive(back_to if e["screen"] == "back" else e["screen"], e.get("via")))
+        elif kind == "external":
+            out.append(External(e[kind]))
+        elif kind in OWN_RESULTS:
+            ref = e[kind]
+            own = ref == "self"
+            out.append(OWN_RESULTS[kind](action.target if own else ref, own))
+    return out
 
 
 class Unroutable(Exception):
@@ -68,8 +91,7 @@ class Route(object):
             self.fail("map", "起点 {} に戻る操作「{}」が書いてある。"
                              "起動直後の画面から戻る先は無い".format(self.at, action.label()))
         dest = self.stack[-2]
-        via = next(e.get("via") for e in action.expects if e.get("screen") == "back")
-        step = Act(self.at, action, to=dest, via=via)
+        step = Act(self.at, action, resolve_result(action, action.expects, back_to=dest))
         self.stack.pop()
         self.at = dest
         return step
@@ -139,7 +161,8 @@ class Route(object):
                                  .format(self.at, goal))
             steps.append(self.back(a))
         for sid, (a, bi, dest, via, _) in hops:
-            steps.append(self.forward(Act(sid, a, to=dest, via=via, branch=bi), dest))
+            expects = [a.branches[bi]] if bi is not None else a.expects
+            steps.append(self.forward(Act(sid, a, resolve_result(a, expects)), dest))
         return steps
 
     def best_route(self, goal, given):
@@ -263,18 +286,15 @@ def emit_path(mp, steps, notes, start=None):
             dest = (mp.screens.get(st.to) or {}).get("anchor")
             rights.append("✓ {} に着いたことを確認".format(st.to) if dest
                           else "— {} に anchor が無い".format(st.to))
-        for e in st.outcome():
-            kind = expect_kind(e)
-            ref = e.get(kind)
-            ref = a.target if ref == "self" else ref
-            if kind in ("visible", "value"):
-                rights.append("✓ {} が出ている{}".format(ref, "（値は証跡で見る）" if kind == "value" else ""))
-            elif kind == "selected":
-                rights.append("✓ {} が選択状態".format(ref))
-            elif kind == "hidden":
-                rights.append("✓ {} が消えた".format(ref))
-            elif kind == "external":
-                rights.append("— アプリの外（{}）に出る。確かめずに戻す".format(ref))
+        for r in st.result:
+            if isinstance(r, (Visible, Value)):
+                rights.append("✓ {} が出ている{}".format(r.id, "（値は証跡で見る）" if isinstance(r, Value) else ""))
+            elif isinstance(r, Selected):
+                rights.append("✓ {} が選択状態".format(r.id))
+            elif isinstance(r, Hidden):
+                rights.append("✓ {} が消えた".format(r.id))
+            elif isinstance(r, External):
+                rights.append("— アプリの外（{}）に出る。確かめずに戻す".format(r.name))
         if not rights:
             rights.append("— 自動確認なし。証跡で見る")
         row(left, rights[0])

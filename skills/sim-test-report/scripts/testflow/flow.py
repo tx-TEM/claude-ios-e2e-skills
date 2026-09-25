@@ -15,8 +15,8 @@ from pathlib import Path
 
 from .maestro import (add_reveals, assign_vars, emit_flow, runtime_picks, runtime_uses,
                       shot_context, split_at_shots, split_parts, var_of)
-from screenmap.model import DO_OPS, FORWARD, GESTURES, is_pattern, load_map, pattern_prefix
-from screenmap.bridge import Route, Unroutable, emit_path, report_problems
+from screenmap.model import DO_OPS, GESTURES, is_pattern, load_map, pattern_prefix
+from screenmap.bridge import Route, Unroutable, emit_path, report_problems, resolve_result
 from screenmap.steps import Act, See, Shot
 
 PLAN_KEYS = {"app", "clear_state", "items", "explore"}
@@ -192,24 +192,20 @@ def do_step(mp, route, op, how, given):
         raise Unroutable([("map", "{} の「{}」は in_tree: false（座標が要る）。フローでは押せない"
                                   .format(at, found.label()))])
     if found.is_back():
-        st = route.back(found)
+        st = route.back(found)       # 戻る先は歩いた履歴で決まる
     else:
-        st = Act(at, found)
-        if found.branches:
-            st.branch = branch_of(found, at, given)
+        # 結果が分かれるなら、確認項目の前提（when）に合う枝だけ
+        expects = [found.branches[branch_of(found, at, given)]] if found.branches else found.expects
+        st = Act(at, found, resolve_result(found, expects))
     st.value = val
     for k, v in how.items():          # input / runtime / pick
         setattr(st, k, v)
-    if found.is_back():
+    if found.is_back() or st.arrive is None:
         return st
-    dest = next((e for e in st.outcome() if e.get("screen") and e.get("via") in FORWARD), None)
-    if dest is None:
-        return st
-    if dest["screen"] not in mp.screens:
+    if st.to not in mp.screens:
         raise Unroutable([("map", "{} の「{}」の遷移先 {} のファイルが無い"
-                                  .format(at, found.label(), dest["screen"]))])
-    st.to, st.via = dest["screen"], dest["via"]
-    return route.forward(st, dest["screen"])
+                                  .format(at, found.label(), st.to))])
+    return route.forward(st, st.to)
 
 
 def branch_of(action, at, given):

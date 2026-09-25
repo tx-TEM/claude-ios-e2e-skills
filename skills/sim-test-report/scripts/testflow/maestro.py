@@ -7,8 +7,9 @@ import os
 import re
 from dataclasses import dataclass
 
-from screenmap.model import BACKWARD, auto_of, expect_kind, is_pattern, pattern_prefix
-from screenmap.steps import Act, Await, Restart, See, Shot
+from screenmap.model import BACKWARD, auto_of, is_pattern, pattern_prefix
+from screenmap.steps import (Act, Arrive, Await, External, Hidden, Restart, See, Selected, Shot,
+                             Value, Visible)
 
 from .flowyaml import Comment, Raw, render
 
@@ -252,11 +253,11 @@ def anchor_of(mp, sid, notes):
     return a
 
 
-def ref_sel(st, ref):
-    """expect が指す要素のセレクタ。`self` はその操作の要素（パターンなら押した1つ）。"""
-    if ref == "self":
+def result_sel(st, r):
+    """結果が指す要素のセレクタ。押した要素そのもの（own）なら、押したのと同じもの（パターンなら押した1つ）。"""
+    if r.own:
         return step_sel(st)
-    return "id", sel_id(str(ref))
+    return "id", sel_id(r.id)
 
 
 def step_comment(st):
@@ -414,13 +415,14 @@ class FlowWriter(object):
             self.notes.append("種類の分からない操作を飛ばした: {}".format(a.label()))
             return
         op(st)
-        if st.to:
-            self.arrive(st.to, i + 1, st.via, st.screen)
+        # 着いたことを先に確かめる（着いた画面の上で、ほかの結果を見る）
+        if st.arrive:
+            self.arrive(st.to, i + 1, st.arrive.via, st.screen)
             self.at = st.to
-        exps = st.outcome()
-        for e in exps:
-            self.expect(st, e)
-        if not exps:
+        for r in st.result:
+            if not isinstance(r, Arrive):
+                self.check(st, r)
+        if not st.result:
             self.notes.append("「{}」の結果を確かめる expect がマップに無い".format(a.label()))
 
     def op_tap(self, st):
@@ -452,18 +454,17 @@ class FlowWriter(object):
 
     # ---- 結果を確かめる ----
 
-    def expect(self, st, e):
-        kind = expect_kind(e)
-        if kind in ("visible", "value"):
-            self.out.append(wait_for(*ref_sel(st, e[kind]), timeout=self.timeout))
-        elif kind == "selected":
-            self.out.append(wait_for(*ref_sel(st, e[kind]), timeout=self.timeout,
-                                     extra={"selected": True}))
-        elif kind == "hidden":
-            self.out.append(wait_gone(*ref_sel(st, e[kind]), timeout=self.timeout))
-        elif kind == "external":
+    def check(self, st, r):
+        """着く以外の結果を1つ確かめる。"""
+        if isinstance(r, (Visible, Value)):
+            self.out.append(wait_for(*result_sel(st, r), timeout=self.timeout))
+        elif isinstance(r, Selected):
+            self.out.append(wait_for(*result_sel(st, r), timeout=self.timeout, extra={"selected": True}))
+        elif isinstance(r, Hidden):
+            self.out.append(wait_gone(*result_sel(st, r), timeout=self.timeout))
+        elif isinstance(r, External):
             # アプリの外に出た。確かめずに、落とさずに前に戻す
-            self.out.append(Comment("アプリの外（{}）に出る。確かめずにアプリに戻す".format(e[kind])))
+            self.out.append(Comment("アプリの外（{}）に出る。確かめずにアプリに戻す".format(r.name)))
             self.out.append({"launchApp": {"stopApp": False}})
             self.wait_anchor(self.at)
 
@@ -478,12 +479,10 @@ def check_of(mp, st):
     checked = None
     if st.to:
         checked = (mp.screens.get(st.to) or {}).get("anchor")
-    for e in st.outcome():
-        kind = expect_kind(e)
-        if kind in ("visible", "value", "selected", "hidden"):
-            ref = e[kind]
-            checked = st.action.target if ref == "self" else ref
-        elif kind == "external":
+    for r in st.result:
+        if isinstance(r, (Visible, Value, Selected, Hidden)):
+            checked = r.id
+        elif isinstance(r, External):
             checked = None
     return checked
 
