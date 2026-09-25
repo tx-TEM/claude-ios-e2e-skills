@@ -33,7 +33,7 @@ sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(MAP_SCRIPTS))
 
 from screenmap import check as map_check  # noqa: E402
-from screenmap import screen as screen_map  # noqa: E402
+from screenmap import map as screen_map  # noqa: E402
 from testflow import flow as flows_of  # noqa: E402
 
 
@@ -1056,6 +1056,13 @@ class Check(unittest.TestCase):
         code, out = self.check()
         self.assertEqual(code, 0, out)
 
+    def test_screen_that_is_not_a_mapping(self):
+        # 中身が辞書でない画面ファイルでも落ちずに、不整合として出す
+        (self.screens / "weird.yaml").write_text("- [1, 2]\n", encoding="utf-8")
+        code, out = self.check()
+        self.assertEqual(code, 1)
+        self.assertIn("weird: 画面の中身が辞書になっていない", out)
+
     def test_undefined_expect_id(self):
         self.edit("list.yaml", "expect: {visible: list.footer}", "expect: {visible: list.count_label}")
         code, out = self.check()
@@ -1104,13 +1111,13 @@ class Migrate(unittest.TestCase):
         self.assertIn("select（index: 0, capture: itemTitle）を捨てた", out)
         self.assertIn("に条件が書いてある", out)
         mp = screen_map.load_map(str(repo))
-        lst = {el["id"]: el for el in mp.elements("list")}
+        lst = {el["id"]: el for el in mp.screens["list"].elements}
         self.assertEqual(lst["list.empty_view"]["when"], "0件のとき")
         self.assertIn("list.count_label", lst)          # 観測点だった ID も要素になる
         self.assertEqual(lst["Clear text"]["by"], "label")
         self.assertIs(lst["list.banner"]["in_tree"], False)
-        self.assertEqual(mp.screens["list"]["gestures"][0]["scroll"], "down")
-        self.assertEqual(mp.screens["list"]["auto_shows"], ["review_dialog"])
+        self.assertEqual(mp.screens["list"].actions[-1].label(), "scroll down")
+        self.assertEqual(mp.screens["list"].auto_shows(), ["review_dialog"])
         with contextlib.redirect_stdout(io.StringIO()) as o:
             self.assertEqual(map_check.cmd_check(mp), 0, o.getvalue())
         self.assertEqual([e[0].target for _, e in mp.path_from("home", "detail")], ["home.fav"])

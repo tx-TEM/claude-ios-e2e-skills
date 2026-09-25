@@ -140,7 +140,7 @@ class Route:
         pops, hops = best
         steps = []
         for _ in range(pops):
-            a = mp.back_action(self.at)
+            a = mp.screens[self.at].back_action()
             if a is None:
                 self.fail("map", "{} に戻る操作（screen: back）がマップに無いので、{} へ向かえない"
                                  .format(self.at, goal))
@@ -232,13 +232,13 @@ def emit_path(mp, steps, notes, start=None):
             checked += right.startswith("✓")
             unchecked += right.startswith("—")
 
-    start_anchor = (mp.screens.get(chain[0]) or {}).get("anchor")
+    start_anchor = mp.anchor(chain[0])
     row("  {}  {}".format(chain[0].ljust(w), "起点" if chain[0] == mp.start else "続き"),
         "✓ {} が出ている".format(start_anchor) if start_anchor else "— anchor が無い")
 
     for n, st in enumerate(steps):
         if isinstance(st, Restart):
-            a = (mp.screens.get(mp.start) or {}).get("anchor")
+            a = mp.anchor(mp.start)
             row("  {}  アプリを起動し直す".format("".ljust(w)), None)
             row("  {}  起点".format(mp.start.ljust(w)),
                 "✓ {} が出ている".format(a) if a else "— anchor が無い")
@@ -248,7 +248,7 @@ def emit_path(mp, steps, notes, start=None):
             row("  {}  撮影 {}".format("".ljust(w), os.path.basename(st.name)), None)
             continue
         if isinstance(st, Await):
-            dest = (mp.screens.get(st.to) or {}).get("anchor")
+            dest = mp.anchor(st.to)
             row("  {}  自動表示 {} を待つ".format(st.screen.ljust(w), st.to),
                 "✓ {} が出ている".format(dest) if dest else "— {} に anchor が無い".format(st.to))
             continue
@@ -266,7 +266,7 @@ def emit_path(mp, steps, notes, start=None):
         if st.to and isinstance(nxt, Await):
             rights.append("（{} が被さって隠れるので、次の自動表示で確かめる）".format(st.to))
         elif st.to:
-            dest = (mp.screens.get(st.to) or {}).get("anchor")
+            dest = mp.anchor(st.to)
             rights.append("✓ {} に着いたことを確認".format(st.to) if dest
                           else "— {} に anchor が無い".format(st.to))
         for r in st.result:

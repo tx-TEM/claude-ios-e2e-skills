@@ -15,7 +15,8 @@ from pathlib import Path
 
 from .maestro import (add_reveals, assign_vars, emit_flow, runtime_picks, runtime_uses,
                       shot_context, split_at_shots, split_parts, var_of)
-from screenmap.screen import DO_OPS, GESTURES, load_map, pattern_prefix
+from screenmap.map import load_map
+from screenmap.screen import DO_OPS, GESTURES, pattern_prefix
 from screenmap.bridge import Route, Unroutable, emit_path, report_problems
 from screenmap.results import resolve_result
 from screenmap.actions import resolve_action
@@ -169,24 +170,25 @@ def resolve(mp, at, wanted):
     if want_op not in DO_OPS:
         want_op, want_target = None, wanted
     if want_op in GESTURES:
-        for a in mp.actions(at):
+        for a in mp.screens[at].actions:
             if a.op == want_op and a.target == want_target:
                 return a, None, None
         return None, None, None
-    el, value = mp.element(at, want_target)
+    el, value = mp.screens[at].element(want_target)
     if el is None:
         return None, None, None
     if want_op == "see":
         return None, el, value
-    for a in mp.actions(at):
+    for a in mp.screens[at].actions:
         if a.element is el and (want_op is None or a.op == want_op):
             return a, el, value
     return None, el, value
 
 
 def known_ops(mp, at):
-    out = ["{}:{}".format(a.op, a.target) for a in mp.actions(at)]
-    out += ["see:{}".format(el.get("id")) for el in mp.elements(at) if not el.get("actions")]
+    scr = mp.screens[at]
+    out = ["{}:{}".format(a.op, a.target) for a in scr.actions]
+    out += ["see:{}".format(el.get("id")) for el in scr.elements if not el.get("actions")]
     return ", ".join(out)
 
 

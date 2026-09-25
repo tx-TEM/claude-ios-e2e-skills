@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
-from screenmap.screen import BACKWARD, auto_of, is_pattern, pattern_prefix
+from screenmap.screen import BACKWARD, is_pattern, pattern_prefix
 from screenmap.results import Arrive, External, Hidden, Selected, Value, Visible
 from screenmap.actions import Input, InputLater, Scroll, Tap
 from screenmap.steps import Act, Await, Restart, See, Shot
@@ -121,7 +121,7 @@ def runtime_picks(mp, steps, names):
             continue
         a = st.action
         prefix = pattern_prefix(a.target)
-        others = sorted(str(el.get("id")) for el in mp.elements(st.screen)
+        others = sorted(str(el.get("id")) for el in mp.screens[st.screen].elements
                         if el.get("id") != a.target and str(el.get("id") or "").startswith(prefix))
         out[var_of(st, names)] = {"pattern": a.target, "pick": a.pick.condition, "exclude": others}
     return out
@@ -213,17 +213,17 @@ def auto_checks(mp, sid, keep=None, via=None, came=None):
     """
     out = []
     back = via in BACKWARD
-    for iid, after in mp.auto_items(sid):
+    for iid, after in mp.screens[sid].auto_items():
         if iid == keep:
             continue
         if (back and came not in after) or (not back and after):
             continue
-        found = auto_of(mp, iid)
+        found = mp.screens[iid].auto_close() if iid in mp.screens else None
         if found is None:
             continue            # 書き間違いは check が出す
         anchor, close = found
         key, dismiss = element_sel(close.target, close.element.get("by") == "label")
-        summary = (mp.screens.get(iid) or {}).get("summary")
+        summary = mp.screens[iid].summary
         when = "（{} から戻ったとき）".format(came) if back else ""
         out.append(Comment("自動表示: {}{}{}（出ていたら閉じる）".format(iid, when, " — " + summary if summary else "")))
         out.append({"runFlow": {"when": {"visible": {"id": sel_id(anchor)}},
@@ -233,7 +233,7 @@ def auto_checks(mp, sid, keep=None, via=None, came=None):
 
 def ready_lines(mp, sid, timeout):
     """読み込み完了の目印（`ready`）を待つ。any はどれか1つ、all は全部。"""
-    r = (mp.screens.get(sid) or {}).get("ready") or {}
+    r = (mp.screens[sid].ready if sid in mp.screens else None) or {}
     out = []
     if r.get("any"):
         alts = [sel_id(str(x)) for x in r["any"]]
@@ -251,7 +251,7 @@ def settle():
 
 
 def anchor_of(mp, sid, notes):
-    a = (mp.screens.get(sid) or {}).get("anchor")
+    a = mp.anchor(sid)
     if not a:
         notes.append("{} に anchor が無いので、着いたことを確かめられない".format(sid))
     return a
@@ -377,7 +377,7 @@ class FlowWriter:
             self.at = self.mp.start
         elif isinstance(st, Await):
             # 自動表示を確かめる項目。閉じずに、出るまで待つ（出なければ落ちる）
-            summary = (self.mp.screens.get(st.to) or {}).get("summary")
+            summary = self.mp.screens[st.to].summary
             self.out.append(Comment("{}: 自動表示 {} を待つ{}".format(
                 st.screen, st.to, " — " + summary if summary else "")))
             self.wait_anchor(st.to)
@@ -478,12 +478,12 @@ def check_of(mp, st):
     """そのステップで最後に自動で確かめる ID。確かめないなら None。"""
     if isinstance(st, (Await, Restart)):
         sid = st.to if isinstance(st, Await) else mp.start
-        return (mp.screens.get(sid) or {}).get("anchor")
+        return mp.anchor(sid)
     if isinstance(st, See):
         return st.target
     checked = None
     if st.to:
-        checked = (mp.screens.get(st.to) or {}).get("anchor")
+        checked = mp.anchor(st.to)
     for r in st.result:
         if isinstance(r, (Visible, Value, Selected, Hidden)):
             checked = r.id
@@ -499,7 +499,7 @@ def shot_context(mp, seg_start, seg_steps):
     確かめたIDが無い（`expect` を持たない操作で終わった）なら None で、
     その証跡は自動確認なし＝画像だけが根拠になる。
     """
-    at, checked = seg_start, (mp.screens.get(seg_start) or {}).get("anchor")
+    at, checked = seg_start, mp.anchor(seg_start)
     for st in seg_steps:
         if isinstance(st, (Shot, Reveal)):
             continue

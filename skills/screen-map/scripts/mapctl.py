@@ -33,19 +33,19 @@
 import sys
 
 from screenmap.check import cmd_check
-from screenmap.screen import load_map
+from screenmap.map import load_map
 from screenmap.bridge import emit_path, report_problems, walk
 
 
 def cmd_screens(mp):
     for sid in sorted(mp.screens):
         s = mp.screens[sid]
-        mark = " [stub]" if s.get("stub") else ""
-        names = s.get("names") or []
+        mark = " [stub]" if s.stub else ""
+        names = s.names
         print("{}{}".format(sid, mark))
         if names:
             print("    呼び名: {}".format(" / ".join(str(n) for n in names)))
-        print("    {}".format(s.get("summary") or "(summary 無し)"))
+        print("    {}".format(s.summary or "(summary 無し)"))
 
 
 def cmd_which(mp, paths):
@@ -62,7 +62,7 @@ def cmd_which(mp, paths):
     """
     owner = {}
     for sid in sorted(mp.screens):
-        for f in (mp.screens[sid] or {}).get("files") or []:
+        for f in mp.screens[sid].files:
             owner.setdefault(str(f), []).append(sid)
     # 完全一致で引けなければファイル名で引く。リポジトリ相対かどうかの
     # 食い違いで黙って0件になる方が怖い
@@ -85,7 +85,7 @@ def cmd_which(mp, paths):
             miss.append(path)
 
     for sid in sorted(hit):
-        print("{}  — {}".format(sid, (mp.screens[sid] or {}).get("summary") or ""))
+        print("{}  — {}".format(sid, mp.screens[sid].summary or ""))
         for f in hit[sid]:
             print("    " + f)
     if not hit:
