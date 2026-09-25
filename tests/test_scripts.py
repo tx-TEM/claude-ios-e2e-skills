@@ -946,6 +946,82 @@ class ElementsOutput(unittest.TestCase):
         self.assertEqual(RF["locate"]("\n".join(out), "browse.book_row.*"), ("browse.book_row.BOITEUX ・ BOITEUSE", 0, 1))
 
 
+class CoveredRows(unittest.TestCase):
+    """#41: 画面の中でも、前面の要素の裏にある行は `裏` にし、見えている1件目に選ばない。"""
+
+    def run_elements(self, dump):
+        f = Path(tempfile.mkdtemp()) / "d.json"
+        f.write_text(json.dumps(dump, ensure_ascii=False), encoding="utf-8")
+        import subprocess
+        out = subprocess.run([sys.executable, str(SCRIPTS / "device" / "elements.py"), str(f)],
+                             capture_output=True, text=True).stdout
+        shutil.rmtree(f.parent)
+        return out, {l.split("\t")[3] or l.split("\t")[4]: l.split("\t")[1]
+                     for l in out.splitlines()[2:]}
+
+    def row(self, y0, name):
+        return {"b": "[16,{}][386,{}]".format(y0, y0 + 66), "a11y": name, "rid": "browse.row." + name}
+
+    def app(self, *windows):
+        return {"ui_schema": {}, "elements": [
+            {"b": "[0,0][402,874]", "a11y": "App", "c": [
+                {"b": "[0,0][402,874]", "c": list(w)} for w in windows]},
+            {"b": "[0,0][402,54]"}]}   # ステータスバーの窓
+
+    def test_rows_under_pinned_header_and_status_bar(self):
+        # スクロールした一覧。行が先に並び、固定された検索欄が後ろに並ぶ（#41 の実測の形）
+        out, on = self.run_elements(self.app([
+            self.row(-18, "A"), self.row(48, "B"), self.row(115, "C"), self.row(182, "D"),
+            {"b": "[8,72][394,116]", "rid": "browse.search_field", "txt": "作品名で絞り込む"},
+            {"b": "[16,126][386,158]", "rid": "browse.target_picker", "txt": "作品名"}]))
+        self.assertEqual([on["browse.row." + n] for n in "ABCD"], ["裏", "裏", "裏", "○"])
+        self.assertEqual(on["browse.search_field"], "○")
+        self.assertEqual(RF["first_visible"](out, "browse.row.*"), "browse.row.D")
+
+    def test_navigation_bar_is_in_front_even_if_listed_first(self):
+        # NavigationStack はバーを中身より前に並べるが、バーが前面
+        out, on = self.run_elements(self.app([
+            {"b": "[0,62][402,116]", "rid": "Nav", "c": [
+                {"b": "[16,62][60,106]", "rid": "BackButton", "a11y": "Back"}]},
+            self.row(50, "A"), self.row(116, "B"),
+            {"b": "[16,70][386,110]", "txt": "スクロールした中身"}]))
+        self.assertEqual(on["BackButton"], "○")
+        self.assertEqual(on["browse.row.A"], "裏")
+        self.assertEqual(on["browse.row.B"], "○")
+
+    def test_later_window_is_in_front(self):
+        # キーボードは後ろの窓。タブバー（バー）より前面
+        out, on = self.run_elements(self.app(
+            [self.row(600, "A"),
+             {"b": "[0,791][402,874]", "a11y": "Tab Bar", "c": [
+                 {"b": "[154,795][248,849]", "rid": "tab.search", "a11y": "さがす"}]}],
+            [{"b": "[0,538][402,874]", "c": [
+                {"b": "[8,805][76,874]", "a11y": "Next keyboard"},
+                {"b": "[100,805][300,874]", "a11y": "space"},
+                {"b": "[8,600][394,660]", "a11y": "qwerty"}]}]))
+        self.assertEqual(on["tab.search"], "裏")
+        self.assertEqual(on["browse.row.A"], "裏")
+        self.assertEqual(on["space"], "○")
+
+    def test_same_thing_is_not_covering(self):
+        # SwiftUI が文言をまとめた要素は、中のラベルより後ろに並ぶ。ラベルは裏ではない
+        out, on = self.run_elements(self.app([
+            {"b": "[32,167][80,187]", "a11y": "作品名"},
+            {"b": "[16,151][386,203]", "a11y": "作品名, BOITEUX"}]))
+        self.assertEqual(on["作品名"], "○")
+
+    def test_inset_rows_are_not_bars(self):
+        # iPad の行は余白があっても幅の96%。上端近くの行をバーと取り違えない
+        dump = {"ui_schema": {}, "elements": [{"b": "[0,0][834,1210]", "a11y": "App", "c": [
+            {"b": "[0,0][834,1210]", "c": [
+                {"b": "[0,24][834,88]", "rid": "tabs", "c": [
+                    {"b": "[377,33][457,65]", "rid": "tab.search", "a11y": "さがす"}]},
+                {"b": "[16,7][818,86]", "rid": "browse.row.A", "a11y": "A"}]}]}]}
+        out, on = self.run_elements(dump)
+        self.assertEqual(on["tab.search"], "○")
+        self.assertEqual(on["browse.row.A"], "裏")
+
+
 class AutoPickRun(unittest.TestCase):
     """#50: 条件の無い選択は run_flows.py が画面を読んで決め、picked に書く。"""
 
