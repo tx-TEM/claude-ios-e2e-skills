@@ -171,7 +171,7 @@ class RuntimeInputs(unittest.TestCase):
     def test_input_use_is_recorded(self):
         rows, _ = self.rows()
         self.assertEqual(rows[0]["input_use"], {"LIST_SEARCH_FIELD": "text"})
-        self.assertEqual(rows[1]["input_use"], {"LIST_ROW": "selector"})
+        self.assertEqual(rows[1]["input_use"], {"LIST_ROW": "selector", "LIST_ROW_INDEX": "index"})
         self.assertEqual(rows[0]["inputs"], {"LIST_SEARCH_FIELD": ""})
         self.assertEqual(rows[1]["inputs"], {"LIST_ROW": ""})
         self.assertEqual(rows[1]["picks"], {"LIST_ROW": {"pattern": "list.row.*", "pick": "いちばん長い名前",
@@ -179,7 +179,7 @@ class RuntimeInputs(unittest.TestCase):
 
     def fill(self, flow, var, value, use):
         body = RF["fill_env"](flow, RF["required_env"](flow),
-                              {var: value, "SHOTS": "/tmp/shots"}, {var: use})
+                              {var: value, var + "_INDEX": 0, "SHOTS": "/tmp/shots"}, {var: use})
         env = dict(re.findall(r"^\s+([A-Z_]+):\s*'(.*)'$", body.split("\n---")[0], re.M))
         return env[var].replace("''", "'")
 
@@ -233,7 +233,7 @@ class Manifest(unittest.TestCase):
         self.assertEqual(sorted(m["devices"]), ["ipad", "iphone"])
         first, explore = m["sections"]
         self.assertEqual(first["name"], "test_01")
-        self.assertEqual(first["input_use"], {"LIST_ROW": "selector"})
+        self.assertEqual(first["input_use"], {"LIST_ROW": "selector", "LIST_ROW_INDEX": "index"})
         # 条件の無い選択は run_flows.py が決めるので、inputs には入らない
         self.assertEqual(first["devices"]["iphone"], {"inputs": {}, "picked": {}})
         self.assertEqual(first["picks"], {"LIST_ROW": {"pattern": "list.row.*", "pick": "", "exclude": []}})
@@ -600,6 +600,16 @@ class ReportShape(unittest.TestCase):
             {"name": "test_01", "title": "a", "desc": "x", "result": "NG"}],
             "footer": "確認していないこと: エラー系\n作成したデータ: 無し"}), [])
 
+def dump_line(cx, cy, on, rid, text="", state=""):
+    """elements.py の出力の1行。"""
+    label = "{}  #{}".format(text, rid) if text else "#" + rid
+    return "{:>12}  {:<5} {}{}\n".format("({},{})".format(cx, cy), on if on == "○" else "×  ",
+                                         label, " [{}]".format(state) if state else "")
+
+
+DUMP_HEAD = "画面: list\n" + "{:>12}  {:<5} テキスト / id\n".format("tap", "画面内")
+
+
 def build_err(items, repo=FIXTURE):
     """組めない plan。stderr に出た理由を返す。"""
     with contextlib.redirect_stderr(io.StringIO()) as err, \
@@ -794,24 +804,34 @@ class AutoShowAfter(unittest.TestCase):
 class FirstVisible(unittest.TestCase):
     """#50: パターンの要素は、ツリー順ではなく画面に見えている1件目を選ぶ。"""
 
-    DUMP = ("画面: list\n"
-            "         tap  画面内   テキスト / id\n"
-            "   (195,-40)  ×     吾輩は猫である  #list.row.吾輩は猫である\n"
-            "    (195,60)  ○     一覧  #list\n"
-            "   (195,300)  ○     C++入門  #list.row.C++入門 [選択]\n"
-            "   (195,380)  ○     #list.row.こころ\n"
-            "   (195,900)  ×     坊っちゃん  #list.row.坊っちゃん\n")
+    DUMP = (DUMP_HEAD
+            + dump_line(195, -40, "×", "list.row.吾輩は猫である", "吾輩は猫である")
+            + dump_line(195, 60, "○", "list", "一覧")
+            + dump_line(195, 300, "○", "list.row.C++入門", "C++入門", "選択")
+            + dump_line(195, 380, "○", "list.row.こころ", "")
+            + dump_line(195, 900, "×", "list.row.坊っちゃん", "坊っちゃん"))
 
     def test_skips_offscreen_and_strips_state(self):
         self.assertEqual(RF["first_visible"](self.DUMP, "list.row.*"), "C++入門")
 
     def test_elements_inside_the_row_are_excluded(self):
         # 行の中のタイトル（list.row.title）も行のパターンに当たる。マップで別の要素なら選ばない
-        dump = ("    (195,280)  ○     吾輩は猫である  #list.row.title\n"
-                "    (195,300)  ○     #list.row.こころ\n")
+        dump = (dump_line(195, 280, "○", "list.row.title", "吾輩は猫である")
+                + dump_line(195, 300, "○", "list.row.こころ", ""))
         self.assertEqual(RF["first_visible"](dump, "list.row.*"), "title")
         self.assertEqual(RF["first_visible"](dump, "list.row.*", ["list.row.title"]), "こころ")
         self.assertEqual(RF["first_visible"](dump, "list.row.*", ["list.row.t*"]), "こころ")
+
+    def test_locate_counts_offscreen_rows_for_index(self):
+        # Maestro の index は画面外も含めた位置順。吾輩は猫である は1件しか無いので 0
+        self.assertEqual(RF["locate"](self.DUMP, "list.row.*"), ("C++入門", 0, 1))
+        dump = (dump_line(195, -40, "×", "list.row.牛乳", "")
+                + dump_line(195, 300, "○", "list.row.牛乳", "")
+                + dump_line(195, 380, "○", "list.row.牛乳#2", ""))
+        self.assertEqual(RF["locate"](dump, "list.row.*"), ("牛乳", 1, 2))
+        # 名前そのものが #2 で終わる行があれば、そちらを採る
+        self.assertEqual(RF["locate"](dump, "list.row.*", value="牛乳#2"), ("牛乳#2", 0, 1))
+        self.assertIsNone(RF["locate"](dump, "list.row.*", value="牛乳#3"))
 
     def test_none_when_nothing_visible(self):
         self.assertIsNone(RF["first_visible"](self.DUMP, "detail.cell.*"))
@@ -828,13 +848,14 @@ class AutoPickRun(unittest.TestCase):
         self.out.mkdir()
         (self.flows / "test_01.1.yaml").write_text("appId: x\n---\n", encoding="utf-8")
         (self.flows / "test_01.yaml").write_text(
-            "appId: x\nenv:\n  SHOTS: ''\n  LIST_ROW: ''\n---\n- tapOn:\n    id: '^list\\.row\\.${LIST_ROW}$'\n",
+            "appId: x\nenv:\n  SHOTS: ''\n  LIST_ROW: ''\n  LIST_ROW_INDEX: ''\n---\n- tapOn:\n"
+            "    id: '^list\\.row\\.${LIST_ROW}$'\n    index: ${LIST_ROW_INDEX}\n",
             encoding="utf-8")
         self.sec = {"name": "test_01", "flow": "test_01.yaml", "launch": True,
                     "parts": [{"flow": "test_01.1.yaml", "decide": None},
                               {"flow": "test_01.yaml", "decide": "LIST_ROW"}],
-                    "input_use": {"LIST_ROW": "selector"},
-                    "picks": {"LIST_ROW": {"pattern": "list.row.*", "pick": ""}},
+                    "input_use": {"LIST_ROW": "selector", "LIST_ROW_INDEX": "index"},
+                    "picks": {"LIST_ROW": {"pattern": "list.row.*", "pick": "", "exclude": []}},
                     "devices": {"iphone": {"inputs": {}, "picked": {}}},
                     "desc": "", "note": "", "result": "PENDING"}
         self.saved = {k: RF[k] for k in ("sh", "HERE")}
@@ -863,14 +884,50 @@ class AutoPickRun(unittest.TestCase):
     def test_picks_first_visible_and_fills_env(self):
         stopped, done, lost = self.run_device()
         self.assertEqual((stopped, done, lost), (None, 1, []))
-        self.assertEqual(self.sec["devices"]["iphone"]["picked"], {"LIST_ROW": "C++入門"})
+        self.assertEqual(self.sec["devices"]["iphone"]["picked"], {"LIST_ROW": "C++入門", "LIST_ROW_INDEX": 0})
         body = [a[2] for a in self.calls if a[0] == "run" and a[3] == "test_01"][0]
         self.assertIn("LIST_ROW: 'C\\+\\+入門'", body)
+        self.assertIn("LIST_ROW_INDEX: '0'", body)
         log = (self.out / "progress_iphone.log").read_text(encoding="utf-8")
         self.assertIn("test_01 撮影済み（選んだ: LIST_ROW=C++入門）", log)
 
+    def test_same_name_rows_get_index(self):
+        # 同じ名前の行が画面外（上）に1件、画面内に2件。見えている1件目は、位置順で2件目
+        self.dump = (dump_line(195, -40, "×", "list.row.牛乳", "")
+                     + dump_line(195, 300, "○", "list.row.牛乳", "")
+                     + dump_line(195, 380, "○", "list.row.牛乳", ""))
+        self.run_device()
+        self.assertEqual(self.sec["devices"]["iphone"]["picked"], {"LIST_ROW": "牛乳", "LIST_ROW_INDEX": 1})
+        log = (self.out / "progress_iphone.log").read_text(encoding="utf-8")
+        self.assertIn("LIST_ROW=牛乳（同じ名前 3件のうち上から2件目）", log)
+
+    def test_conditional_pick_with_ordinal(self):
+        # 条件で選んだ値に #2 を付けると、見えている同じ名前のうち上から2件目
+        self.dump = (dump_line(195, -40, "×", "list.row.牛乳", "")
+                     + dump_line(195, 300, "○", "list.row.牛乳", "")
+                     + dump_line(195, 380, "○", "list.row.牛乳", ""))
+        self.sec["picks"]["LIST_ROW"]["pick"] = "下の方の牛乳"
+        self.sec["devices"]["iphone"]["inputs"] = {"LIST_ROW": "牛乳#2"}
+        with contextlib.redirect_stdout(io.StringIO()):
+            RF["run_device"]({"sections": [self.sec]}, self.out / "manifest.json",
+                             self.flows, "iphone", "AAAA", ("test_01", 1))
+        self.assertEqual(self.sec["devices"]["iphone"]["picked"], {"LIST_ROW": "牛乳", "LIST_ROW_INDEX": 2})
+        body = [a[2] for a in self.calls if a[0] == "run"][0]
+        self.assertIn("LIST_ROW: '牛乳'", body)
+        self.assertIn("LIST_ROW_INDEX: '2'", body)
+
+    def test_conditional_pick_not_on_screen_loses_the_item(self):
+        self.sec["picks"]["LIST_ROW"]["pick"] = "x"
+        self.sec["devices"]["iphone"]["inputs"] = {"LIST_ROW": "坊っちゃん"}   # 画面外
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            stopped, done, lost = RF["run_device"]({"sections": [self.sec]}, self.out / "manifest.json",
+                                                   self.flows, "iphone", "AAAA", ("test_01", 1))
+        self.assertEqual(lost, ["iphone test_01"])
+        self.assertIn("坊っちゃん が画面に見えていない",
+                      (self.out / "progress_iphone.log").read_text(encoding="utf-8"))
+
     def test_nothing_visible_loses_the_item(self):
-        self.dump = "画面: list\n"
+        self.dump = DUMP_HEAD
         stopped, done, lost = self.run_device()
         self.assertEqual((done, lost), (0, ["iphone test_01"]))
         self.assertIn("押す list.row.* が画面に見えていない",

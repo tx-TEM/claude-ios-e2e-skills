@@ -585,6 +585,16 @@ def var_of(st):
     return st.get("var") or var_name(st["action"].target)
 
 
+def index_var(var):
+    """パターンの要素のうち何番目を押すか（Maestro の `index`）の変数名。"""
+    return var + "_INDEX"
+
+
+def picks_pattern(st):
+    """パターンの要素のどれを押すかを実行時に決めるステップか（打つ文字ではなく）。"""
+    return "pick" in st and "action" in st
+
+
 def assign_vars(steps):
     """実行時に決める値に変数名を振る。**同じ区間で同じ名前が2回要れば `_2` を付ける**
     （同じ一覧を2回通るなど）。ここで振れば、フローとマニフェストで名前がずれない。"""
@@ -610,6 +620,8 @@ def runtime_uses(steps):
     for st in steps:
         if needs_value(st):
             uses[var_of(st)] = "text" if st.get("runtime") else "selector"
+        if picks_pattern(st):
+            uses[index_var(var_of(st))] = "index"   # 数字そのもの。エスケープしない
     return uses
 
 
@@ -836,7 +848,12 @@ def emit_flow(mp, steps, app, clear_state, notes=None, timeout=10000,
     # **実行時に決める値は env に未定のまま置く。** 値を焼き込むと、
     # データが変わったときに黙って古い値で走る。未定のままなら、埋まっていない
     # ことが走らせる前に分かる。
-    used = [var_of(st) for st in steps if needs_value(st)]
+    used = []
+    for st in steps:
+        if needs_value(st):
+            used.append(var_of(st))
+        if picks_pattern(st):
+            used.append(index_var(var_of(st)))
     out = ["appId: " + app]
     # 撮影先は端末で変わるので焼き込まない。走らせる側が端末に合わせて埋める
     if any("shot" in st for st in steps):
@@ -921,7 +938,15 @@ def emit_flow(mp, steps, app, clear_state, notes=None, timeout=10000,
         key, val = step_sel(st) if a.element is not None else (None, None)
 
         if a.op == "tap":
-            out.append("- tapOn:\n    {}: {}".format(key, q(val)))
+            line = "- tapOn:\n    {}: {}".format(key, q(val))
+            if picks_pattern(st):
+                # 同じ名前の行が複数あると ID も同じになる。どれを押すかを index で1つに絞る。
+                # Maestro の index は、当たった要素を画面上の位置順（上端の y、次に x）に並べた
+                # 番号で、画面外の要素も数える（Filters.index / INDEX_COMPARATOR）。index を
+                # 付けないとツリー順の先頭（押せるもの優先）になり、画面に見えているとは限らない。
+                # ドキュメントには書かれていない挙動なので、Maestro を上げたら確かめ直す
+                line += "\n    index: ${" + index_var(var_of(st)) + "}"
+            out.append(line)
         elif a.op == "text":
             out.append("- tapOn:\n    {}: {}".format(key, q(val)))
             out.append("- eraseText")       # 前の項目の文字が残ったまま打たない
@@ -1678,7 +1703,9 @@ def write_flows(plan, out_dir, repo, timeout=10000):
         uses = runtime_uses(seg_steps)
         picks = runtime_picks(mp, seg_steps)
         # 走らせる側（や LLM）が埋める値。見えている1件目を選ぶものは run_flows.py が埋めるので入れない
-        inputs = {v: "" for v in uses if not (v in picks and not picks[v]["pick"])}
+        # 何番目か（_INDEX）は run_flows.py が数えるので入れない
+        inputs = {v: "" for v, use in uses.items()
+                  if use != "index" and not (v in picks and not picks[v]["pick"])}
         it = by_shot.get(shot, {})
         written.append({"name": shot, "title": it.get("title", ""),
                         "from": it.get("from"), "fresh": bool(it.get("fresh")),
