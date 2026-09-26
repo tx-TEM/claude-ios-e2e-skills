@@ -18,6 +18,7 @@ import os
 import re
 import runpy
 import shutil
+import subprocess
 import sys
 import tempfile
 from unittest import mock
@@ -35,6 +36,7 @@ sys.path.insert(0, str(MAP_SCRIPTS))
 from screenmap import check as map_check  # noqa: E402
 from screenmap import map as screen_map  # noqa: E402
 from flowgen import flow as flows_of  # noqa: E402
+import diffscope  # noqa: E402
 
 
 def load_run_flows():
@@ -404,6 +406,115 @@ class PlanRepo(unittest.TestCase):
         with self.assertRaises(SystemExit) as cm:
             run_manifest([f, self.work / "out", "--repo", FIXTURE, "--device", "iphone=AAAA"])
         self.assertIn("plan の repo に書く", str(cm.exception.code))
+
+
+class DiffScope(unittest.TestCase):
+    """#72: 確かめる変更の範囲を決める（diffscope.py）。
+
+    master ── A                                 既定ブランチ
+               └── C（Tag.swift）          feature-x（オープン PR #11）
+                    └── E, F（FavoriteButton / FavoriteBadge / FavoriteTests）  mine（今のブランチ）
+    """
+
+    def setUp(self):
+        self.work = Path(tempfile.mkdtemp())
+        self.repo = self.work / "app"
+        self.repo.mkdir()
+        self.git("init", "-b", "master")
+        self.commit({"Old.swift": "a"}, "A")
+        origin = self.work / "origin.git"
+        subprocess.run(["git", "clone", "-q", "--bare", str(self.repo), str(origin)], check=True)
+        self.git("remote", "add", "origin", str(origin))
+        self.git("fetch", "-q", "origin")
+        self.git("remote", "set-head", "origin", "master")
+        self.git("checkout", "-q", "-b", "feature-x")
+        self.feature_x = self.commit({"Tag.swift": "c"}, "C")
+        self.git("checkout", "-q", "-b", "mine")
+        self.commit({"FavoriteButton.swift": "e"}, "E")
+        self.commit({"FavoriteBadge.swift": "f", "FavoriteTests.swift": "f"}, "F")
+
+    def tearDown(self):
+        shutil.rmtree(self.work)
+
+    def git(self, *args):
+        return subprocess.run(["git", "-C", str(self.repo), "-c", "user.name=t", "-c", "user.email=t@t",
+                               *args], check=True, capture_output=True, text=True).stdout
+
+    def commit(self, files, msg):
+        for f, body in files.items():
+            (self.repo / f).write_text(body + "\n")
+        self.git("add", "."); self.git("commit", "-q", "-m", msg)
+        return self.git("rev-parse", "HEAD").strip()
+
+    def prs(self, *prs):
+        return mock.patch.object(diffscope, "open_prs", lambda repo: list(prs))
+
+    def pr(self, number, branch, oid):
+        return {"number": number, "headRefName": branch, "headRefOid": oid}
+
+    MINE = ["FavoriteBadge.swift", "FavoriteButton.swift", "FavoriteTests.swift"]
+
+    def test_commits_in_another_open_pr_are_not_in_range(self):
+        with self.prs(self.pr(11, "feature-x", self.feature_x)):
+            sc = diffscope.scope(self.repo)
+        self.assertEqual(sorted(sc["files"]), self.MINE)
+        self.assertIn("PR #11", sc["via"])
+
+    def test_without_open_prs_the_default_branch_decides(self):
+        with self.prs():
+            sc = diffscope.scope(self.repo)
+        self.assertIn("既定ブランチ origin/master", sc["via"])
+        self.assertEqual(sorted(sc["files"]), sorted(self.MINE + ["Tag.swift"]))
+
+    def test_without_gh_the_default_branch_decides_and_says_so(self):
+        with mock.patch.object(diffscope, "open_prs", lambda repo: None):
+            sc = diffscope.scope(self.repo)
+        self.assertIn("Tag.swift", sc["files"])
+        self.assertTrue(any("gh" in n for n in sc["notes"]))
+
+    def test_own_pr_is_not_a_candidate(self):
+        # 今のブランチ自身の PR を候補にすると、差分が空になる
+        pushed = self.git("rev-parse", "HEAD~1").strip()
+        with self.prs(self.pr(11, "feature-x", self.feature_x), self.pr(12, "mine", pushed)):
+            sc = diffscope.scope(self.repo)
+        self.assertEqual(sorted(sc["files"]), self.MINE)
+        self.assertIn("PR #11", sc["via"])
+
+    def test_pr_stacked_on_this_branch_is_not_a_candidate(self):
+        head = self.git("rev-parse", "HEAD").strip()
+        self.git("checkout", "-q", "-b", "child")
+        child = self.commit({"Child.swift": "g"}, "G")
+        self.git("checkout", "-q", "mine")
+        with self.prs(self.pr(11, "feature-x", self.feature_x), self.pr(13, "child", child)):
+            sc = diffscope.scope(self.repo)
+        self.assertEqual(sorted(sc["files"]), self.MINE)
+        self.assertTrue(any("PR #13" in n for n in sc["notes"]))
+        self.assertEqual(self.git("rev-parse", "HEAD").strip(), head)
+
+    def test_base_can_be_given(self):
+        sc = diffscope.scope(self.repo, "feature-x")
+        self.assertEqual(sorted(sc["files"]), self.MINE)
+
+    def test_working_tree_is_included_without_head(self):
+        (self.repo / "Old.swift").write_text("changed\n")
+        (self.repo / "NewDraft.swift").write_text("new\n")
+        (self.repo / ".gitignore").write_text("build/\n")
+        (self.repo / "build").mkdir()
+        (self.repo / "build" / "out.o").write_text("x")
+        files = diffscope.scope(self.repo, "feature-x")["files"]
+        self.assertIn("Old.swift", files)
+        self.assertIn("NewDraft.swift", files)
+        self.assertNotIn("build/out.o", files)
+        self.assertNotIn("NewDraft.swift", diffscope.scope(self.repo, "feature-x", "HEAD")["files"])
+
+    def test_default_branch_moved_on_is_not_in_range(self):
+        # 起点は分岐点。既定ブランチがその後に進んでも、その変更は入らない
+        self.git("checkout", "-q", "master")
+        self.commit({"Other.swift": "o"}, "other")
+        self.git("push", "-q", "origin", "master")
+        self.git("checkout", "-q", "mine")
+        with self.prs():
+            self.assertNotIn("Other.swift", diffscope.scope(self.repo)["files"])
 
 
 class RetakeRuns(unittest.TestCase):
