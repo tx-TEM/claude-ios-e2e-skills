@@ -2,8 +2,8 @@
 import subprocess
 
 from .screen import (ACTION_KEYS, BACKWARD, ELEMENT_KEYS, EXPECT_KEYS, FORWARD, GESTURE_KEYS,
-                        GESTURES, KINDS, OPS, SCREEN_KEYS, SYSTEM_IDS, expect_kind, is_pattern,
-                        pattern_prefix)
+                        GESTURES, KINDS, OPS, SCREEN_KEYS, SCROLLS, SYSTEM_IDS, expect_kind,
+                        is_pattern, pattern_prefix)
 from .map import old_schema
 
 
@@ -151,7 +151,7 @@ def check_screen(mp, sid, ids):
         return ["{}: 画面の中身が辞書になっていない".format(sid)], [], []
     check_screen_keys(sid, s, f)
     check_ready(sid, s, ids, f)
-    check_elements(sid, s, f)
+    check_elements(sid, scr, f)
     for a in scr.actions:
         check_action(mp, sid, a, ids, f)
     check_auto_shows(mp, sid, f)
@@ -181,10 +181,13 @@ def check_ready(sid, s, ids, f):
                 f.bad.append("{}: ready の {} がどの画面の要素にも無い".format(sid, ref))
 
 
-def check_elements(sid, s, f):
+def check_elements(sid, scr, f):
     seen = set()
-    for el in s.get("elements") or []:
-        if not isinstance(el, dict) or not el.get("id"):
+    raw = scr.raw.get("elements") or []
+    if any(not isinstance(el, dict) for el in raw):
+        f.bad.append("{}: id の無い要素がある".format(sid))
+    for el in scr.elements:
+        if not el.get("id"):
             f.bad.append("{}: id の無い要素がある".format(sid))
             continue
         eid = str(el["id"])
@@ -207,6 +210,29 @@ def check_elements(sid, s, f):
         if el.get("when") and el.get("actions"):
             f.breaks.append("{}: {} は条件つき（when: {}）。前提に書かない限り経路に使わない"
                             .format(sid, eid, el["when"]))
+        check_nesting(sid, scr, el, eid, f)
+
+
+def check_nesting(sid, scr, el, eid, f):
+    """`scroll` と `children`。入れ子にするのは、画面の縦スクロールとは別のスクロールの中にあるか
+    （親に `scroll`）、同じ ID が繰り返す親の数だけ出る（親がパターン）ときだけ。"""
+    kids = el.get("children")
+    scroll = el.get("scroll")
+    if "children" in el and (not isinstance(kids, list) or not kids):
+        f.bad.append("{}: {} の children は要素の並びで書く".format(sid, eid))
+    if "scroll" in el and scroll not in SCROLLS:
+        f.bad.append("{}: {} の scroll は {} だけ（縦の中の縦はまだ扱えない）".format(
+            sid, eid, " / ".join(SCROLLS)))
+    if "scroll" in el and not kids:
+        f.bad.append("{}: {} に scroll があるのに children が無い（中の要素を children に置く）".format(sid, eid))
+    if kids and "scroll" not in el and not is_pattern(eid):
+        f.bad.append("{}: {} は scroll もパターンでもないので children を持てない。"
+                     "ID が一意で、画面のスクロールで届くなら平らに書く".format(sid, eid))
+    for p in scr.parents(el):
+        pid = str(p.get("id") or "")
+        if is_pattern(pid) and eid.startswith(pattern_prefix(pid)):
+            f.bad.append("{}: {} が親 {} のパターンに前方一致する。子の ID に親の接頭辞を使わない"
+                         "（どの親の中かは入れ子で決まる）".format(sid, eid, pid))
 
 
 def check_action(mp, sid, a, ids, f):

@@ -321,6 +321,8 @@ def cmd_inspect(udid, name, save_to=None):
     # 共有マーカーを奪い合い、片方が「変わっていない」と誤判定する。
     STATE.mkdir(parents=True, exist_ok=True)
     (STATE / f"last_dump_{udid}.txt").write_text(out.stdout)
+    # 生のほうも置く。run_flows.py が、親（カルーセルなど）の枠の中の行だけから選ぶのに使う
+    (STATE / f"last_raw_{udid}.json").write_text(r["text"])
     (STATE / f"last_screen_{udid}").write_text(screen_of(out.stdout) or UNKNOWN)
     print("\n".join(l for l in out.stdout.splitlines() if "×" not in l))
     print(f"生: {raw} / 全行: {dumps / (name + '.txt')}", file=sys.stderr)

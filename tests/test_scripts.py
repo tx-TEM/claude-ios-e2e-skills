@@ -1368,6 +1368,169 @@ class Check(unittest.TestCase):
         self.assertIn("migrate_map.py", str(cm.exception.code))
 
 
+class NestingCheck(Check):
+    """#70: children を持てるのは scroll かパターンの要素だけ。子の ID は親の接頭辞で始めない。"""
+
+    def test_children_need_scroll_or_pattern(self):
+        self.edit("recommend.yaml", "    scroll: horizontal\n    children:\n      - id: recommend.filter.*",
+                  "    children:\n      - id: recommend.filter.*")
+        code, out = self.check()
+        self.assertEqual(code, 1)
+        self.assertIn("recommend.filter_bar は scroll もパターンでもないので children を持てない", out)
+
+    def test_vertical_scroll_is_refused(self):
+        self.edit("recommend.yaml", "  - id: recommend.filter_bar\n    name: 絞り込みのチップの列（上部、横スクロール）\n"
+                                    "    scroll: horizontal",
+                  "  - id: recommend.filter_bar\n    name: 絞り込みのチップの列（上部、横スクロール）\n"
+                  "    scroll: vertical")
+        code, out = self.check()
+        self.assertIn("recommend.filter_bar の scroll は horizontal だけ", out)
+
+    def test_scroll_without_children(self):
+        self.edit("list.yaml", "  - id: list.footer\n", "  - id: list.footer\n    scroll: horizontal\n")
+        code, out = self.check()
+        self.assertIn("list.footer に scroll があるのに children が無い", out)
+
+    def test_child_id_with_parent_prefix(self):
+        self.edit("recommend.yaml", "      - id: recommend.more\n", "      - id: recommend.carousel.more\n")
+        code, out = self.check()
+        self.assertIn("recommend.carousel.more が親 recommend.carousel.* のパターンに前方一致する", out)
+
+    def test_duplicate_id_across_levels(self):
+        self.edit("recommend.yaml", "      - id: recommend.more\n", "      - id: recommend.filter_bar\n")
+        code, out = self.check()
+        self.assertIn("要素 recommend.filter_bar が2回ある", out)
+
+
+class Nesting(unittest.TestCase):
+    """#70: 子の要素は、親を縦に寄せ、親の上から送り、childOf で親の中を指す。"""
+
+    def test_pattern_parent_is_chosen_at_run_time(self):
+        rows, flows = write_flows([{"from": "recommend", "do": ["see:recommend.more"]}])
+        # 親を選ぶ手前で割る。前の本は親のどれかが見えるまでスクロールして止まる
+        self.assertEqual(rows[0]["parts"], [{"flow": "test_01.1.yaml", "decide": None},
+                                            {"flow": "test_01.yaml", "decide": "RECOMMEND_CAROUSEL"}])
+        self.assertEqual(rows[0]["picks"]["RECOMMEND_CAROUSEL"],
+                         {"pattern": "recommend.carousel.*", "pick": "", "exclude": []})
+        self.assertEqual(rows[0]["inputs"], {})
+        self.assertIn("id: '^recommend\\.carousel\\..*'", flows["test_01.1.yaml"])
+        body = flows["test_01.yaml"]
+        self.assertIn("  RECOMMEND_CAROUSEL: ''", body)
+        self.assertIn("    id: '^${RECOMMEND_CAROUSEL}$'\n    direction: DOWN\n    centerElement: true", body)
+        self.assertIn("- repeat:\n    times: 20\n    while:\n      notVisible:\n"
+                      "        id: '^recommend\\.more$'\n        childOf:\n"
+                      "          id: '^${RECOMMEND_CAROUSEL}$'\n    commands:\n      - swipe:\n"
+                      "          from:\n            id: '^${RECOMMEND_CAROUSEL}$'\n"
+                      "          direction: LEFT", body)
+        # 送る繰り返しは見つからなくても落ちないので、そのあとの待ちで落とす
+        self.assertIn("- extendedWaitUntil:\n    visible:\n      id: '^recommend\\.more$'\n"
+                      "      childOf:\n        id: '^${RECOMMEND_CAROUSEL}$'", body)
+
+    def test_in_names_the_parent(self):
+        rows, flows = write_flows([{"from": "recommend",
+                                    "do": [{"op": "tap:recommend.more", "in": "recommend.carousel.9"}]}])
+        self.assertEqual(len(rows[0]["parts"]), 1)
+        body = flows["test_01.yaml"]
+        self.assertIn("- tapOn:\n    id: '^recommend\\.more$'\n    childOf:\n"
+                      "      id: '^recommend\\.carousel\\.9$'", body)
+        self.assertNotIn("direction: RIGHT", body)
+
+    def test_swiped_parent_is_searched_back(self):
+        # 前の項目で同じ親を送ったなら、戻る向きにも探す（縦の up と同じ）
+        rows, flows = write_flows([
+            {"from": "recommend", "do": [{"op": "see:recommend.more", "in": "recommend.carousel.9"}]},
+            {"from": "recommend", "do": [{"op": "see:recommend.book.*", "in": "recommend.carousel.9"}]}])
+        self.assertNotIn("direction: RIGHT", flows["test_01.yaml"])
+        self.assertIn("direction: RIGHT", flows["test_02.yaml"])
+
+    def test_child_pattern_is_picked_inside_the_parent(self):
+        rows, flows = write_flows([{"from": "recommend", "do": ["tap:recommend.book.*"]}])
+        self.assertEqual([p["decide"] for p in rows[0]["parts"]],
+                         [None, "RECOMMEND_CAROUSEL", "RECOMMEND_BOOK"])
+        self.assertEqual(rows[0]["picks"]["RECOMMEND_BOOK"]["within"], {"var": "RECOMMEND_CAROUSEL"})
+        body = flows["test_01.yaml"]
+        # 親の値は前の本で決まっているが、この本でも使う
+        self.assertIn("  RECOMMEND_CAROUSEL: ''", body)
+        self.assertIn("- tapOn:\n    id: '^${RECOMMEND_BOOK}$'\n    childOf:\n"
+                      "      id: '^${RECOMMEND_CAROUSEL}$'\n    index: ${RECOMMEND_BOOK_INDEX}", body)
+
+    def test_fixed_parent_needs_no_choice(self):
+        rows, flows = write_flows([{"from": "recommend", "do": ["tap:recommend.filter.新着"]}])
+        self.assertEqual(len(rows[0]["parts"]), 1)
+        body = flows["test_01.yaml"]
+        self.assertIn("childOf:\n          id: '^recommend\\.filter_bar$'", body)
+        # 押した要素そのものの結果（selected: self）も、同じ親の中を見る
+        self.assertIn("- extendedWaitUntil:\n    visible:\n      id: '^recommend\\.filter\\.新着$'\n"
+                      "      childOf:\n        id: '^recommend\\.filter_bar$'\n      selected: true", body)
+
+    def test_pick_condition_for_the_parent(self):
+        rows, _ = write_flows([{"from": "recommend",
+                                "do": [{"op": "see:recommend.more", "in": {"pick": "10件に満たないカテゴリー"}}]}])
+        self.assertEqual(rows[0]["picks"]["RECOMMEND_CAROUSEL"]["pick"], "10件に満たないカテゴリー")
+        self.assertEqual(rows[0]["inputs"], {"RECOMMEND_CAROUSEL": ""})
+
+    def test_route_through_a_child_picks_the_first_parent(self):
+        # 経路の途中で子を押すときも、親は見えている1件目。おすすめから詳細へはカードを押す
+        path = write_flows_path([{"from": "recommend"}, {"from": "detail"}])
+        self.assertIn("recommend.carousel.* のどれの中でするかを決める [見えている1件目]", path)
+        self.assertIn("tap recommend.book.* [見えている1件目] in recommend.carousel.*（見えている1件目）", path)
+
+    def test_in_on_a_top_level_element(self):
+        _, err = build_err([{"from": "recommend", "do": [{"op": "see:recommend.filter_bar", "in": "x"}]}])
+        self.assertIn("子の要素（マップの children）ではないので in は添えられない", err)
+
+    def test_in_outside_the_parent_pattern(self):
+        _, err = build_err([{"from": "recommend", "do": [{"op": "tap:recommend.more", "in": "recommend.filter_bar"}]}])
+        self.assertIn("in の recommend.filter_bar が親 recommend.carousel.* に当たらない", err)
+
+
+def write_flows_path(items, repo=FIXTURE):
+    """plan から フローを書いて、人が読む経路を返す。"""
+    out = Path(tempfile.mkdtemp())
+    plan = {"app": "jp.example.App", "repo": str(repo), "items": items}
+    with contextlib.redirect_stdout(io.StringIO()) as o:
+        flows_of.write_flows(plan, out)
+    shutil.rmtree(out)
+    return o.getvalue()
+
+
+class PickInsideParent(unittest.TestCase):
+    """#70: 子のパターンは、選んだ親の枠の中で見えている1件目を選ぶ。"""
+
+    RAW = json.dumps({"ui_schema": {}, "elements": [{"b": "[0,0][402,874]", "c": [
+        {"b": "[0,220][402,410]", "rid": "recommend.carousel.8"},
+        {"b": "[0,478][402,668]", "rid": "recommend.carousel.9"}]}]})
+
+    run_device = AutoPickRun.run_device
+    tearDown = AutoPickRun.tearDown
+
+    def setUp(self):
+        AutoPickRun.setUp(self)
+        self.sec["picks"] = {"LIST_ROW": {"pattern": "list.row.*", "pick": "", "exclude": [],
+                                          "within": {"var": "PARENT"}}}
+        self.sec["devices"]["iphone"]["inputs"] = {"PARENT": "recommend.carousel.9"}
+        self.dump = (DUMP_HEAD
+                     + dump_line(74, 315, "○", "list.row.上の段", "")
+                     + dump_line(-40, 573, "×", "list.row.はみ出し", "")
+                     + dump_line(74, 573, "○", "list.row.下の段", ""))
+        state = self.tmp / ".work" / "state"
+        state.mkdir(parents=True, exist_ok=True)
+        (state / "last_raw_AAAA.json").write_text(self.RAW, encoding="utf-8")
+
+    def test_picks_first_visible_in_the_parent(self):
+        # 上のカルーセルの行（上の段）は、画面の上のほうに見えていても選ばない
+        self.run_device()
+        self.assertEqual(self.sec["devices"]["iphone"]["picked"]["LIST_ROW"], "list.row.下の段")
+
+    def test_missing_parent_loses_the_item(self):
+        self.sec["devices"]["iphone"]["inputs"] = {"PARENT": "recommend.carousel.3"}
+        stopped, done, lost = self.run_device()
+        self.assertEqual(lost, ["iphone test_01"])
+        self.assertIn("親 recommend.carousel.3 が画面に無い",
+                      (self.out / "progress_iphone.log").read_text(encoding="utf-8"))
+
+
+
 class Migrate(unittest.TestCase):
     """#50: 古い形のマップを変換し、そのまま check と経路計算が通る。"""
 

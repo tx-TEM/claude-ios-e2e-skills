@@ -1,0 +1,32 @@
+anchor: recommend
+names: [おすすめ]
+summary: カテゴリーごとに作品を横に並べる
+ready:
+  any: [recommend.book.*]
+elements:
+  - id: recommend.filter_bar
+    name: 絞り込みのチップの列（上部、横スクロール）
+    scroll: horizontal
+    children:
+      - id: recommend.filter.*
+        name: 絞り込みのチップ（ID はチップの名前）
+        actions:
+          - tap:
+            summary: そのチップで絞り込む
+            expect: {selected: self}
+  - id: recommend.carousel.*
+    name: カテゴリーのカルーセル（ID はカテゴリーの ID）
+    scroll: horizontal
+    children:
+      - id: recommend.book.*
+        name: 作品のカード（ID は作品名）
+        actions:
+          - tap:
+            summary: 作品の詳細を開く
+            expect: {screen: detail, via: push}
+      - id: recommend.more
+        name: もっと見る（末尾のカード）
+        actions:
+          - tap:
+            summary: カテゴリーの作品の一覧を開く
+            expect: {screen: list, via: push}

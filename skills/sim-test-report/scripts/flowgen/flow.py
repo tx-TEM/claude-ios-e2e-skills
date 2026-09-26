@@ -20,11 +20,11 @@ from screenmap.screen import DO_OPS, GESTURES, is_pattern, pattern_prefix
 from .actions import resolve_action
 from .bridge import Route, Unroutable, emit_path, report_problems
 from .results import resolve_result
-from .steps import Act, See, Shot
+from .steps import Act, See, Shot, nest
 
 PLAN_KEYS = {"app", "repo", "clear_state", "items", "explore"}
 ITEM_KEYS = {"from", "do", "fresh", "title", "expect", "when"}
-DO_KEYS = {"op", "runtime", "input", "pick"}
+DO_KEYS = {"op", "runtime", "input", "pick", "in"}
 EXPLORE_KEYS = {"from", "title", "expect", "reason", "when"}
 
 
@@ -76,6 +76,8 @@ def read_items(plan):
     `do` の要素は操作id（`"tap:Search"` / `"see:list.footer"`）か、値の決め方を添えた
     `{"op": 操作id, "runtime": true}` / `{"op": 操作id, "input": 値}`（打つ文字）/
     `{"op": 操作id, "pick": 条件}`（パターンの要素から条件に合うものを選ぶ）。
+    子の要素（マップの `children`）には、どの親の中でするかを `in` で添えられる
+    （`{"op": 操作id, "in": 親の ID}`。ほかの値の決め方と一緒に書いてよい）。
 
     `when` は項目の前提（マップの `when` の文言をそのまま写す）。条件つきの辺と、
     結果が分かれる操作の枝は、ここに同じ文言があるときだけ使う。
@@ -111,18 +113,35 @@ def read_items(plan):
                 ops.append((d, {}))
                 continue
             modes = [k for k in ("runtime", "input", "pick") if k in d] if isinstance(d, dict) else []
+            within = read_in(d.get("in")) if isinstance(d, dict) and "in" in d else None
             bad = not isinstance(d, dict) or not d.get("op") or set(d) - DO_KEYS \
-                or len(modes) != 1 or d.get("runtime") not in (None, True) \
-                or ("pick" in d and not (isinstance(d["pick"], str) and d["pick"].strip()))
+                or len(modes) > 1 or (not modes and within is None) or d.get("runtime") not in (None, True) \
+                or ("pick" in d and not (isinstance(d["pick"], str) and d["pick"].strip())) \
+                or within is False
             if bad:
                 sys.exit("plan の {} の do の要素は操作id か {{\"op\": 操作id, \"input\": 値}} か "
-                         "{{\"op\": 操作id, \"runtime\": true}} か {{\"op\": 操作id, \"pick\": 条件}}: {}".format(
-                             name, json.dumps(d, ensure_ascii=False)))
-            ops.append((d["op"], {modes[0]: d[modes[0]]}))
+                         "{{\"op\": 操作id, \"runtime\": true}} か {{\"op\": 操作id, \"pick\": 条件}}、"
+                         "親を選ぶなら {{\"op\": 操作id, \"in\": 親の ID か [外から順の ID] か "
+                         "{{\"pick\": 条件}}}}: {}".format(name, json.dumps(d, ensure_ascii=False)))
+            how = {modes[0]: d[modes[0]]} if modes else {}
+            if within is not None:
+                how["in"] = within
+            ops.append((d["op"], how))
         when = item.get("when") or []
         out.append({"name": name, "from": item["from"], "do": ops, "fresh": bool(item.get("fresh")),
                     "when": tuple([when] if isinstance(when, str) else when)})
     return out
+
+
+def read_in(v):
+    """plan の `in` を、パターンの親ごとの ID の並び（外から順）か `{"pick": 条件}` にする。読めなければ False。"""
+    if isinstance(v, str) and v.strip():
+        return [v]
+    if isinstance(v, list) and v and all(isinstance(x, str) and x.strip() for x in v):
+        return list(v)
+    if isinstance(v, dict) and set(v) == {"pick"} and isinstance(v["pick"], str) and v["pick"].strip():
+        return {"pick": v["pick"]}
+    return False
 
 
 # ---------- 項目をステップにする ----------
@@ -145,8 +164,8 @@ def build_steps(mp, items):
             steps += route.to(item["from"], item["when"])
             for op, how in item["do"]:
                 tag = "({}) do {}".format(name, op)
-                st, wrong = do_step(mp, route, op, how, item["when"])
-                steps.append(st)
+                sts, wrong = do_step(mp, route, op, how, item["when"])
+                steps += sts
                 # 値の決め方の間違い。経路は組めるので、ほかの間違いもまとめて出す
                 problems += [("call", "({}) {}".format(name, m)) for m in wrong]
             steps.append(Shot(name))
@@ -193,32 +212,42 @@ def known_ops(mp, at):
 
 
 def do_step(mp, route, op, how, given):
-    """項目の do の1つをステップにする。(ステップ, 呼び方の間違いの文の並び)。
+    """項目の do の1つをステップにする。(ステップの並び, 呼び方の間違いの文の並び)。
     画面を移る操作なら route の居る画面も進める。
 
-    `how` はテストケースが添えた値の決め方（`input` / `runtime` / `pick`）。パターンの要素を
-    ID まで書いた操作（`tap:list.row.牛乳`）は、その ID を操作の対象にする。
+    `how` はテストケースが添えた値の決め方（`input` / `runtime` / `pick`）と、子の要素の
+    親の選び方（`in`）。パターンの要素を ID まで書いた操作（`tap:list.row.牛乳`）は、
+    その ID を操作の対象にする。
+
+    **子の要素（マップの `children`）なら、親を決めるステップ（Enter）を手前に置く。**
+    パターンの親のどれの中でするかを、`in` が無ければ走らせるときに決める。
     """
     at = route.at
+    how = dict(how)
+    given_in = how.pop("in", None)
     kind, _, rest = op.partition(":")
     if kind == "see" and rest.startswith("text:"):
-        if how:
+        if how or given_in is not None:
             raise Unroutable([("call", "「{}」に値は添えられない（待つ文言は op に書く）".format(op))])
         words = rest[len("text:"):]
         if not words.strip():
             raise Unroutable([("call", "「{}」に待つ文言が無い".format(op))])
-        return See(at, words, None, by_label=True, text=True), []
+        return [See(at, words, None, by_label=True, text=True)], []
     found, el, val = resolve(mp, at, op)
     target = None if val is None else pattern_prefix(el.get("id")) + val
+    parents = mp.screens[at].parents(el) if el is not None else []
+    if given_in is not None and not parents:
+        raise Unroutable([("call", "「{}」は子の要素（マップの children）ではないので in は添えられない".format(op))])
+    enters, within, wrong_in = nest(at, parents, given_in, "「{}」".format(op))
     if kind == "see" and el is not None:
-        st = See(at, target or el.get("id"), el.get("name"), el.get("by") == "label")
+        st = See(at, target or el.get("id"), el.get("name"), el.get("by") == "label", within=within)
         if how:
             if "pick" in how or not is_pattern(st.target) or st.by_label:
                 raise Unroutable([("call", "「{}」に添えられるのは input か runtime で、パターンの要素"
                                            "（`*` で終わる ID）にだけ。その語を含む行を待つ".format(op))])
             st.contains = str(how["input"]) if "input" in how else None
             st.later = bool(how.get("runtime"))
-        return st, []
+        return enters + [st], wrong_in
     if found is None:
         raise Unroutable([("call", "{} に「{}」という操作がマップに無い。この画面にあるのは {}"
                                    .format(at, op, known_ops(mp, at) or "（無し）"))])
@@ -226,19 +255,21 @@ def do_step(mp, route, op, how, given):
         raise Unroutable([("map", "{} の「{}」は in_tree: false（座標が要る）。フローでは押せない"
                                   .format(at, found.label()))])
     action, wrong = resolve_action(found, target, how)
+    wrong = wrong_in + wrong
     if found.is_back():
         st = route.back(found)       # 戻る先は歩いた履歴で決まる
         st.action = action
-        return st, wrong
+        st.within = within
+        return enters + [st], wrong
     # 結果が分かれるなら、確認項目の前提（when）に合う枝だけ
     expects = [found.branches[branch_of(found, at, given)]] if found.branches else found.expects
-    st = Act(at, action, resolve_result(found, expects))
+    st = Act(at, action, resolve_result(found, expects), within=within)
     if st.arrive is None:
-        return st, wrong
+        return enters + [st], wrong
     if st.to not in mp.screens:
         raise Unroutable([("map", "{} の「{}」の遷移先 {} のファイルが無い"
                                   .format(at, found.label(), st.to))])
-    return route.forward(st, st.to), wrong
+    return enters + [route.forward(st, st.to)], wrong
 
 
 def branch_of(action, at, given):

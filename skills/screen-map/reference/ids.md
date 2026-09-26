@@ -153,7 +153,7 @@ plan の `do` にこう書ける。データソースを引かずに済む。
 | 軸 | 振るもの | 例 |
 |---|---|---|
 | どの行か | **表示テキスト。** 絞りきれないぶんは実行時に選ぶ（マップに書かない） | `item_list.cell.<表示名>` |
-| 行の中のどの要素か | 静的な役割名 | `item_list.cell.title` / `.subtitle` |
+| 行の中のどの要素か | 静的な役割名。**行の接頭辞で始めない**（マップでは行の子にする） | `item_list.cell_title` / `item_list.cell_subtitle` |
 
 マップ側は、**行をパターンで書く。** 何番目か、どの行かは書かない — どの行を押すかはテストのときの選び方で、画面の事実ではない。
 
@@ -170,3 +170,33 @@ elements:
 どの行を押すかはスクリプトが実行時に決める。条件が無ければ画面に見えている1件目、条件があれば plan の `do` に `pick` で書く（sim-test-report の test-case-builder）。**特定の行を名指しするのはテストケースの側で、表示テキストまで書く**（`tap:item_list.cell.牛乳`）。
 
 末尾の `*` がパターンの印。接頭辞（`item_list.cell.`）は静的なので、それでlintの存在確認ができる。**接頭辞を補間の中に散らさない。**
+
+## 親と子にする要素
+
+**マップで親（`children` を持つ要素）にする要素には、必ず `.accessibilityElement(children: .contain)` を ID と一緒に付ける。** フローは子を `childOf`（ツリー上でその要素の中にあるもの）で探すので、親がツリーに要素として出て、子をその下に持っている必要がある。
+
+- **ツリーに出るのはコードの構造ではない。** ID を振っていない `VStack` / `HStack` は平らにされ、別の `View` の struct に切り出した区切りもツリーには現れない。付けずに済む形（`ScrollView` は付けなくても出た）もあるが、どれが出るかを覚えて使い分けない。付けて困ることは無い（`ScrollView` に付けても、中のカードが子として並び、送り方も変わらないことを実測した）
+- **`Button` / `NavigationLink` で包んだものは親にできない。** 包んだ全体が1つの要素にまとまり、中の文字はラベルに入る。カードの中にさらにボタンがある形は、実測していない
+
+## 横スクロールの中
+
+**`ScrollView(.horizontal)` そのものに振る。** マップではそれが `scroll: horizontal` の親になり、フローは子が見えるまでその上から送り、子を探す範囲（`childOf`）にも使う。セクションの外枠（見出しとカルーセルを包む `VStack`）に振る必要は無い。
+
+```swift
+ScrollView(.horizontal) {
+    LazyHStack {
+        ForEach(section.books) { book in
+            BookCard(book: book)
+                .accessibilityIdentifier("recommend.book.\(book.title)")
+        }
+        MoreButton()
+            .accessibilityIdentifier("recommend.more")
+    }
+}
+.accessibilityElement(children: .contain)
+.accessibilityIdentifier("recommend.carousel.\(section.category.id)")
+```
+
+- **子の ID に親の名前を入れない**（`recommend.book.<作品名>`、`recommend.more`）。同じ ID がカルーセルの数だけ出てよい。どのカルーセルの中かは親で決まる
+- **子の ID を親の接頭辞で始めない。** `recommend.carousel.more` は親のパターン `recommend.carousel.*` に前方一致する
+- 実測（SwiftUI、iOS 26.5）: `ScrollView` に振った ID は、中のカードを子に持つ要素としてツリーに出る（`.contain` の有無によらない）。画面外のカードは `LazyHStack` でも `HStack` でもツリーに出ない（画面付近の3〜4枚だけ）
