@@ -18,7 +18,7 @@ import sys
 
 from .results import External, Hidden, Selected, Value, Visible, resolve_result
 from .actions import Input, Tap, resolve_action
-from .steps import Act, Await, Restart, See, Shot, stays_out
+from .steps import Act, Await, Enter, Restart, See, Shot, nest, stays_out
 
 
 class Unroutable(Exception):
@@ -147,7 +147,11 @@ class Route:
             steps.append(self.back(a))
         for sid, (a, bi, dest, via, _) in hops:
             expects = [a.branches[bi]] if bi is not None else a.expects
-            steps.append(self.forward(Act(sid, self.action_of(a), resolve_result(a, expects)), dest))
+            # 子の要素なら、パターンの親は見えている1件目（どれを選ぶかを気にするなら do に書く）
+            enters, within, _ = nest(sid, a.parents)
+            steps += enters
+            steps.append(self.forward(Act(sid, self.action_of(a), resolve_result(a, expects),
+                                          within=within), dest))
         return steps
 
     def best_route(self, goal, given):
@@ -241,21 +245,28 @@ def emit_path(mp, steps, notes, start=None):
             row("  {}  自動表示 {} を待つ".format(st.screen.ljust(w), st.to),
                 "✓ {} が出ている".format(dest) if dest else "— {} に anchor が無い".format(st.to))
             continue
+        if isinstance(st, Enter):
+            row("  {}  {} のどれの中でするかを決める [{}]".format(
+                st.screen.ljust(w), st.target, st.pick.condition or "見えている1件目"), None)
+            continue
         if isinstance(st, See) and st.text:
             row("  {}  see text「{}」".format(st.screen.ljust(w), st.target),
                 "✓ 「{}」が出ている（文言で待つ）".format(st.target))
             continue
         if isinstance(st, See):
             word = st.contains if st.contains is not None else ("撮るときに決める語" if st.later else None)
-            row("  {}  see {}{}".format(st.screen.ljust(w), st.target,
-                                         " [「{}」を含む行]".format(word) if st.contains is not None
-                                         else " [{}を含む行]".format(word) if word else ""),
+            inside = " in " + " > ".join(x.label() for x in st.within) if st.within else ""
+            row("  {}  see {}{}{}".format(st.screen.ljust(w), st.target,
+                                           " [「{}」を含む行]".format(word) if st.contains is not None
+                                           else " [{}を含む行]".format(word) if word else "", inside),
                 "✓ {} が見える".format(st.target))
             continue
         a = st.action
         extra = ' "{}"'.format(a.text) if isinstance(a, Input) else ""
         if isinstance(a, Tap) and a.pick is not None:
             extra += " [{}]".format(a.pick.condition or "見えている1件目")
+        if st.within:
+            extra += " in " + " > ".join(x.label() for x in st.within)
         left = "  {}  {}{}".format(st.screen.ljust(w), a.label(), extra)
         nxt = next((x for x in steps[n + 1:] if not isinstance(x, Shot)), None)
         rights = []

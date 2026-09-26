@@ -26,3 +26,9 @@ elements:
       - tap:
         summary: 設定タブに切り替える
         expect: {screen: settings, via: tab}
+  - id: tab_bar.recommend
+    name: おすすめ（タブバー）
+    actions:
+      - tap:
+        summary: おすすめタブに切り替える
+        expect: {screen: recommend, via: tab}

@@ -189,7 +189,30 @@ def dump_rows(dump):
     return out
 
 
-def pattern_rows(dump, pattern, exclude=()):
+def box_of(raw, rid):
+    """生のダンプ（maestrod.py が置く JSON）で、その ID の要素の枠 (x0, y0, x1, y1)。無ければ None。
+
+    **親の中の行だけから選ぶのに使う。** elements.py の行は中心しか持たないので、親の枠は
+    生のほうから取る。同じ ID の要素が複数あれば、ツリーで先のもの。
+    """
+    try:
+        d = json.loads(raw)
+    except ValueError:
+        return None
+    stack = list(d["elements"]) if isinstance(d, dict) and "elements" in d else [d]
+    while stack:
+        n = stack.pop(0)
+        if not isinstance(n, dict):
+            continue
+        a = n.get("attributes") or {}
+        if (n.get("rid") or a.get("resource-id")) == rid:
+            m = re.match(r"^\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]$", n.get("b") or a.get("bounds") or "")
+            return tuple(map(int, m.groups())) if m else None
+        stack[0:0] = n.get("c") or n.get("children") or []
+    return None
+
+
+def pattern_rows(dump, pattern, exclude=(), box=None):
     """ダンプのうちパターンに当たる行を、Maestro の index と同じ順で [(ID, 画面内か)]。
 
     ID はアクセシビリティ ID そのもの（ダンプの id の欄）。**順は上端の y、次に x**（Maestro の Filters.index が
@@ -199,6 +222,8 @@ def pattern_rows(dump, pattern, exclude=()):
     `exclude` はマップで別の要素として定義されている ID（行の中のタイトルなど）。
     パターン（`item_list.cell.*`）の前方一致には当たるが、行ではないので数えない。
     パターンになっているもの（`item_list.cell.badge.*`）は前方一致で外す。
+
+    `box` を渡すと、中心がその枠の中にある行だけ（子の要素を、選んだ親の中から選ぶとき）。
     """
     prefix = pattern[:-1] if pattern.endswith("*") else pattern
     rows = []
@@ -206,12 +231,14 @@ def pattern_rows(dump, pattern, exclude=()):
         rid = r["id"]
         if any(rid == x or (x.endswith("*") and rid.startswith(x[:-1])) for x in exclude):
             continue
+        if box and not (box[0] <= r["cx"] <= box[2] and box[1] <= r["cy"] <= box[3]):
+            continue
         if rid.startswith(prefix) and len(rid) > len(prefix):
             rows.append((r["top"], r["cx"], rid, r["on"]))
     return [(v, on) for _, _, v, on in sorted(rows, key=lambda x: (x[0], x[1]))]
 
 
-def locate(dump, pattern, exclude=(), value=None):
+def locate(dump, pattern, exclude=(), value=None, box=None):
     """押す行を決める。(ID, Maestro の index, 同じ ID の行の数)。決められなければ None。
 
     `value` が None なら**画面に見えている1件目**。**Maestro のツリー順の0番目ではない** —
@@ -226,7 +253,7 @@ def locate(dump, pattern, exclude=(), value=None):
     index は、同じ ID の行を位置順（上端の y、次に x）に並べたときの番号（画面外も数える）。
     Maestro の `index` がその順で数えるため（Filters.index の INDEX_COMPARATOR）。
     """
-    rows = pattern_rows(dump, pattern, exclude)
+    rows = pattern_rows(dump, pattern, exclude, box)
     if value is None:
         chosen = next((r for r in rows if r[1]), None)
         nth = 1
@@ -248,6 +275,16 @@ def first_visible(dump, pattern, exclude=()):
     """画面に見えている1件目の ID。無ければ None。"""
     found = locate(dump, pattern, exclude)
     return found[0] if found else None
+
+
+def parent_of(pk, dev):
+    """選ぶ範囲の親の具体的な ID（`picks` の `within`）。親が無ければ None。"""
+    w = pk.get("within")
+    if not w:
+        return None
+    if "id" in w:
+        return w["id"]
+    return (dev.get("picked") or {}).get(w["var"]) or (dev.get("inputs") or {}).get(w["var"])
 
 
 def read_dump(udid, name):
@@ -361,8 +398,19 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, only=Non
                     # どの行を押すかを決め、同じ ID の行のうち何番目か（Maestro の index）を数える。
                     # 条件が無ければ画面に見えている1件目（モデルに訊かない）
                     dump = read_dump(udid, f"{name}.pick{k}")
+                    box, parent = None, parent_of(pk, dev)
+                    if dump and parent:
+                        # 子の要素は、選んだ親（カルーセルなど）の枠の中から選ぶ
+                        raw = HERE.parent / ".work" / "state" / f"last_raw_{udid}.json"
+                        box = box_of(raw.read_text(encoding="utf-8"), parent) if raw.exists() else None
+                        if box is None:
+                            failed = True
+                            logline(f"{line} 撮影できず 親 {parent} が画面に無い")
+                            print(f"{line} 親 {parent} が画面に無い。次に起動し直すフローまで飛ばす",
+                                  file=sys.stderr)
+                            break
                     found = locate(dump, pk["pattern"], pk.get("exclude") or (),
-                                   given if pk.get("pick") else None) if dump else None
+                                   given if pk.get("pick") else None, box) if dump else None
                     if found is None:
                         what = f"{given} が" if pk.get("pick") else f"押す {pk['pattern']} が"
                         failed = True

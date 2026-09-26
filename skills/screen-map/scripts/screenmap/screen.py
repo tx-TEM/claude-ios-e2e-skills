@@ -15,10 +15,11 @@ BACKWARD = ("back", "dismiss")           # 来た画面に戻る。戻り先は�
 SYSTEM_IDS = ("BackButton",   # ナビゲーションの戻る
               "Search")       # キーボードの検索キー
 KINDS = ("screen", "visible", "hidden", "selected", "value", "external")
+SCROLLS = ("horizontal",)                # 要素の `scroll`。画面の縦スクロールとは別に送る向き
 
 SCREEN_KEYS = {"anchor", "names", "summary", "files", "stub", "ready", "elements",
                "gestures", "auto_shows"}
-ELEMENT_KEYS = {"id", "name", "summary", "when", "by", "in_tree", "actions"}
+ELEMENT_KEYS = {"id", "name", "summary", "when", "by", "in_tree", "actions", "scroll", "children"}
 ACTION_KEYS = {"summary", "note", "expect"} | set(OPS)
 GESTURE_KEYS = {"summary", "note", "expect"} | set(GESTURES)
 EXPECT_KEYS = set(KINDS) | {"via", "when"}
@@ -31,6 +32,26 @@ def is_pattern(eid):
 
 def pattern_prefix(eid):
     return str(eid)[:-1]
+
+
+def flatten(items, parents=()):
+    """`elements` を、子（`children`）も含めて親が先の順に平らにする。(要素の並び, {id(要素): 親の並び})。
+
+    親の並びは外から順。**要素は yaml の辞書のまま持つ**（check.py が鍵を確かめる）ので、
+    親は辞書に書き込まずに別に持つ。
+    """
+    out, ps = [], {}
+    for e in items or []:
+        if not isinstance(e, dict):
+            continue
+        out.append(e)
+        ps[id(e)] = list(parents)
+        kids = e.get("children")
+        if isinstance(kids, list):
+            sub, sub_ps = flatten(kids, parents + (e,))
+            out += sub
+            ps.update(sub_ps)
+    return out, ps
 
 
 def expect_kind(e):
@@ -52,11 +73,17 @@ class Screen:
         self.files = r.get("files") or []   # この画面の主なソース
         self.stub = bool(r.get("stub"))     # まだ書いていない画面（操作は網羅ではない）
         self.ready = r.get("ready")         # 読み込み完了の目印（{any: [...]} / {all: [...]}）
-        self.elements = [e for e in r.get("elements") or [] if isinstance(e, dict)]
+        # 子（`children`）も含めて平らに持つ。どの親の中かは parents() で引く
+        self.elements, self._parents = flatten(r.get("elements"))
         # 操作（要素のアクション → gestures の順）
-        self.actions = ([ActionSpec(sid, a, el) for el in self.elements for a in el.get("actions") or []]
+        self.actions = ([ActionSpec(sid, a, el, self.parents(el))
+                         for el in self.elements for a in el.get("actions") or []]
                         + [ActionSpec(sid, g) for g in r.get("gestures") or []])
         self._auto_shows = r.get("auto_shows") or []
+
+    def parents(self, el):
+        """その要素の親（`children` に置かれた先）を外から順に。画面の直下なら空。"""
+        return self._parents.get(id(el), [])
 
     def element(self, eid):
         """(要素, 実行時の値)。パターンの要素（`list.row.*`）に具体的な ID
@@ -131,10 +158,11 @@ class ActionSpec:
     ここから sim-test-report の flowgen/（actions.py / results.py）が作る。
     """
 
-    def __init__(self, sid, raw, element=None):
+    def __init__(self, sid, raw, element=None, parents=()):
         self.sid = sid
         self.raw = raw or {}
         self.element = element
+        self.parents = list(parents)     # 要素の親（外から順）。子の操作は、親の中で探す
         self.op = next((k for k in (OPS if element is not None else GESTURES) if k in self.raw), None)
         self.target = element.get("id") if element is not None else self.raw.get(self.op)
         self.summary = self.raw.get("summary")
