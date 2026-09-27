@@ -78,7 +78,7 @@ plan から、Maestro のフローとテストの定義ファイル（`manifest.
 
 ```bash
 python3 ~/.claude/skills/sim-test-report/scripts/manifest.py \
-  ~/.claude/skills/sim-test-report/.work/flows/<slug>/plan.json <出力先> \
+  ~/.claude/skills/sim-test-report/.work/flows/<出力先の名前>/plan.json <出力先> \
   --device iphone=<iPhoneのUDID> --device ipad=<iPadのUDID>
 ```
 

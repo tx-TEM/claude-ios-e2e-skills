@@ -476,6 +476,9 @@ def write_flows(plan, out_dir, timeout=10000):
     by_shot = {row["name"]: (case, row) for case in read_cases(plan) for row in case["items"]}
     d = Path(out_dir)
     d.mkdir(parents=True, exist_ok=True)
+    # 前の回のフローが残らないように、書く前に消す（plan.json は残す）
+    for old in d.glob("*.yaml"):
+        old.unlink()
     written = []
     # 押す前のスクロール（Reveal）と、外から戻す操作（Return）を挟んでから切る。経路の表示（emit_path）は挟む前の steps で出す
     for seg_start, seg_steps, shot, lch in split_at_shots(mp, add_returns(add_reveals(steps)), None):

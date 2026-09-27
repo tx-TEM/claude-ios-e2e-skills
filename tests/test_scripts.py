@@ -937,8 +937,9 @@ class RetakeRun(unittest.TestCase):
         stopped, done, lost = self.run_device(["test_03"])
         self.assertEqual(done, 0)
         self.assertEqual(lost, ["iphone test_02（なぞる途中で落ちた）", "iphone test_03"])
-        # 撮れていないので、前の判定（RETAKE を出した判定）はそのまま
-        self.assertEqual(self.sec("test_03")["result"], "OK")
+        # 撮れていないので、前の回の判定は捨てて PENDING。前の回の証跡と OK が残っていると
+        # レポートに出てしまう。PENDING なら build_report.py が止める
+        self.assertEqual(self.sec("test_03")["result"], "PENDING")
         self.assertNotIn(("inspect", "test_03"), [(c, n) for c, n, _, _ in self.calls])
 
     def test_other_chain_is_not_touched(self):
@@ -949,6 +950,80 @@ class RetakeRun(unittest.TestCase):
         stopped, done, lost = self.run_device(None)
         self.assertEqual(done, 5)
         self.assertTrue(all(s["result"] == "PENDING" for s in self.sections))
+
+
+class Leftovers(unittest.TestCase):
+    """前の回の残り（フロー、ダンプの置き場、証跡、進捗ログ）が今回のものに紛れない。"""
+
+    def test_run_key_splits_runs_and_devices(self):
+        # maestrod.py も読み込むと main() が走るので、関数だけ取り出す
+        src = (SCRIPTS / "maestrod.py").read_text(encoding="utf-8").replace("\nmain()\n", "\n")
+        ns = {"__file__": str(SCRIPTS / "maestrod.py"), "__name__": "maestrod"}
+        exec(compile(src, "maestrod.py", "exec"), ns)
+        key = ns["run_key"]
+        self.assertEqual(key("/x/sim-test-report-20260928-a/shots/iphone"), "sim-test-report-20260928-a/iphone")
+        self.assertEqual(key("/x/sim-test-report-20260928-a/shots"), "sim-test-report-20260928-a")
+        self.assertTrue(key(None).startswith("_probe/"))
+
+    def test_old_flows_are_removed_but_not_the_plan(self):
+        out = Path(tempfile.mkdtemp())
+        (out / "test_15.yaml").write_text("old", encoding="utf-8")
+        (out / "plan.json").write_text("{}", encoding="utf-8")
+        plan = {"app": "x", "repo": str(FIXTURE),
+                "cases": [{"title": "A", "items": [{"from": "list", "title": "a", "expect": "a"}]}]}
+        with contextlib.redirect_stdout(io.StringIO()):
+            flows_of.write_flows(plan, out)
+        names = sorted(p.name for p in out.iterdir())
+        shutil.rmtree(out)
+        self.assertEqual(names, ["plan.json", "test_01.yaml"])
+
+
+class FreshRun(unittest.TestCase):
+    """最初から撮るときと、撮る項目ごとに、前の回の証跡と進捗ログを片付ける。"""
+
+    setUp = lambda self: RetakeRun.setUp(self)
+    tearDown = lambda self: RetakeRun.tearDown(self)
+    sec = RetakeRun.sec
+
+    def shots(self):
+        d = self.out / "shots" / "iphone"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def run_device(self, only=None, resume=None):
+        manifest = {"sections": self.sections}
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            return RF["run_device"](manifest, self.out / "manifest.json", self.flows,
+                                    "iphone", "AAAA", resume, only)
+
+    def test_fresh_run_clears_log_and_stale_shots(self):
+        d = self.shots()
+        (d / "test_99.png").write_text("前の回", encoding="utf-8")        # 今回のマニフェストに無い名前
+        (d / "test_99.txt").write_text("前の回", encoding="utf-8")
+        log = self.out / "progress_iphone.log"
+        log.write_text("前の回の行\n", encoding="utf-8")
+        self.run_device()
+        self.assertFalse((d / "test_99.png").exists())
+        self.assertFalse((d / "test_99.txt").exists())
+        self.assertNotIn("前の回の行", log.read_text(encoding="utf-8"))
+
+    def test_failed_item_does_not_keep_the_old_shot_or_verdict(self):
+        d = self.shots()
+        (d / "test_04.png").write_text("前の回", encoding="utf-8")
+        self.failing.add("test_04")
+        self.run_device()
+        self.assertFalse((d / "test_04.png").exists())
+        self.assertEqual(self.sec("test_04")["result"], "PENDING")
+        self.assertEqual(self.sec("test_05")["result"], "PENDING")   # 巻き添えで撮れなかった項目も
+        self.assertEqual(self.sec("test_01")["result"], "PENDING")   # 撮った項目は判定し直す
+
+    def test_retake_appends_to_the_log(self):
+        log = self.out / "progress_iphone.log"
+        log.write_text("最初の回の行\n", encoding="utf-8")
+        self.run_device(only=["test_04"])
+        text = log.read_text(encoding="utf-8")
+        self.assertIn("最初の回の行", text)
+        self.assertIn("--- 撮り直し: test_04", text)
 
 
 class Interrupts(unittest.TestCase):

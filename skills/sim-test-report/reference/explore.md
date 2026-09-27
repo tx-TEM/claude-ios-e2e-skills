@@ -11,10 +11,10 @@
 - **マニフェストのパス**と、撮らせる項目（`flow` が無いセクション）の名前（`test_11`）。項目の中身（`title` / `expect` / `from`、前提の `when`、テストケースの `case`）はマニフェストに入っている
 - **フローが落ちて a を選ばれた項目がテストケースの途中なら、手前の項目の名前も「なぞるだけ」として渡す。** 手前の項目の操作をしないと、その項目の前提の状態にならない。手前の項目の証跡は撮り直させない
 - **端末名**（`iphone` / `ipad`）と、その **UDID**（マニフェストの `devices.<端末>.udid`）
-- 証跡の出力先ディレクトリ。`~/Desktop/sim-test-report-<テーマのslug>/shots/<端末>/`。リポジトリ内には作らない
+- 証跡の出力先ディレクトリ。`~/Desktop/sim-test-report-<日付>-<テーマ>/shots/<端末>/`。リポジトリ内には作らない
 - 前提条件（アカウント、必要なデータ、事前設定）
 - **対象アプリの bundle id**。手順0で plan の `app` に書いたものと同じ。探索で撮る項目でも Maestro のフローに要る
-- **進捗ログのパス**。`~/Desktop/sim-test-report-<slug>/progress_<端末名>.log`（証跡ではないので `shots/` の外に置く）。**端末ごとに分ける。** 同じファイルに2台が書くと行が混ざる
+- **進捗ログのパス**。`~/Desktop/sim-test-report-<日付>-<テーマ>/progress_<端末名>.log`（証跡ではないので `shots/` の外に置く）。**端末ごとに分ける。** 同じファイルに2台が書くと行が混ざる
 
 ## 進捗を見張る
 
@@ -22,13 +22,13 @@
 
 ```bash
 python3 <このスキルのディレクトリ>/scripts/maestrod.py sweep
-touch ~/Desktop/sim-test-report-<slug>/progress_<端末名>.log
+touch ~/Desktop/sim-test-report-<日付>-<テーマ>/progress_<端末名>.log
 ```
 
 `sweep` は14日より古い作業用ファイルを消す。
 
 ```
-Monitor(command: "tail -f ~/Desktop/sim-test-report-<slug>/progress_<端末名>.log",
+Monitor(command: "tail -f ~/Desktop/sim-test-report-<日付>-<テーマ>/progress_<端末名>.log",
         description: "sim-driver の進捗", persistent: false, timeout_ms: 1800000)
 ```
 

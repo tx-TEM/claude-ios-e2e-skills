@@ -24,10 +24,10 @@ tools: mcp__Claude_Code_iOS_Simulator__control, Bash
 - **マニフェストのパス**と、撮る項目の名前（`test_11`）。項目の中身（`title` / `expect` / `from`、前提があれば `when`）はそのセクションにある。**証跡の名前はセクションの `name`** で、自分で付けない
 - なぞるだけの項目の名前（あれば）。撮る項目の前提の状態を作るために、操作だけして撮らない項目
 - 端末名（`iphone` / `ipad` など。進捗ログの区切りに書く）と対象デバイスのUDID（マニフェストの `devices.<端末>.udid`）
-- 証跡の出力先ディレクトリ。**端末ごとのディレクトリ**（例: `~/Desktop/sim-test-report-<slug>/shots/iphone/`）
+- 証跡の出力先ディレクトリ。**端末ごとのディレクトリ**（例: `~/Desktop/sim-test-report-<日付>-<テーマ>/shots/iphone/`）
 - 前提条件（アカウント、必要なデータ、事前設定）
 - 対象アプリの bundle id（スクロールのフローに書く。渡されなければ `xcrun simctl listapps <UDID>` で探す）
-- 進捗ログのパス（例: `~/Desktop/sim-test-report-<slug>/progress_<端末名>.log`）。渡されなければ書かない
+- 進捗ログのパス（例: `~/Desktop/sim-test-report-<日付>-<テーマ>/progress_<端末名>.log`）。渡されなければ書かない
 
 # 開始前の確認
 
