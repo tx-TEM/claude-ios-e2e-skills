@@ -189,6 +189,17 @@ class ScrollUp(unittest.TestCase):
         self.assertEqual(ups(flows["test_01.yaml"]), [])
         self.assertEqual(ups(flows["test_02.yaml"]), ["^list\\.search_field$"])
 
+    def test_up_does_not_center(self):
+        # #82: 上向きに centerElement を付けると、上のほうに見えている要素を下へ寄せようとして
+        # 指を下に動かし続ける。寄せるのは下向きだけ
+        rows, flows = write_flows([
+            {"from": "list", "title": "a", "expect": "a", "do": ["see:list.footer"]},
+            {"from": "list", "title": "b", "expect": "b", "do": ["see:list.search_field"]}])
+        flow = flows["test_02.yaml"]
+        self.assertEqual(ups(flow), ["^list\\.search_field$"])
+        self.assertIn("direction: DOWN\n    centerElement: true", flow)
+        self.assertNotIn("direction: UP\n    centerElement: true", flow)
+
     def test_pushed_screen_starts_at_top(self):
         rows, flows = write_flows([
             {"from": "list", "title": "a", "expect": "a", "do": ["see:list.footer"]},

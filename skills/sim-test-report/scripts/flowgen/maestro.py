@@ -324,8 +324,15 @@ def reveal(key, value, center=False, up=False, extra=None):
     より上に来たら止まる（Maestro の `UiElement.isElementNearScreenCenter`。余白は
     画面の高さの1/5）。初めからその線より上に見えていれば、スクロールしない。
 
+    **上向きには `centerElement` を付けない**（#82）。上向きの `centerElement` は、画面の
+    上のほうに見えている要素を「中央に無い」とみなし、下へ寄せようとして指を下に動かす。
+    一覧がもう一番上だと動かず、画面が変わらなくなるまで空打ちして（実測5回・約8秒）、
+    アプリによっては「引っ張って更新」で一覧を読み込み直す。寄せる理由は下端から離す
+    ことなので、上から入ってくる要素には要らない。
+
     **`up` なら、下向きを `optional` にして、そのあとに上向きも探す。** 要素が見えているか
-    下にあれば下向きで止まり、上向きは見えている要素なのですぐ抜ける。上にあれば下向きは
+    下にあれば下向きで止まり、上向きは見えている要素なのですぐ抜ける（上向きに
+    `centerElement` を付けないので、寄せ直しのスクロールも起きない）。上にあれば下向きは
     時間切れ（落ちない）になり、上向きで見つかる。scrollUntilVisible はスクロールの端を
     検知しない（Orchestra.scrollUntilVisible）ので、この時間切れは上限いっぱいかかる。
     上限を縮めると、長く下までスクロールしたあとで上に戻りきれないので縮めない。
@@ -339,7 +346,7 @@ def reveal(key, value, center=False, up=False, extra=None):
     """
     def scroll(direction, optional=False):
         body = {"element": dict({key: value}, **(extra or {})), "direction": Raw(direction)}
-        if center:
+        if center and direction == "DOWN":
             body["centerElement"] = True
         body["timeout"] = SCROLL_TIMEOUT
         if optional:
