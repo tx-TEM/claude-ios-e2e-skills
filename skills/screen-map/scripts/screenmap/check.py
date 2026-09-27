@@ -204,7 +204,8 @@ def check_elements(sid, scr, f):
         if el.get("in_tree") is False:
             f.breaks.append("{}: {} は in_tree: false（座標が要る）".format(sid, eid))
         if el.get("by") == "label":
-            f.breaks.append("{}: {} はラベル指定（ローカライズで壊れる）".format(sid, eid))
+            # ラベルで押すのは、ID を振れない OS の要素（クリアボタン、タブ、アラートのボタン）に
+            # 決めて使うもの。弱い箇所としては出さない（毎回言われても直しようがない）
             if is_pattern(eid):
                 f.bad.append("{}: {} はラベル指定なのでパターンにできない".format(sid, eid))
         if el.get("when") and el.get("actions"):
