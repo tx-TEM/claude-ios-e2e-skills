@@ -250,6 +250,8 @@ def build_steps(mp, items):
       打っていたら、最後にキーボードも閉じる
     - `reset` の無いものが1つでもあれば、次のテストケースの頭で起動し直す
     - `reset` まで経路が組めなければ、起動し直しに倒す
+    - **テストケースの中ですでに `reset` の操作を叩いていたら、その `leaves` は片付いている。**
+      後始末には入れない（クリアで絞り込みを解除するテストケース、など）
 
     次のテストケースがもともと起動し直す（`launch`）なら何もしない。最後の
     テストケースの後も何もしない。後始末は {テストケースの題: {"relaunch", "resets", "leaves"}} で
@@ -269,6 +271,12 @@ def build_steps(mp, items):
             for op, how in item["do"]:
                 tag = "({}) do {}".format(name, op)
                 spec, _, _ = resolve(mp, route.at, op)
+                if spec is not None:
+                    # テストケースの中で reset の操作をもう叩いたなら、その状態はもう戻っている。
+                    # 後始末でもう一度叩くと、戻した結果その要素が消えている（空の入力欄では
+                    # クリアボタンが出ない）ことがあり、そこで落ちる
+                    done = "{}:{}".format(spec.op, spec.target)
+                    left = [(sid, l) for sid, l in left if not (sid == route.at and l.reset == done)]
                 if spec is not None and spec.leaves:
                     left.append((route.at, spec))
                 typed = typed or (spec is not None and spec.op == "text")

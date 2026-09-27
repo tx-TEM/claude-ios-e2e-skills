@@ -603,6 +603,18 @@ class LeavesReset(unittest.TestCase):
         rows, _ = self.flows(self.typing("打つ"), explore, self.opening("開く"))
         self.assertEqual([(r["name"], r["launch"]) for r in rows], [("test_01", True), ("test_03", True)])
 
+    def test_reset_already_done_in_the_case_is_not_repeated(self):
+        # 打ってからクリアで戻すテストケース。クリアのあとは入力欄が空でクリアボタンが出ないので、
+        # 後始末でもう一度押しに行くと落ちる
+        self.leaves()
+        case = self.typing("打ってクリアする")
+        case["items"].append({"from": "list", "do": ["tap:list.clear_button"], "title": "クリア", "expect": "x"})
+        rows, flow = self.flows(case, self.opening("開く"))
+        after_case = flow[flow.index("'${SHOTS}/test_02'"):]
+        self.assertNotIn("clear_button", after_case)
+        self.assertEqual([r["after"] for r in rows], [None, None, None])
+        self.assertEqual([r["launch"] for r in rows], [True, False, False])
+
     def test_items_inside_a_case_are_not_reset(self):
         # テストケースの中では前の項目の状態を当てにするので、戻さない
         self.leaves()
