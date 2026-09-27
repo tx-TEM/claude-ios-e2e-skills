@@ -33,36 +33,41 @@ clone したディレクトリで `./install.sh` を実行する。`~/.claude/` 
 
 ### 1. テストケースを立てる（LLM / `test-case-builder`）
 
-ユーザーの指示から確認項目を立てる。コードの差分と、事前に用意した[画面マップ](skills/screen-map/reference/schema.md)を参照する。項目ごとに、どの画面で何を操作し、何が見えるはずかを **`plan.json` 1つ**に書く。そこまでの経路は書かない。以降のフローもマニフェストもここから作り、LLM が散文から写す箇所を残さない。
+ユーザーの指示から確認項目を立てる。コードの差分と、事前に用意した[画面マップ](skills/screen-map/reference/schema.md)を参照する。項目はテストケース（1つの機能を確かめるまとまり）にまとめ、項目ごとに、どの画面で何を操作し、何が見えるはずかを **`plan.json` 1つ**に書く。そこまでの経路は書かない。以降のフローもマニフェストもここから作り、LLM が散文から写す箇所を残さない。
 
 ```json
 {
-  "app": "tx-tem.AozoraReaderClient",
-  "repo": "~/Program/AozoraReader",
-  "items": [
-    {"from": "browse",
-     "title": "さがす画面の初期表示で作品一覧が出る",
-     "expect": "絞り込み無しの一覧が出て、作品の行が複数並んでいる"},
-    {"from": "browse",
-     "title": "キーワード入力でデバウンス絞り込みが走る",
-     "do": [{"op": "text:browse.search_field", "runtime": true}],
-     "expect": "入力欄に出ている語を、一覧に残っている行がすべて作品名に含む"},
-    {"from": "browse", "fresh": true,
-     "title": "一覧の作品をタップすると詳細に移る",
-     "do": ["tap:browse.book_row.*"],
-     "expect": "詳細画面の作品名が、タップした行の作品名と一致する"},
-    {"from": "book_detail", "when": ["ログイン中"],
-     "title": "ログイン中に登録を押すと登録画面が開く",
-     "do": ["tap:book_detail.register_button"],
-     "expect": "…"}
-  ],
-  "explore": []
+  "app": "com.example.app",
+  "repo": "~/Program/<アプリのリポジトリ>",
+  "cases": [
+    {"title": "キーワードで一覧を絞り込める",
+     "relaunch_after": true,
+     "items": [
+       {"from": "browse",
+        "title": "キーワード入力でデバウンス絞り込みが走る",
+        "do": [{"op": "text:browse.search_field", "runtime": true}],
+        "expect": "入力欄に出ている語を、一覧に残っている行がすべて品名に含む"}]},
+    {"title": "一覧から詳細を開き、戻れる",
+     "items": [
+       {"id": "open", "from": "browse",
+        "title": "一覧の行をタップすると詳細に移る",
+        "do": ["tap:browse.item_row.*"],
+        "expect": "詳細画面の品名が、タップした行の品名と一致する"},
+       {"from": "item_detail",
+        "title": "詳細から戻ると一覧に戻る",
+        "do": ["tap:BackButton"],
+        "expect": "一覧に戻り、{open} でタップした行が見えている"}]},
+    {"title": "ログイン中に登録を押すと登録画面が開く",
+     "items": [
+       {"from": "item_detail", "when": ["ログイン中"],
+        "title": "ログイン中に登録を押すと登録画面が開く",
+        "do": ["tap:item_detail.register_button"],
+        "expect": "…"}]}
+  ]
 }
 ```
 
-`do` はマップの要素を `tap:<id>` / `text:<id>` / `see:<id>`（見るだけの要素を見る）で、要素に紐づかない操作を `scroll:down` で指す。前提（`when`）はマップの `when` の文言をそのまま写し、条件つきの要素や、状態で結果が分かれる操作の枝を選ぶのに使う。
-
-期待は値ではなく、証跡の中で確かめられる関係で書く。データに依る値は plan に焼き込まない。打つ文字は `do` に `"runtime": true` を添えて未定のまま残し、撮影時に画面を見て埋める。一覧の行のように同じ種類が並ぶ要素（ID の末尾が `*`）は、何も添えなければスクリプトが画面に見えている1件目を押し、条件があるときだけ `"pick": 条件` を添えて撮影時に選ぶ。横スクロールの中の要素のように、マップで親の `children` に置いた要素は、親の中で操作する。親がパターン（カテゴリーごとのカルーセルなど）なら、何も添えなければ画面に見えている1件目の親で、特定の親にするときだけ `"in"` を添える。
+書き方（テストケースの分け方、`relaunch_after` と `launch`、`do` の操作、データに依る値の決め方、期待の書き方）は [test-case-builder.md](agents/test-case-builder.md) と `manifest.py --help` にある。
 
 ### 2. フローとテストの定義ファイルを作る（`manifest.py`）
 
@@ -115,13 +120,14 @@ env:
 - takeScreenshot: '${SHOTS}/test_02'
 ```
 
-画面マップが無いアプリでは全項目が plan の `explore` になり、フローは書かない。マップはあっても経路が組めない項目（未マップの画面、座標が要る操作）は理由つきで返り、`explore` に移る。どちらも LLM（`sim-driver`）が画面を見ながら探索して撮る。
+画面マップが無いアプリでは全テストケースが plan の `explore` になり、フローは書かない。マップはあっても経路が組めない項目（未マップの画面、座標が要る操作）は理由つきで返り、そのテストケースに `explore` が付く。どちらも LLM（`sim-driver`）が画面を見ながら探索して撮る。
 
 続けて、plan の項目と期待、書き出したフローの一覧を定義ファイルにまとめる。
 
 ```json
 {
   "name": "test_02",
+  "case": "キーワードで一覧を絞り込める",
   "title": "キーワード入力でデバウンス絞り込みが走る",
   "from": "browse",
   "when": [],
@@ -151,7 +157,7 @@ env:
 
 `inputs` は撮影する側（LLM）が画面を見て埋める値（`runtime` の打つ文字と、`pick` の選択）。条件の無い行の選択は `picks` に選び方だけがあり、撮影時にスクリプトが選んだ値が `picked` に入る。同じ名前の行が複数あると ID も同じになるので、スクリプトは押す直前の画面から何番目かを数え、Maestro の `index` で1件に絞って押す（`picked` の `_INDEX`）。
 
-経路が組めなかった項目（plan の `explore`）も、フローを持たないセクションとして同じファイルに並べる。
+経路が組めなかったテストケース（plan で `explore` の付いたもの）も、フローを持たないセクションとしてその場に並べる。
 
 このファイルを読み上げてレビューを受ける。直すところがあれば plan を直して手順2を叩き直し、合意してから撮影に入る。
 
