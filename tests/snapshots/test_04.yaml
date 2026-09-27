@@ -19,6 +19,5 @@ env:
     element:
       id: '^list\.footer$'
     direction: UP
-    centerElement: true
     timeout: 60000
 - takeScreenshot: '${SHOTS}/test_04'
