@@ -290,6 +290,9 @@ def main():
             "flow": e.get("flow"),             # 撮るフロー（parts の最後）。全端末で同じ
             # パターンの要素の選び方。pick が空なら run_flows.py が見えている1件目を選ぶ
             "picks": dict(e.get("picks") or {}),
+            # 見たい行が含む語（see の runtime）の、待つ行のパターン。run_flows.py が走らせる前に、
+            # 書かれた語を ID に含む行が今の画面にあるかを確かめる（#85）
+            "sees": dict(e.get("sees") or {}),
             # 実行時に決める値の入る先（selector / text）。端末によらない。run_flows.py が
             # これを見て、セレクタに入る値だけ正規表現としてエスケープする
             "input_use": dict(e.get("input_use") or {}),

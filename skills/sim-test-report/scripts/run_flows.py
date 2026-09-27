@@ -60,6 +60,10 @@
 1件に絞る。値はアクセシビリティ ID そのもの（ダンプの id の欄）。条件つきの選択は
 `<ID>#2`（見えている同じ ID の行のうち上から2件目）とも書ける。
 
+**見たい行が含む語（`see` の `runtime`）は、走らせる前に今の画面で確かめる**（`contains_problem()`、#85）。
+行の ID をまるごと書いた、または語が今の画面のどの行の ID にも入っていないなら、走らせずに止めて
+表示中の行を並べる。フローは必ず落ちるうえ、落ちると「撮れなかった」項目として別の判断に回る。
+
 **セレクタに入る値だけ正規表現としてエスケープする**（`fill_env()`）。どれがそうかは
 マニフェストの `input_use` を見る。inputs に書く側はエスケープをかけない。
 
@@ -313,6 +317,30 @@ def value_hint(pk, use):
     return "見たい行が含む語（行の ID の一部。ID をまるごと書かない）を"
 
 
+def contains_problem(dump, see, value):
+    """見たい行が含む語（see の runtime）が、今の画面の行に当たるか。当たれば None、
+    当たらなければ呼び出し元に見せる文。
+
+    フローは `^<接頭辞>.*<語>.*` の ID を探すので、次のどちらでも必ず落ちる（#85）。
+
+    - **行の ID をまるごと書いた**（接頭辞から始まる）。後ろに何も続かない行を探すことになる
+    - **語が、今の画面の行の ID のどれにも入っていない**。作者で絞り込んだのに、ID が作品名の行を
+      作者名で待つ、など。止まった時点でアプリは値を使う直前の画面（絞り込まれた一覧）に居るので、
+      そこにある行と照らせば分かる。画面外の行もダンプに出ている範囲で数える
+    """
+    prefix = see["pattern"][:-1] if see["pattern"].endswith("*") else see["pattern"]
+    if value.startswith(prefix):
+        return (f"「{value}」は行の ID をまるごと書いている。行の ID の一部（{prefix} を除いた"
+                f"語）を書く")
+    rows = [v for v, _ in pattern_rows(dump, see["pattern"], see.get("exclude") or ())]
+    if any(value in v[len(prefix):] for v in rows):
+        return None
+    shown = ", ".join(v[len(prefix):] for v in rows[:10]) or "（パターンに当たる行が無い）"
+    return (f"「{value}」を ID に含む {see['pattern']} の行が、いまの画面に無い。"
+            f"表示中の行（{prefix} を除いた ID）: {shown}。"
+            "この中の行の ID の一部を書く — 打った語と同じとは限らない（作者で絞り込めば、行の ID は作品名）")
+
+
 def parts_of(sec):
     """セクションのフローを、走らせる順に [(フロー, その前に決める値)] で。"""
     parts = sec.get("parts") or [{"flow": sec["flow"], "decide": None}]
@@ -409,6 +437,20 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, only=Non
                           f"ダンプの id の欄（{prefix}…）をそのまま devices.{device}.inputs に書き、"
                           "同じコマンドをもう一度叩く。")
                     return (name, k), done, lost
+                see = (sec.get("sees") or {}).get(decide)
+                if see and given:
+                    # 見たい行が含む語は、走らせる前に今の画面で確かめる（#85）。まだ画面は動いて
+                    # いないので、直して叩き直せば続きから走る
+                    dump = read_dump(udid, f"{name}.see{k}")
+                    problem = contains_problem(dump, see, given) if dump else None
+                    if problem:
+                        if replay:
+                            sys.exit(f"{device} {name} の {decide}: {problem}。撮り直しは手前の項目を"
+                                     f"なぞるので、devices.{device}.inputs を直してから叩き直す")
+                        logline(f"{line} 撮影せず {decide} の「{given}」を含む行が無い")
+                        print(f"\n{device} {line} {decide}: {problem}。"
+                              f"devices.{device}.inputs を直し、同じコマンドをもう一度叩けば続きから走る。")
+                        return (name, k), done, lost
                 if pk is not None:
                     # どの行を押すかを決め、同じ ID の行のうち何番目か（Maestro の index）を数える。
                     # 条件が無ければ画面に見えている1件目（モデルに訊かない）
