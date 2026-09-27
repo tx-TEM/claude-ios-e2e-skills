@@ -47,7 +47,7 @@ clone したディレクトリで `./install.sh` を実行する。`~/.claude/` 
         "title": "キーワード入力でデバウンス絞り込みが走る",
         "do": [{"op": "text:browse.search_field", "runtime": true}],
         "expect": "入力欄に出ている語を、一覧に残っている行がすべて品名に含む"}]},
-    {"title": "一覧から詳細を開き、戻れる",
+    {"title": "一覧から開いた詳細から戻ると、開いた行の位置に戻る",
      "items": [
        {"id": "open", "from": "browse",
         "title": "一覧の行をタップすると詳細に移る",
