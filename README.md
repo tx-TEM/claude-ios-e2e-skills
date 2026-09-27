@@ -81,7 +81,7 @@ python3 ~/.claude/skills/sim-test-report/scripts/manifest.py \
   --device iphone=<iPhoneのUDID> --device ipad=<iPadのUDID>
 ```
 
-中で経路を計算する（`scripts/flowgen/bridge.py`。画面マップは screen-map の部品で読む）。plan の各項目について、前の項目が終わった画面から `from` までの経路を画面マップから計算し、`do` の操作と撮影を繋いで、項目ごとのフローとして書き出す。押す前・見る前には必ず見えるまでスクロールし（`scrollUntilVisible`。横スクロールの中の要素は、親を縦に寄せてからその親の上から送る）、画面に着いたら anchor → 読み込み完了の目印（`ready`）→ アニメーションの落ち着きの順に待つ。経路は同じ長さならタブバーを通る方を採る。テストケースの境目で `relaunch_after` / `launch` があれば、そこでアプリを起動し直す。
+中で経路を計算する（`scripts/flowgen/bridge.py`。画面マップは screen-map の部品で読む）。plan の各項目について、前の項目が終わった画面から `from` までの経路を画面マップから計算し、`do` の操作と撮影を繋いで、項目ごとのフローとして書き出す。押す前・見る前には必ず見えるまでスクロールし（`scrollUntilVisible`。横スクロールの中の要素は、親を縦に寄せてからその親の上から送る）、画面に着いたら anchor → 読み込み完了の目印（`ready`）→ アニメーションの落ち着きの順に待つ。テストケースの境目で `relaunch_after` / `launch` があれば、そこでアプリを起動し直す。
 
 どの語を打つか、どの行を押すかは、そのときの画面を見ないと決まらない。なのでフローに値を書き込まず、その操作の手前でフローを2本に分ける。1本目は対象が見えるところまで進んで止まり、そこで値を決めて、2本目がその値で操作して撮る。値を決めるのは次のどちらか。
 
@@ -103,13 +103,11 @@ python3 ~/.claude/skills/sim-test-report/scripts/run_flows.py \
   <出力先>/manifest.json
 ```
 
-どのシミュレーターで撮るかは、手順2でマニフェストに記録してある。
-
-LLM が値を決める操作で止まったら、値を書いて同じコマンドを叩けば続きを走る（手順2）。判定で撮り直し（`RETAKE`）になった項目は `--only test_07` でその項目だけ撮り直せる。詳しくは `run_flows.py` 冒頭の docstring を参照。
+LLM が値を決める操作で止まったら、値を書いて同じコマンドを叩けば続きを走る（手順2）。詳しくは `run_flows.py` 冒頭の docstring を参照。
 
 ### 4. 判定を書き込む（LLM / `evidence-judge`）
 
-撮影したスクリーンショットとダンプを見て、結果を記録する。渡すのは定義ファイルのパスだけで、確認項目も期待も証跡もそこに入っている。
+撮影したスクリーンショットとダンプを見て、結果を記録する。
 
 項目ごとに観測した事実（`desc`）と OK / NG（`result`）を書く。画像以外を根拠にしたときは、その項目の注記（`note`）に残す。期待のほうが狭かったと思えても期待は直さず NG のまま返し、期待を直すかはユーザーが選ぶ。
 
@@ -119,8 +117,6 @@ LLM が値を決める操作で止まったら、値を書いて同じコマン�
 python3 ~/.claude/skills/sim-test-report/scripts/build_report.py <出力先>/manifest.json \
   --title "…"
 ```
-
-渡すのは題だけ。確認環境は定義ファイルに記録した端末から、実施日は組んだ日からスクリプトが出す。ブランチは載せない（レポートは PR に貼るので、そちらで分かる）。
 
 画像を base64 で埋め込んだ単一HTMLと、それを1枚に描画したPNGが出る。
 
@@ -132,12 +128,8 @@ python3 ~/.claude/skills/sim-test-report/scripts/build_report.py <出力先>/man
 
 ## テスト
 
-スクリプト（screen-map の `mapctl.py` / `migrate_map.py`、sim-test-report の `manifest.py` / `run_flows.py`）のテストは `tests/` にある。シミュレーターも Maestro も要らない。
+スクリプト（screen-map の `mapctl.py` / `migrate_map.py`、sim-test-report の `manifest.py` / `run_flows.py`）のテストは `tests/` にある。
 
 ```bash
 python3 -m unittest discover tests
 ```
-
-`tests/fixtures/app` の画面マップと plan から書かれるフローを、`tests/snapshots/` と比べる。フローの書き方を変えたときは `UPDATE_SNAPSHOTS=1` を付けて書き直し、差分を読んでから入れる。
-
-スキル（LLM の振る舞い）の評価は `skills/*/evals/` にある。
