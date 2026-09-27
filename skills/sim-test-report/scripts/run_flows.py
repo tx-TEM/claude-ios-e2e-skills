@@ -297,6 +297,22 @@ def read_dump(udid, name):
     return last.read_text(encoding="utf-8")
 
 
+def value_hint(pk, use):
+    """止まったときに、何を決めるのかを言う文。取り違えると、行の ID を渡すべきところに語を、
+    語を渡すべきところに行の ID を書いてしまう。
+
+    - `pick`（パターンの要素・親のどれか）: 行の ID をまるごと
+    - 打つ文字（`input_use` が `text`）: 入力欄に打つ文字
+    - 見る行が含む語（`see` の `runtime`。`selector` で `picks` に無い）: 行の ID の一部になる語。
+      行の ID をまるごと書くと、その後ろに何も続かない行を探すことになり当たらない
+    """
+    if pk:
+        return f"条件「{pk['pick']}」に合う {pk['pattern']} を選んで、その ID（ダンプの id の欄をまるごと）を"
+    if use == "text":
+        return "打つ文字を"
+    return "見たい行が含む語（行の ID の一部。ID をまるごと書かない）を"
+
+
 def parts_of(sec):
     """セクションのフローを、走らせる順に [(フロー, その前に決める値)] で。"""
     parts = sec.get("parts") or [{"flow": sec["flow"], "decide": None}]
@@ -375,8 +391,7 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, only=Non
                                  f"なぞるので、devices.{device}.inputs に前に撮ったときの値が要る")
                     logline(f"{line} 撮影せず 入力が未定（{decide}）")
                     rest = [n for n, _ in targets[targets.index((i, sec)):]]
-                    how = (f"条件「{pk['pick']}」に合う {pk['pattern']} を選んで、その ID（ダンプの id の欄）を"
-                           if pk else "打つ文字を")
+                    how = value_hint(pk, (sec.get("input_use") or {}).get(decide))
                     print(f"\n{device} {line} 入力が未定（{decide}）。")
                     print(f"いまこの画面に居る。見て {how} {decide} に決め、"
                           f"devices.{device}.inputs に書き、同じコマンドをもう一度叩けば続きから走る。")

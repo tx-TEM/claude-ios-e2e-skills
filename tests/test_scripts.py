@@ -499,6 +499,18 @@ class Cases(unittest.TestCase):
         self.assertEqual(heads, {1: "一覧から開く", 4: "絞り込む"})
 
 
+class ValueHint(unittest.TestCase):
+    """止まったときのメッセージが、何を決めるのかを取り違えさせない。"""
+
+    def test_each_kind(self):
+        hint = RF["value_hint"]
+        pk = {"pattern": "list.row.*", "pick": "在庫あり"}
+        self.assertIn("ID（ダンプの id の欄をまるごと）", hint(pk, "selector"))
+        self.assertEqual(hint(None, "text"), "打つ文字を")
+        # see の runtime（見たい行が含む語）は、行の ID ではなく語
+        self.assertIn("ID をまるごと書かない", hint(None, "selector"))
+
+
 class PlanRepo(unittest.TestCase):
     """plan が、どのアプリの画面マップを前提にしたかを持つ（repo）。manifest.py は引数で受け取らない。"""
 
