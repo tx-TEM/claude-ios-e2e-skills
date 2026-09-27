@@ -103,7 +103,7 @@ class Snapshot(unittest.TestCase):
             {"from": "list", "title": "入力で絞り込む", "expect": "入力した語を含む行だけ",
              "do": [{"op": "text:list.search_field", "runtime": True}]},
             {"from": "list", "title": "検索キーで確定", "expect": "キーボードが閉じる",
-             "do": ["tap:Search"]},
+             "do": [{"op": "text:list.search_field", "input": "猫"}, "tap:Search"]},
             {"from": "list", "title": "末尾まで読む", "expect": "フッターが出る",
              "do": ["see:list.footer"]},
             {"from": "list", "launch": True, "title": "行を開く", "expect": "詳細が開く",
@@ -614,6 +614,22 @@ class LeavesReset(unittest.TestCase):
         self.assertNotIn("clear_button", after_case)
         self.assertEqual([r["after"] for r in rows], [None, None, None])
         self.assertEqual([r["launch"] for r in rows], [True, False, False])
+
+    def test_keyboard_closed_at_the_end_even_without_reset(self):
+        # 打ってからクリアで終わるテストケース。戻す状態は無いが、キーボードは最後に閉じる
+        self.leaves()
+        case = self.typing("打ってクリアする")
+        case["items"].append({"from": "list", "do": ["tap:list.clear_button"], "title": "クリア", "expect": "x"})
+        rows, flow = self.flows(case, self.opening("開く"))
+        between = flow[flow.index("'${SHOTS}/test_01'"):flow.index("'${SHOTS}/test_02'")]
+        self.assertNotIn("hideKeyboard", between)          # テストケースの中では閉じない
+        self.assertEqual(flow[flow.index("'${SHOTS}/test_02'"):].count("- hideKeyboard"), 1)
+
+    def test_keyboard_closed_when_the_map_has_no_leaves(self):
+        # 打った操作にマップの leaves が無くても、キーボードは最後に閉じる
+        rows, flow = self.flows(self.typing("打つ"), self.opening("開く"))
+        self.assertEqual(flow.count("- hideKeyboard"), 1)
+        self.assertEqual([r["after"] for r in rows], [None, None])
 
     def test_items_inside_a_case_are_not_reset(self):
         # テストケースの中では前の項目の状態を当てにするので、戻さない

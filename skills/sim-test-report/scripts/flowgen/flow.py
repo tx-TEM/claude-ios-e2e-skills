@@ -246,12 +246,16 @@ def build_steps(mp, items):
     **テストケースの後始末は画面マップが決める**（#83）。テストケースの `do` で、マップに
     `leaves`（後に残る状態）のある操作を使ったら、そのテストケースを撮り終えたあとに:
 
-    - 全部に `reset`（既定に戻す操作）があれば、その画面まで繋いで `reset` を叩く。入力欄に
-      打っていたら、最後にキーボードも閉じる
+    - 全部に `reset`（既定に戻す操作）があれば、その画面まで繋いで `reset` を叩く
     - `reset` の無いものが1つでもあれば、次のテストケースの頭で起動し直す
     - `reset` まで経路が組めなければ、起動し直しに倒す
     - **テストケースの中ですでに `reset` の操作を叩いていたら、その `leaves` は片付いている。**
       後始末には入れない（クリアで絞り込みを解除するテストケース、など）
+
+    **キーボードは、そのテストケースで入力欄に打っていれば最後に閉じる**（`hideKeyboard`）。
+    `reset` を叩いたならそのあと。戻す状態が無くても閉じる（テストケースの中でクリアして
+    終わった、打った操作にマップの `leaves` が無い、など）。テストケースの中の項目の間では
+    閉じない — 後ろの項目が、打ったあとにキーボードのキー（検索キー）を押すことがある。
 
     次のテストケースがもともと起動し直す（`launch`）なら何もしない。最後の
     テストケースの後も何もしない。後始末は {テストケースの題: {"relaunch", "resets", "leaves"}} で
@@ -302,8 +306,14 @@ def build_steps(mp, items):
 
 def clean_up(mp, route, steps, left, typed, nxt):
     """テストケースの後始末（build_steps の説明）。(マニフェストに載せる後始末, 次の頭で起動し直すか)。
-    steps には `reset` のステップを足す。"""
-    if not left or nxt is None or nxt["restart"]:
+    steps には `reset` と、キーボードを閉じるステップを足す。"""
+    if nxt is None or nxt["restart"]:
+        return None, False
+    if not left:
+        # 戻す状態は無い（leaves の無い操作だけ、またはテストケースの中で reset 済み）。
+        # 打っていればキーボードだけ閉じる
+        if typed:
+            steps.append(Act(route.at, HideKeyboard(), []))
         return None, False
     leaves = list(dict.fromkeys(spec.leaves for _, spec in left))
     if not all(spec.reset for _, spec in left):

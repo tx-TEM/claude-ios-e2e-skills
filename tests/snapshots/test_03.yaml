@@ -7,6 +7,28 @@ env:
     visible:
       id: '^list$'
     timeout: 10000
+# list: hideKeyboard — 打ったあとに開いたキーボードを閉じる
+- hideKeyboard
+# list: text list.search_field — 入力が止まると絞り込む
+- scrollUntilVisible:
+    element:
+      id: '^list\.search_field$'
+    direction: DOWN
+    timeout: 60000
+    optional: true
+- scrollUntilVisible:
+    element:
+      id: '^list\.search_field$'
+    direction: UP
+    timeout: 60000
+- tapOn:
+    id: '^list\.search_field$'
+- eraseText
+- inputText: '猫'
+- extendedWaitUntil:
+    visible:
+      id: '^list\.search_field$'
+    timeout: 10000
 # list: tap Search — 絞り込みを確定し、キーボードを閉じる
 - scrollUntilVisible:
     element:
