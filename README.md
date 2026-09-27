@@ -31,6 +31,8 @@ clone したディレクトリで `./install.sh` を実行する。`~/.claude/` 
 
 ## 流れ
 
+実際に通しで動かしたときのやり取り（依頼 → テストケースのレビュー → plan → Maestro のフロー → 報告）は [docs/example-session.md](docs/example-session.md) にある。
+
 ### 1. テストケースを立てる（LLM / `test-case-builder`）
 
 ユーザーの指示から確認項目を立てる。コードの差分と、事前に用意した[画面マップ](skills/screen-map/reference/schema.md)を参照する。項目はテストケース（1つの機能を確かめるまとまり）にまとめ、項目ごとに、どの画面で何を操作し、何が見えるはずかを **`plan.json` 1つ**に書く。そこまでの経路は書かない。以降のフローもマニフェストもここから作り、LLM が散文から写す箇所を残さない。
