@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from screenmap.screen import BACKWARD, is_pattern, pattern_prefix
-from .actions import Input, InputLater, Scroll, Tap
+from .actions import HideKeyboard, Input, InputLater, Scroll, Tap
 from .results import Arrive, External, Hidden, Selected, Value, Visible
 from .steps import Act, Await, Enter, Restart, See, Shot, goes_out, stays_out, waits_text
 
@@ -118,7 +118,7 @@ def add_reveals(steps):
             scrolled.add(st.screen)
             swiped.update((st.screen, w.id) for w in st.within if w.scroll)
         elif isinstance(st, Act):
-            if not isinstance(st.action, Scroll):
+            if not isinstance(st.action, (Scroll, HideKeyboard)):
                 back = any((st.screen, w.id) in swiped for w in st.within if w.scroll)
                 out.append(Reveal(st, st.item, st.screen in scrolled, back))
             scrolled.add(st.screen)
@@ -699,6 +699,8 @@ class FlowWriter:
             self.tap(st)
         elif isinstance(a, (Input, InputLater)):
             self.type_text(st)
+        elif isinstance(a, HideKeyboard):
+            self.out.append("hideKeyboard")
         else:
             self.scroll(a)
         # 着いたことを先に確かめる（着いた画面の上で、ほかの結果を見る）
@@ -710,7 +712,7 @@ class FlowWriter:
         for r in st.result:
             if not isinstance(r, Arrive):
                 self.check(st, r, stay)
-        if not st.result:
+        if not st.result and not isinstance(a, HideKeyboard):
             self.notes.append("「{}」の結果を確かめる expect がマップに無い".format(a.label()))
 
     def tap(self, st):

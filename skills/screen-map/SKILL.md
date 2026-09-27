@@ -78,6 +78,7 @@ grep -rn "accessibilityIdentifier" --include="*.swift" . | head -50
 | `when` つきの見るだけの要素 | 表示が分かれる画面だけ | どちらの状態で着いたかの判定（空表示、エラー時の再読み込みボタンなど） |
 | 見るだけの要素 | 手順2で選ばれたものだけ | plan の `see:<id>` で見る（セクションの見出しなど） |
 | 自動表示の画面の `anchor` と閉じる操作 | 自動で出るダイアログがある画面だけ | 出ていたら閉じる／確かめる項目では出るまで待つ。自動表示も画面として書く（`reference/schema.md` の auto_shows） |
+| `reset` で押す要素（クリアボタンなど） | 入力欄の語や絞り込みのように、後に残る状態（`leaves`）がある画面だけ | テストケースの後に状態を既定に戻す。操作に `leaves` と `reset` を書く（`reference/schema.md` の leaves と reset） |
 
 **振る前に `reference/ids.md` を、yaml を書く前に `reference/schema.md` と `reference/route.md`（経路として効いてくる書き方: 戻る操作、複数の入口、`when`、`summary` の書き方）を読む。** 書き方の実例と、下の規則の理由はそちらにある。規則だけ先に並べる。
 

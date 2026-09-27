@@ -421,24 +421,19 @@ class Cases(unittest.TestCase):
         return str(cm.exception.code)
 
     def test_items_in_a_case_continue(self):
-        # テストケースの中では起動し直さない。後ろのテストケースも、前が relaunch_after を付けなければ続き
+        # テストケースの中では起動し直さない。後ろのテストケースも、マップの leaves が無ければ続き
         self.assertEqual(self.launches([self.case("A", "list", "detail"), self.case("B", "list")]),
                          [("test_01", True), ("test_02", False), ("test_03", False)])
-
-    def test_relaunch_after_restarts_the_next_case(self):
-        self.assertEqual(self.launches([self.case("A", "list", "detail", relaunch_after=True),
-                                        self.case("B", "list", "detail")]),
-                         [("test_01", True), ("test_02", False), ("test_03", True), ("test_04", False)])
 
     def test_launch_restarts_its_own_head(self):
         self.assertEqual(self.launches([self.case("A", "list"), self.case("B", "list", launch=True)]),
                          [("test_01", True), ("test_02", True)])
 
-    def test_explore_case_keeps_its_place_and_passes_relaunch_on(self):
-        # 探索のテストケースはフローで走らないので、前の relaunch_after はその次のテストケースに効く
-        cases = [self.case("A", "list", relaunch_after=True),
+    def test_explore_case_keeps_its_place(self):
+        # 探索のテストケースはフローを持たず、番号はその場のまま
+        cases = [self.case("A", "list"),
                  self.case("X", "list", explore="画面 history がマップに無い"),
-                 self.case("B", "list")]
+                 self.case("B", "list", launch=True)]
         self.assertEqual(self.launches(cases), [("test_01", True), ("test_03", True)])
 
     def test_refs_expand_to_the_earlier_item(self):
@@ -471,7 +466,7 @@ class Cases(unittest.TestCase):
         out = self.refused({"cases": [c]})
         self.assertIn("起動し直せるのはテストケースの境目だけ", out)
         c = self.case("A", "list", fresh=True)
-        self.assertIn("relaunch_after", self.refused({"cases": [c]}))
+        self.assertIn("leaves", self.refused({"cases": [c]}))
 
     def test_old_shape_is_refused(self):
         f = Path(tempfile.mkdtemp()) / "plan.json"
@@ -485,7 +480,7 @@ class Cases(unittest.TestCase):
         work = Path(tempfile.mkdtemp())
         plan = work / "plan.json"
         plan.write_text(json.dumps({"app": "x", "repo": str(FIXTURE), "cases": [
-            self.case("A", "list", "detail", relaunch_after=True),
+            self.case("A", "list", "detail"),
             self.case("X", "list", explore="画面 history がマップに無い"),
             self.case("B", "list", launch=True)]}), encoding="utf-8")
         run_manifest([plan, work / "out", "--device", "iphone=AAAA"])
@@ -496,11 +491,11 @@ class Cases(unittest.TestCase):
                          [("test_01", "A", True), ("test_02", "A", True),
                           ("test_03", "X", False), ("test_04", "B", True)])
         self.assertEqual(m["cases"], [
-            {"title": "A", "launch": False, "relaunch_after": True, "explore": None,
+            {"title": "A", "launch": False, "explore": None, "after": None,
              "items": ["test_01", "test_02"]},
-            {"title": "X", "launch": False, "relaunch_after": False, "explore": "画面 history がマップに無い",
-             "items": ["test_03"]},
-            {"title": "B", "launch": True, "relaunch_after": False, "explore": None, "items": ["test_04"]}])
+            {"title": "X", "launch": False, "explore": "画面 history がマップに無い",
+             "after": None, "items": ["test_03"]},
+            {"title": "B", "launch": True, "explore": None, "after": None, "items": ["test_04"]}])
 
     def test_report_heads_where_the_case_changes(self):
         ns = runpy.run_path(str(SCRIPTS / "build_report.py"), run_name="build_report")
@@ -522,6 +517,115 @@ class ValueHint(unittest.TestCase):
         self.assertEqual(hint(None, "text"), "打つ文字を")
         # see の runtime（見たい行が含む語）は、行の ID ではなく語
         self.assertIn("ID をまるごと書かない", hint(None, "selector"))
+
+
+class LeavesReset(unittest.TestCase):
+    """#83: 後に残る状態（leaves）と既定に戻す操作（reset）は画面マップに書き、テストケースの
+    後始末はスクリプトが決める。"""
+
+    SEARCH = ("  - id: list.search_field\n"
+              "    name: 検索欄（上部）\n"
+              "    actions:\n"
+              "      - text:\n"
+              "        summary: 入力が止まると絞り込む\n"
+              "        expect: {value: self}\n")
+
+    def setUp(self):
+        self.repo = Path(tempfile.mkdtemp()) / "app"
+        shutil.copytree(FIXTURE, self.repo)
+        self.list = self.repo / "screen-map" / "screens" / "list.yaml"
+
+    def tearDown(self):
+        shutil.rmtree(self.repo.parent)
+
+    def leaves(self, reset="tap:list.clear_button", clear="tap"):
+        body = self.list.read_text(encoding="utf-8")
+        assert self.SEARCH in body
+        search = self.SEARCH + "        leaves: 入力欄の語と絞り込みの結果が残る\n"
+        if reset:
+            search += "        reset: {}\n".format(reset)
+        button = ("  - id: list.clear_button\n"
+                  "    name: クリア（検索欄の右端）\n"
+                  "    actions:\n"
+                  "      - {}:\n"
+                  "        summary: 入力欄を空にし、絞り込みを解除する\n"
+                  "        expect: {{value: list.search_field}}\n").format(clear)
+        self.list.write_text(body.replace(self.SEARCH, search + button), encoding="utf-8")
+
+    def flows(self, *cases):
+        rows, flows = write_flows(None, repo=self.repo, cases=list(cases))
+        return rows, "".join(flows[k] for k in sorted(flows))
+
+    def typing(self, title, **flags):
+        return dict({"title": title, "items": [
+            {"from": "list", "do": [{"op": "text:list.search_field", "input": "猫"}],
+             "title": title, "expect": "x"}]}, **flags)
+
+    def opening(self, title):
+        return {"title": title, "items": [{"from": "list", "do": ["tap:list.row.*"],
+                                           "title": title, "expect": "x"}]}
+
+    def check(self):
+        mp = screen_map.ScreenMap(screen_map.find_map(str(self.repo)))
+        with contextlib.redirect_stdout(io.StringIO()) as o:
+            code = map_check.cmd_check(mp)
+        return code, o.getvalue()
+
+    def test_reset_runs_after_the_case(self):
+        self.leaves()
+        rows, flow = self.flows(self.typing("打つ"), self.opening("開く"))
+        # 打ったテストケースの後、次のテストケースの前にクリアを押してキーボードを閉じる。起動し直さない
+        head = flow[flow.index("takeScreenshot: '${SHOTS}/test_01'"):]
+        self.assertLess(head.index("id: '^list\\.clear_button$'"), head.index("- hideKeyboard"))
+        self.assertLess(head.index("- hideKeyboard"), head.index("list\\.row"))
+        self.assertEqual([r["launch"] for r in rows], [True, False])
+        self.assertEqual(rows[0]["after"], {"relaunch": False, "resets": ["tap:list.clear_button"],
+                                            "leaves": ["入力欄の語と絞り込みの結果が残る"]})
+
+    def test_leaves_without_reset_relaunches(self):
+        self.leaves(reset=None)
+        rows, _ = self.flows(self.typing("打つ"), self.opening("開く"))
+        self.assertEqual([r["launch"] for r in rows], [True, True])
+        self.assertEqual(rows[0]["after"]["relaunch"], True)
+
+    def test_nothing_after_the_last_case_or_before_a_relaunch(self):
+        self.leaves()
+        opening = dict(self.opening("起動して開く"), launch=True)
+        rows, flow = self.flows(self.typing("打つ"), opening, self.typing("最後に打つ"))
+        self.assertNotIn("clear_button", flow)
+        self.assertEqual([r["after"] for r in rows], [None, None, None])
+
+    def test_explore_case_between_passes_the_clean_up_on(self):
+        # 探索のテストケースはフローで走らないので、前の後始末はその次のフローのテストケースの前にする
+        self.leaves(reset=None)
+        explore = {"title": "探索", "explore": "画面 history がマップに無い",
+                   "items": [{"from": "list", "title": "x", "expect": "x"}]}
+        rows, _ = self.flows(self.typing("打つ"), explore, self.opening("開く"))
+        self.assertEqual([(r["name"], r["launch"]) for r in rows], [("test_01", True), ("test_03", True)])
+
+    def test_items_inside_a_case_are_not_reset(self):
+        # テストケースの中では前の項目の状態を当てにするので、戻さない
+        self.leaves()
+        case = self.typing("打って開く")
+        case["items"].append({"from": "list", "do": ["tap:list.row.*"], "title": "開く", "expect": "x"})
+        rows, flow = self.flows(case, self.opening("もう一度開く"))
+        between = flow[flow.index("'${SHOTS}/test_01'"):flow.index("'${SHOTS}/test_02'")]
+        self.assertNotIn("clear_button", between)
+        self.assertIn("clear_button", flow[flow.index("'${SHOTS}/test_02'"):])
+
+    def test_check(self):
+        self.leaves()
+        code, out = self.check()
+        self.assertEqual(code, 0, out)
+        body = self.list.read_text(encoding="utf-8").replace("reset: tap:list.clear_button", "reset: tap:list.nothing")
+        self.list.write_text(body, encoding="utf-8")
+        code, out = self.check()
+        self.assertEqual(code, 1)
+        self.assertIn("reset「tap:list.nothing」が list の操作に無い", out)
+
+    def test_check_suggests_leaves_on_text(self):
+        code, out = self.check()
+        self.assertIn("「text list.search_field」 に leaves が無い", out)
 
 
 class PlanRepo(unittest.TestCase):

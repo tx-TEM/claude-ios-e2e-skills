@@ -19,13 +19,13 @@ from .maestro import (add_returns, add_reveals, assign_vars, emit_flow, runtime_
                       shot_context, split_at_shots, split_parts, var_of)
 from screenmap.map import load_map
 from screenmap.screen import DO_OPS, GESTURES, is_pattern, pattern_prefix
-from .actions import resolve_action
+from .actions import HideKeyboard, resolve_action
 from .bridge import Route, Unroutable, emit_path, report_problems
 from .results import resolve_result
 from .steps import Act, See, Shot, nest
 
 PLAN_KEYS = {"app", "repo", "clear_state", "cases"}
-CASE_KEYS = {"title", "items", "relaunch_after", "launch", "explore"}
+CASE_KEYS = {"title", "items", "launch", "explore"}
 ITEM_KEYS = {"id", "from", "do", "title", "expect", "when"}
 DO_KEYS = {"op", "runtime", "input", "pick", "in"}
 REF = re.compile(r"\{([^{}\s]*)\}")     # 期待の中で、同じテストケースの前の項目を指す
@@ -76,7 +76,7 @@ def load_plan(path):
 def read_cases(plan):
     """plan の cases を確かめて、テストケースの並びにする。
 
-    [{title, launch, relaunch_after, explore, items: [{name, item, expect}]}]。`name` は
+    [{title, launch, explore, items: [{name, item, expect}]}]。`name` は
     テストケースをまたいだ通し番号、`item` は plan の項目そのまま、`expect` は前の項目を指す
     `{id}` を証跡の名前に展開したもの（「test_04（一覧の行をタップすると詳細に移る）」）。
 
@@ -99,7 +99,7 @@ def read_cases(plan):
             if unknown & {"from", "do", "expect"}:
                 hint = "。項目はテストケースの items に入れる"
             elif "fresh" in unknown:
-                hint = "。後に状態を残すなら relaunch_after、起動そのものを確かめるなら launch"
+                hint = "。後に残る状態は画面マップの操作に leaves（と、既定に戻す操作 reset）を書く。スクリプトがテストケースの後に reset を叩くか、起動し直す。起動そのものを確かめるなら launch"
             elif "reason" in unknown:
                 hint = "。経路が組めない理由は \"explore\": 理由 で書く"
             sys.exit("plan の{}に知らない鍵: {}（使えるのは {}）{}".format(
@@ -112,9 +112,8 @@ def read_cases(plan):
             sys.exit("plan の{}が2つある。テストケースの題は分ける（マニフェストとレポートで"
                      "まとまりを引く鍵になる）".format(where))
         titles.add(title)
-        for k in ("relaunch_after", "launch"):
-            if k in case and not isinstance(case[k], bool):
-                sys.exit("plan の{}の {} は true / false で書く".format(where, k))
+        if "launch" in case and not isinstance(case["launch"], bool):
+            sys.exit("plan の{}の launch は true / false で書く".format(where))
         explore = case.get("explore")
         if "explore" in case and not (isinstance(explore, str) and explore.strip()):
             sys.exit("plan の{}の explore には、経路が組めない理由を文で書く".format(where))
@@ -131,8 +130,8 @@ def read_cases(plan):
             if unknown:
                 hint = ""
                 if "fresh" in unknown:
-                    hint = ("。起動し直せるのはテストケースの境目だけ。後に状態を残すテストケースに "
-                            "relaunch_after、起動そのものを確かめるテストケースに launch を付ける")
+                    hint = ("。起動し直せるのはテストケースの境目だけ" + "。後に残る状態は画面マップの操作に leaves（と、既定に戻す操作 reset）を書く。スクリプトがテストケースの後に reset を叩くか、起動し直す" +
+                            "。起動そのものを確かめるテストケースには launch を付ける")
                 elif "shot" in unknown:
                     hint = "。証跡の名前は並び順から振る"
                 elif unknown & {"steps", "goto"}:
@@ -164,7 +163,6 @@ def read_cases(plan):
                 ids[iid] = "{}（{}）".format(name, item.get("title", ""))
             rows.append({"name": name, "item": item, "expect": expect})
         out.append({"title": title, "launch": bool(case.get("launch")),
-                    "relaunch_after": bool(case.get("relaunch_after")),
                     "explore": explore, "items": rows})
     return out
 
@@ -184,11 +182,11 @@ def read_items(plan):
     結果が分かれる操作の枝は、ここに同じ文言があるときだけ使う。
 
     `restart` が真の項目は、アプリを起動し直した直後から始める。**テストケースの頭にしか
-    立たない** — そのテストケースに `launch` があるか、フローで走る直前のテストケースに
-    `relaunch_after` があるとき。テストケースの途中で起動し直すと、前の項目を当てにしている
-    項目の前提が消える。
+    立たない** — そのテストケースに `launch` があるとき。後に残った状態で起動し直すかは、
+    ここではなく build_steps() が画面マップの `leaves` / `reset` から決める。テストケースの
+    途中で起動し直すと、前の項目を当てにしている項目の前提が消える。
     """
-    out, dirty = [], False
+    out = []
     for case in read_cases(plan):
         if case["explore"]:
             continue       # フローで走らないので、前のテストケースが残した状態もそのまま次へ渡る
@@ -219,9 +217,9 @@ def read_items(plan):
                 ops.append((d["op"], how))
             when = item.get("when") or []
             out.append({"name": name, "from": item["from"], "do": ops,
-                        "restart": k == 0 and (case["launch"] or dirty),
+                        "restart": k == 0 and case["launch"],
+                        "case": case["title"], "case_last": k == len(case["items"]) - 1,
                         "when": tuple([when] if isinstance(when, str) else when)})
-        dirty = case["relaunch_after"]
     return out
 
 
@@ -239,35 +237,85 @@ def read_in(v):
 # ---------- 項目をステップにする ----------
 
 def build_steps(mp, items):
-    """項目を順にステップ列にする。(ステップ列, 組めなかった理由, 補足)。
+    """項目を順にステップ列にする。(ステップ列, 組めなかった理由, 補足, テストケースの後始末)。
 
     項目ごとに: `restart` なら起動し直す → bridge.py で `from` まで繋ぐ → `do` を1つずつ
     ステップにする → 撮る。**組めなかったらそこで止める**（先の項目は、手前の項目が
     終わった画面を前提にしているので、組んでも意味が無い）。
+
+    **テストケースの後始末は画面マップが決める**（#83）。テストケースの `do` で、マップに
+    `leaves`（後に残る状態）のある操作を使ったら、そのテストケースを撮り終えたあとに:
+
+    - 全部に `reset`（既定に戻す操作）があれば、その画面まで繋いで `reset` を叩く。入力欄に
+      打っていたら、最後にキーボードも閉じる
+    - `reset` の無いものが1つでもあれば、次のテストケースの頭で起動し直す
+    - `reset` まで経路が組めなければ、起動し直しに倒す
+
+    次のテストケースがもともと起動し直す（`launch`）なら何もしない。最後の
+    テストケースの後も何もしない。後始末は {テストケースの題: {"relaunch", "resets", "leaves"}} で
+    返し、マニフェストの `cases` に載る（レビューで「ここで〜する」と読み上げる）。
     """
-    route, steps, problems = Route(mp), [], []
-    for item in items:
+    route, steps, problems, afters = Route(mp), [], [], {}
+    left, typed, restart_next = [], False, False
+    for n, item in enumerate(items):
         name = item["name"]
         tag = "({}) goto {}".format(name, item["from"])
         first = len(steps)
         try:
-            if item["restart"] and steps:
+            if (item["restart"] or restart_next) and steps:
                 steps.append(route.restart())
+            restart_next = False
             steps += route.to(item["from"], item["when"])
             for op, how in item["do"]:
                 tag = "({}) do {}".format(name, op)
+                spec, _, _ = resolve(mp, route.at, op)
+                if spec is not None and spec.leaves:
+                    left.append((route.at, spec))
+                typed = typed or (spec is not None and spec.op == "text")
                 sts, wrong = do_step(mp, route, op, how, item["when"])
                 steps += sts
                 # 値の決め方の間違い。経路は組めるので、ほかの間違いもまとめて出す
                 problems += [("call", "({}) {}".format(name, m)) for m in wrong]
             steps.append(Shot(name))
+            if item.get("case_last"):
+                nxt = items[n + 1] if n + 1 < len(items) else None
+                after, restart_next = clean_up(mp, route, steps, left, typed, nxt)
+                if after:
+                    afters[item["case"]] = after
+                left, typed = [], False
         except Unroutable as e:
             problems += [(kind, "{}: {}".format(tag, msg)) for kind, msg in e.problems]
         for st in steps[first:]:
             st.item = name
         if problems:
             break
-    return steps, problems, route.notes
+    return steps, problems, route.notes, afters
+
+
+def clean_up(mp, route, steps, left, typed, nxt):
+    """テストケースの後始末（build_steps の説明）。(マニフェストに載せる後始末, 次の頭で起動し直すか)。
+    steps には `reset` のステップを足す。"""
+    if not left or nxt is None or nxt["restart"]:
+        return None, False
+    leaves = list(dict.fromkeys(spec.leaves for _, spec in left))
+    if not all(spec.reset for _, spec in left):
+        return {"relaunch": True, "resets": [], "leaves": leaves}, True
+    # 後に残したものから戻す。同じ画面の同じ reset は1回
+    resets = list(dict.fromkeys((sid, spec.reset) for sid, spec in reversed(left)))
+    at, stack, mark = route.at, list(route.stack), len(steps)
+    try:
+        for sid, op in resets:
+            steps += route.to(sid)
+            sts, _ = do_step(mp, route, op, {}, ())
+            steps += sts
+        if typed:
+            steps.append(Act(route.at, HideKeyboard(), []))
+    except Unroutable:
+        # reset まで繋げない（戻す画面に行けない、reset の要素が条件つき）。起動し直しに倒す
+        del steps[mark:]
+        route.at, route.stack = at, stack
+        return {"relaunch": True, "resets": [], "leaves": leaves}, True
+    return {"relaunch": False, "resets": [op for _, op in resets], "leaves": leaves}, False
 
 
 def resolve(mp, at, wanted):
@@ -402,7 +450,7 @@ def write_flows(plan, out_dir, timeout=10000):
     if not app:
         sys.exit("plan に app（bundle id）が要る（xcrun simctl listapps <UDID> で調べる）")
     mp = load_map(plan.get("repo"))
-    steps, problems, notes = build_steps(mp, items)
+    steps, problems, notes, afters = build_steps(mp, items)
     if problems:
         report_problems(problems)
         sys.exit(2)
@@ -434,7 +482,10 @@ def write_flows(plan, out_dir, timeout=10000):
                   if use != "index" and not (v in picks and not picks[v]["pick"])}
         case, row = by_shot[shot]
         it = row["item"]
+        last = row is case["items"][-1]
         written.append({"name": shot, "case": case["title"], "title": it.get("title", ""),
+                        # テストケースの後始末（画面マップの leaves / reset から。最後の項目にだけ）
+                        "after": afters.get(case["title"]) if last else None,
                         "from": it.get("from"),
                         "when": it.get("when") or [],
                         "do": it.get("do") or [], "expect": row["expect"],

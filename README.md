@@ -45,7 +45,6 @@ clone したディレクトリで `./install.sh` を実行する。`~/.claude/` 
   "repo": "~/Program/<アプリのリポジトリ>",
   "cases": [
     {"title": "キーワードで一覧を絞り込める",
-     "relaunch_after": true,
      "items": [
        {"from": "browse",
         "title": "キーワード入力でデバウンス絞り込みが走る",
@@ -71,7 +70,7 @@ clone したディレクトリで `./install.sh` を実行する。`~/.claude/` 
 }
 ```
 
-書き方（テストケースの分け方、`relaunch_after` と `launch`、`do` の操作、データに依る値の決め方、期待の書き方）は [test-case-builder.md](agents/test-case-builder.md) と `manifest.py --help` にある。
+書き方（テストケースの分け方、`launch`、`do` の操作、データに依る値の決め方、期待の書き方）は [test-case-builder.md](agents/test-case-builder.md) と `manifest.py --help` にある。
 
 ### 2. フローとテストの定義ファイルを作る（`manifest.py`）
 
@@ -83,7 +82,7 @@ python3 ~/.claude/skills/sim-test-report/scripts/manifest.py \
   --device iphone=<iPhoneのUDID> --device ipad=<iPadのUDID>
 ```
 
-中で経路を計算する（`scripts/flowgen/bridge.py`。画面マップは screen-map の部品で読む）。plan の各項目について、前の項目が終わった画面から `from` までの経路を画面マップから計算し、`do` の操作と撮影を繋いで、項目ごとのフローとして書き出す。押す前・見る前には必ず見えるまでスクロールし（`scrollUntilVisible`。横スクロールの中の要素は、親を縦に寄せてからその親の上から送る）、画面に着いたら anchor → 読み込み完了の目印（`ready`）→ アニメーションの落ち着きの順に待つ。テストケースの境目で `relaunch_after` / `launch` があれば、そこでアプリを起動し直す。
+中で経路を計算する（`scripts/flowgen/bridge.py`。画面マップは screen-map の部品で読む）。plan の各項目について、前の項目が終わった画面から `from` までの経路を画面マップから計算し、`do` の操作と撮影を繋いで、項目ごとのフローとして書き出す。押す前・見る前には必ず見えるまでスクロールし（`scrollUntilVisible`。横スクロールの中の要素は、親を縦に寄せてからその親の上から送る）、画面に着いたら anchor → 読み込み完了の目印（`ready`）→ アニメーションの落ち着きの順に待つ。テストケースの境目では、画面マップの `leaves`（後に残る状態）に `reset`（既定に戻す操作）があればそれを叩き、無ければアプリを起動し直す。`launch` の付いたテストケースも起動し直してから始める。
 
 どの語を打つか、どの行を押すかは、そのときの画面を見ないと決まらない。なのでフローに値を書き込まず、その操作の手前でフローを2本に分ける。1本目は対象が見えるところまで進んで止まり、そこで値を決めて、2本目がその値で操作して撮る。値を決めるのは次のどちらか。
 

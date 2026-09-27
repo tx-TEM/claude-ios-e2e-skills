@@ -20,7 +20,7 @@ SCROLLS = ("horizontal",)                # 要素の `scroll`。画面の縦ス�
 SCREEN_KEYS = {"anchor", "names", "summary", "files", "stub", "ready", "elements",
                "gestures", "auto_shows"}
 ELEMENT_KEYS = {"id", "name", "summary", "when", "by", "in_tree", "actions", "scroll", "children"}
-ACTION_KEYS = {"summary", "note", "expect"} | set(OPS)
+ACTION_KEYS = {"summary", "note", "expect", "leaves", "reset"} | set(OPS)
 GESTURE_KEYS = {"summary", "note", "expect"} | set(GESTURES)
 EXPECT_KEYS = set(KINDS) | {"via", "when"}
 
@@ -166,6 +166,10 @@ class ActionSpec:
         self.op = next((k for k in (OPS if element is not None else GESTURES) if k in self.raw), None)
         self.target = element.get("id") if element is not None else self.raw.get(self.op)
         self.summary = self.raw.get("summary")
+        # 後に残る状態（入力欄の語、絞り込み、セグメントの選択）と、それを既定に戻す操作（#83）。
+        # この操作を使ったテストケースの後に、flowgen が reset を叩くか、無ければ起動し直す
+        self.leaves = self.raw.get("leaves")
+        self.reset = self.raw.get("reset")
         exp = self.raw.get("expect")
         items = exp if isinstance(exp, list) else ([exp] if isinstance(exp, dict) else [])
         # 全部に when があれば分岐。1つも無ければ全部を確かめる。混ざっていれば check が出す
