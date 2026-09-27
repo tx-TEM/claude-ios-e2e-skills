@@ -59,6 +59,8 @@
   読む側は全項目で画像と判定を見る。確認として弱い項目は手順0のレビューで扱う
 - **項目ごとの話はカードに書き、footer は実行全体の話だけにする。** footer に項目番号つきで
   書くと、読む側がカードと行き来して突き合わせることになる
+- **`case`（属するテストケースの題）があれば、変わるところに見出しを置く。** 同じ機能を
+  順に確かめる項目のまとまりが読める。1項目だけで題が項目と同じなら置かない
 - sections には他の欄を持たせてよい。**知らない欄は無視する** — このマニフェストは
   手順0で作って工程ごとに埋めていくので、screen / flow / dump なども載っている
 - src はマニフェストからの相対パスまたは絶対パス
@@ -176,6 +178,26 @@ def meta_items(meta: list[str]) -> list[tuple[str, str]]:
     return [(k, v) for k, v in items if v]
 
 
+def case_heads(sections: list) -> dict:
+    """テストケースの見出しを置く位置。{セクションの番号（1始まり）: 見出し}。
+
+    セクションの `case`（属するテストケースの題）が変わるところに置く。**1項目だけで、
+    題が項目と同じテストケースには置かない** — 同じ文がカードのすぐ上に2回並ぶだけになる。
+    `case` の無いマニフェスト（スキルを経由せずに書いたもの）では何も置かない。
+    """
+    sizes = {}
+    for s in sections:
+        if s.get("case"):
+            sizes[s["case"]] = sizes.get(s["case"], 0) + 1
+    heads, prev = {}, None
+    for i, s in enumerate(sections, start=1):
+        case = s.get("case")
+        if case and case != prev and not (sizes[case] == 1 and case == s.get("title")):
+            heads[i] = case
+        prev = case
+    return heads
+
+
 def section_rows(section: dict) -> tuple[list[tuple[str, str]], str]:
     """証跡の上に出す期待と結果、下に出す注記。値の無いものは出さない。
 
@@ -224,6 +246,7 @@ def build(manifest_path: pathlib.Path, width: int, title: str, meta: list) -> pa
 
     cards = ""
     counts = {"OK": 0, "NG": 0}
+    heads = case_heads(manifest["sections"])
     for i, section in enumerate(manifest["sections"], start=1):
         # **既定を OK にしない。** このマニフェストは工程ごとに埋めていくので、
         # 判定を書き忘れた項目が黙って OK で出ると、確かめていないものを
@@ -252,6 +275,9 @@ def build(manifest_path: pathlib.Path, width: int, title: str, meta: list) -> pa
         result = section["result"]
         ok = result == "OK"
         counts["OK" if ok else "NG"] += 1
+        if i in heads:
+            cards += f'''
+    <h2 class="case">{html.escape(heads[i])}</h2>'''
         cards += f'''
     <section class="card{"" if ok else " ng"}">
       <h2><span class="badge">{i}</span><span class="title">{html.escape(section["title"])}</span><span class="result">{"✓" if ok else "✗"} {html.escape(result)}</span></h2>
@@ -306,6 +332,7 @@ def build(manifest_path: pathlib.Path, width: int, title: str, meta: list) -> pa
   .summary .all {{ color: var(--sub); background: var(--card); border: 1px solid var(--line); }}
   .summary {{ align-items: center; flex-wrap: wrap; }}
   .summary .date {{ margin-left: auto; padding: 0; color: var(--sub); font-weight: 400; }}
+  h2.case {{ font-size: 15px; line-height: 1.5; margin: 32px 0 0; padding-left: 10px; border-left: 4px solid var(--badge); color: var(--sub); }}
   .card {{ background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px 24px; margin-top: 16px; }}
   .card.ng {{ border-left: 4px solid var(--ng); }}
   .card h2 {{ font-size: 16px; line-height: 1.5; margin: 0; display: flex; align-items: flex-start; gap: 10px; }}

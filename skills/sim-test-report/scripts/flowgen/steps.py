@@ -161,7 +161,7 @@ class Shot:
 
 @dataclass
 class Restart:
-    """アプリを起動し直す（`fresh` の項目の前）。起点に戻る。"""
+    """アプリを起動し直す（起動し直すテストケースの頭）。起点に戻る。"""
     item: Optional[str] = None
     to = None
 

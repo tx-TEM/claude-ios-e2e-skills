@@ -31,38 +31,45 @@ clone したディレクトリで `./install.sh` を実行する。`~/.claude/` 
 
 ## 流れ
 
+実際に通しで動かしたときのやり取り（依頼 → テストケースのレビュー → plan → Maestro のフロー → 報告）は [docs/example-session.md](docs/example-session.md) にある。
+
 ### 1. テストケースを立てる（LLM / `test-case-builder`）
 
-ユーザーの指示から確認項目を立てる。コードの差分と、事前に用意した[画面マップ](skills/screen-map/reference/schema.md)を参照する。項目ごとに、どの画面で何を操作し、何が見えるはずかを **`plan.json` 1つ**に書く。そこまでの経路は書かない。以降のフローもマニフェストもここから作り、LLM が散文から写す箇所を残さない。
+ユーザーの指示から確認項目を立てる。コードの差分と、事前に用意した[画面マップ](skills/screen-map/reference/schema.md)を参照する。項目はテストケース（1つの機能を確かめるまとまり）にまとめ、項目ごとに、どの画面で何を操作し、何が見えるはずかを **`plan.json` 1つ**に書く。そこまでの経路は書かない。以降のフローもマニフェストもここから作り、LLM が散文から写す箇所を残さない。
 
 ```json
 {
-  "app": "tx-tem.AozoraReaderClient",
-  "repo": "~/Program/AozoraReader",
-  "items": [
-    {"from": "browse",
-     "title": "さがす画面の初期表示で作品一覧が出る",
-     "expect": "絞り込み無しの一覧が出て、作品の行が複数並んでいる"},
-    {"from": "browse",
-     "title": "キーワード入力でデバウンス絞り込みが走る",
-     "do": [{"op": "text:browse.search_field", "runtime": true}],
-     "expect": "入力欄に出ている語を、一覧に残っている行がすべて作品名に含む"},
-    {"from": "browse", "fresh": true,
-     "title": "一覧の作品をタップすると詳細に移る",
-     "do": ["tap:browse.book_row.*"],
-     "expect": "詳細画面の作品名が、タップした行の作品名と一致する"},
-    {"from": "book_detail", "when": ["ログイン中"],
-     "title": "ログイン中に登録を押すと登録画面が開く",
-     "do": ["tap:book_detail.register_button"],
-     "expect": "…"}
-  ],
-  "explore": []
+  "app": "com.example.app",
+  "repo": "~/Program/<アプリのリポジトリ>",
+  "cases": [
+    {"title": "キーワードで一覧を絞り込める",
+     "relaunch_after": true,
+     "items": [
+       {"from": "browse",
+        "title": "キーワード入力でデバウンス絞り込みが走る",
+        "do": [{"op": "text:browse.search_field", "runtime": true}],
+        "expect": "入力欄に出ている語を、一覧に残っている行がすべて品名に含む"}]},
+    {"title": "一覧から開いた詳細から戻ると、開いた行の位置に戻る",
+     "items": [
+       {"id": "open", "from": "browse",
+        "title": "一覧の行をタップすると詳細に移る",
+        "do": ["tap:browse.item_row.*"],
+        "expect": "詳細画面の品名が、タップした行の品名と一致する"},
+       {"from": "item_detail",
+        "title": "詳細から戻ると一覧に戻る",
+        "do": ["tap:BackButton"],
+        "expect": "一覧に戻り、{open} でタップした行が見えている"}]},
+    {"title": "ログイン中に登録を押すと登録画面が開く",
+     "items": [
+       {"from": "item_detail", "when": ["ログイン中"],
+        "title": "ログイン中に登録を押すと登録画面が開く",
+        "do": ["tap:item_detail.register_button"],
+        "expect": "…"}]}
+  ]
 }
 ```
 
-`do` はマップの要素を `tap:<id>` / `text:<id>` / `see:<id>`（見るだけの要素を見る）で、要素に紐づかない操作を `scroll:down` で指す。前提（`when`）はマップの `when` の文言をそのまま写し、条件つきの要素や、状態で結果が分かれる操作の枝を選ぶのに使う。
-
-期待は値ではなく、証跡の中で確かめられる関係で書く。データに依る値は plan に焼き込まない。打つ文字は `do` に `"runtime": true` を添えて未定のまま残し、撮影時に画面を見て埋める。一覧の行のように同じ種類が並ぶ要素（ID の末尾が `*`）は、何も添えなければスクリプトが画面に見えている1件目を押し、条件があるときだけ `"pick": 条件` を添えて撮影時に選ぶ。横スクロールの中の要素のように、マップで親の `children` に置いた要素は、親の中で操作する。親がパターン（カテゴリーごとのカルーセルなど）なら、何も添えなければ画面に見えている1件目の親で、特定の親にするときだけ `"in"` を添える。
+書き方（テストケースの分け方、`relaunch_after` と `launch`、`do` の操作、データに依る値の決め方、期待の書き方）は [test-case-builder.md](agents/test-case-builder.md) と `manifest.py --help` にある。
 
 ### 2. フローとテストの定義ファイルを作る（`manifest.py`）
 
@@ -74,84 +81,16 @@ python3 ~/.claude/skills/sim-test-report/scripts/manifest.py \
   --device iphone=<iPhoneのUDID> --device ipad=<iPadのUDID>
 ```
 
-中で経路を計算する（`scripts/flowgen/bridge.py`。画面マップは screen-map の部品で読む）。plan の各項目について、前の項目が終わった画面から `from` までの経路を画面マップから計算し、`do` の操作と撮影を繋いで、項目ごとのフローとして書き出す。押す前・見る前には必ず見えるまでスクロールし（`scrollUntilVisible`。横スクロールの中の要素は、親を縦に寄せてからその親の上から送る）、画面に着いたら anchor → 読み込み完了の目印（`ready`）→ アニメーションの落ち着きの順に待つ。経路は同じ長さならタブバーを通る方を採る。
+中で経路を計算する（`scripts/flowgen/bridge.py`。画面マップは screen-map の部品で読む）。plan の各項目について、前の項目が終わった画面から `from` までの経路を画面マップから計算し、`do` の操作と撮影を繋いで、項目ごとのフローとして書き出す。押す前・見る前には必ず見えるまでスクロールし（`scrollUntilVisible`。横スクロールの中の要素は、親を縦に寄せてからその親の上から送る）、画面に着いたら anchor → 読み込み完了の目印（`ready`）→ アニメーションの落ち着きの順に待つ。テストケースの境目で `relaunch_after` / `launch` があれば、そこでアプリを起動し直す。
 
-実行時に値を決める操作（打つ文字、どの行を押すか）があると、項目のフローはその手前で割れる。前の本は対象が見えるまでスクロールして止まり、次の本がその値を使う。
+どの語を打つか、どの行を押すかは、そのときの画面を見ないと決まらない。なのでフローに値を書き込まず、その操作の手前でフローを2本に分ける。1本目は対象が見えるところまで進んで止まり、そこで値を決めて、2本目がその値で操作して撮る。値を決めるのは次のどちらか。
 
-```yaml
-# test_02.1.yaml — 検索欄が見えるまで運んで止まる
-appId: tx-tem.AozoraReaderClient
----
-- extendedWaitUntil:
-    visible:
-      id: '^browse$'
-    timeout: 10000
-- scrollUntilVisible:
-    element:
-      id: '^browse\.search_field$'
-    direction: DOWN
-    timeout: 60000
-```
+- **条件の無い行の選択**（画面に見えている1件目）は、`run_flows.py` がその場で画面を読んで決め、止まらずに続ける
+- **打つ語と、条件つきで選ぶ行**は、`run_flows.py` がそこで止まって LLM に返す。LLM が画面のダンプを見て値を決め、定義ファイルに書いて叩き直すと、2本目から続く
 
-```yaml
-# test_02.yaml — 決めた値で打って撮る
-appId: tx-tem.AozoraReaderClient
-env:
-  SHOTS: ''
-  BROWSE_SEARCH_FIELD: ''
----
-- extendedWaitUntil:
-    visible:
-      id: '^browse$'
-    timeout: 10000
-- tapOn:
-    id: '^browse\.search_field$'
-- eraseText
-- inputText: ${BROWSE_SEARCH_FIELD}
-- extendedWaitUntil:
-    visible:
-      id: '^browse\.search_field$'
-    timeout: 10000
-- takeScreenshot: '${SHOTS}/test_02'
-```
+画面マップで経路が組めなかったテストケース（`explore`）はフローを作らない。LLM（`sim-driver`）が画面を見ながら操作して撮る。
 
-画面マップが無いアプリでは全項目が plan の `explore` になり、フローは書かない。マップはあっても経路が組めない項目（未マップの画面、座標が要る操作）は理由つきで返り、`explore` に移る。どちらも LLM（`sim-driver`）が画面を見ながら探索して撮る。
-
-続けて、plan の項目と期待、書き出したフローの一覧を定義ファイルにまとめる。
-
-```json
-{
-  "name": "test_02",
-  "title": "キーワード入力でデバウンス絞り込みが走る",
-  "from": "browse",
-  "when": [],
-  "screen": "browse",
-  "expect": "入力欄に出ている語を、一覧に残っている行がすべて作品名に含む",
-  "checked": "browse.search_field",
-  "launch": false,
-  "parts": [
-    { "flow": "test_02.1.yaml", "decide": null },
-    { "flow": "test_02.yaml", "decide": "BROWSE_SEARCH_FIELD" }
-  ],
-  "flow": "test_02.yaml",
-  "picks": {},
-  "input_use": { "BROWSE_SEARCH_FIELD": "text" },
-  "devices": {
-    "iphone": { "inputs": { "BROWSE_SEARCH_FIELD": "" }, "picked": {} },
-    "ipad":   { "inputs": { "BROWSE_SEARCH_FIELD": "" }, "picked": {} }
-  },
-  "images": [
-    { "src": "shots/iphone/test_02.png", "label": "iPhone" },
-    { "src": "shots/ipad/test_02.png", "label": "iPad" }
-  ],
-  "desc": "",
-  "result": "PENDING"
-}
-```
-
-`inputs` は撮影する側（LLM）が画面を見て埋める値（`runtime` の打つ文字と、`pick` の選択）。条件の無い行の選択は `picks` に選び方だけがあり、撮影時にスクリプトが選んだ値が `picked` に入る。同じ名前の行が複数あると ID も同じになるので、スクリプトは押す直前の画面から何番目かを数え、Maestro の `index` で1件に絞って押す（`picked` の `_INDEX`）。
-
-経路が組めなかった項目（plan の `explore`）も、フローを持たないセクションとして同じファイルに並べる。
+定義ファイルには、項目ごとに題・期待・撮る画面・フロー・証跡の置き場と、判定の欄が並ぶ。形は `manifest.py` 冒頭の docstring を参照。
 
 このファイルを読み上げてレビューを受ける。直すところがあれば plan を直して手順2を叩き直し、合意してから撮影に入る。
 
@@ -164,15 +103,11 @@ python3 ~/.claude/skills/sim-test-report/scripts/run_flows.py \
   <出力先>/manifest.json
 ```
 
-どのシミュレーターで撮るかは、手順2でマニフェストに記録してある。
-
-割れたフローは順に走らせ、切れ目で値を決める。条件の無い行の選択は、その場で画面を読んで見えている1件目を選び、そのまま続ける（LLM は関与しない）。打つ文字と条件つきの選択は、その画面で止まって終わる。値を `inputs` に書いて同じコマンドを叩けば、止まった項目の止まった本から続きを走る。
-
-判定で撮り直し（`RETAKE`）になった項目は、`--only test_07` でその項目だけ撮り直せる。同じ鎖の頭から手前の項目を撮らずになぞってから撮るので、ほかの項目の証跡と判定はそのまま残る。
+LLM が値を決める操作で止まったら、値を書いて同じコマンドを叩けば続きを走る（手順2）。詳しくは `run_flows.py` 冒頭の docstring を参照。
 
 ### 4. 判定を書き込む（LLM / `evidence-judge`）
 
-撮影したスクリーンショットとダンプを見て、結果を記録する。渡すのは定義ファイルのパスだけで、確認項目も期待も証跡もそこに入っている。
+撮影したスクリーンショットとダンプを見て、結果を記録する。
 
 項目ごとに観測した事実（`desc`）と OK / NG（`result`）を書く。画像以外を根拠にしたときは、その項目の注記（`note`）に残す。期待のほうが狭かったと思えても期待は直さず NG のまま返し、期待を直すかはユーザーが選ぶ。
 
@@ -182,8 +117,6 @@ python3 ~/.claude/skills/sim-test-report/scripts/run_flows.py \
 python3 ~/.claude/skills/sim-test-report/scripts/build_report.py <出力先>/manifest.json \
   --title "…"
 ```
-
-渡すのは題だけ。確認環境は定義ファイルに記録した端末から、実施日は組んだ日からスクリプトが出す。ブランチは載せない（レポートは PR に貼るので、そちらで分かる）。
 
 画像を base64 で埋め込んだ単一HTMLと、それを1枚に描画したPNGが出る。
 
@@ -195,12 +128,8 @@ python3 ~/.claude/skills/sim-test-report/scripts/build_report.py <出力先>/man
 
 ## テスト
 
-スクリプト（screen-map の `mapctl.py` / `migrate_map.py`、sim-test-report の `manifest.py` / `run_flows.py`）のテストは `tests/` にある。シミュレーターも Maestro も要らない。
+スクリプト（screen-map の `mapctl.py` / `migrate_map.py`、sim-test-report の `manifest.py` / `run_flows.py`）のテストは `tests/` にある。
 
 ```bash
 python3 -m unittest discover tests
 ```
-
-`tests/fixtures/app` の画面マップと plan から書かれるフローを、`tests/snapshots/` と比べる。フローの書き方を変えたときは `UPDATE_SNAPSHOTS=1` を付けて書き直し、差分を読んでから入れる。
-
-スキル（LLM の振る舞い）の評価は `skills/*/evals/` にある。

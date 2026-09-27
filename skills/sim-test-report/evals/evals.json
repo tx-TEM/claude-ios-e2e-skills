@@ -49,17 +49,40 @@
     {
       "id": 2,
       "prompt": "画面マップのあるアプリ（このリポジトリの tests/fixtures/app）で、一覧画面の検索を変えた。入力が止まると絞り込みが走り、検索キーを押すと確定してキーボードが閉じる。これを確認したい。テストケースを test-case-builder に作らせ、plan.json と manifest.json ができてレビューに出せる状態にする。撮る端末は起動中の iPhone 1台。",
-      "expected_output": "test-case-builder が書いた plan.json と、manifest.py がそこから作った manifest.json とフロー。項目は一覧画面の検索に噛み合っていて、打つ語は撮影時に決める形で残っている。",
+      "expected_output": "test-case-builder が書いた plan.json（テストケースの集合）と、manifest.py がそこから作った manifest.json とフロー。項目は一覧画面の検索に噛み合っていて、打つ語は撮影時に決める形で残っている。準備の操作は do に並び、準備のためだけの項目は無い。",
       "files": [
         "tests/fixtures/app/screen-map/"
       ],
       "assertions": [
-        "plan.json の各項目に from / do / title / expect がある。from は画面マップの画面id（list）",
+        "plan.json の一番上は cases（テストケースの並び）で、一番上に items / explore を書いていない。各テストケースに title と items があり、各項目に from / do / title / expect がある。from は画面マップの画面id（list）",
         "do の操作idが、マップの要素の id とその要素の actions の種類に完全一致している（text:list.search_field、tap:Search）",
         "打つ語は plan に焼き込まず、{\"op\": \"text:list.search_field\", \"runtime\": true} で撮影時に決める形になっている",
-        "入力（text）と検索キー（tap:Search）が別の項目になっている。デバウンスと確定を分けて確かめている",
+        "デバウンス（入力が止まると絞り込む）と確定（検索キー）を別の項目で確かめている。確定の項目は do に打つ操作と tap:Search を並べた1項目で、「語を打つ」だけを確かめる項目（準備のためだけの項目）が無い",
+        "確定の項目の期待に、絞り込みの結果（語を含む行だけが並ぶ。一致しない語を固定で打つなら該当なしの表示）と、キーボードが閉じていることの両方がある。キーボードだけにしていない",
+        "確定の項目は、tap:Search のあとに絞り込まれた行（または該当なしの表示）を see で待ってから撮る。検索キーの expect は入力欄の値で操作の前から出ているので、see が無いと絞り込みの反映前を撮るおそれがある",
+        "同じ操作・同じ期待の項目（語を打つと絞り込まれる、など）を、テストケースをまたいで繰り返していない",
+        "検索欄に語・絞り込み・キーボードを残すテストケースには、plan の最後に置いたものも含めて relaunch_after が付いている。「後に続くテストケースが無い」「次のテストケースが打ち直す」のように、並び順や次のテストケースを理由に外していない。項目に fresh を書いていない",
         "期待は値ではなく関係で書かれている（「入力欄に出ている語を含む行だけが並ぶ」のように）。データソース（API・DB）を引いて期待を作っていない",
-        "manifest.py が経路を組めて manifest.json を書いている。sections の数が plan の items と explore の合計と一致し、runtime の項目の inputs が空のまま残っている",
+        "manifest.py が経路を組めて manifest.json を書いている。sections の数が plan の全テストケースの items の合計と一致し、manifest.json に cases がある。runtime の項目の inputs が空のまま残っている",
+        "manifest.json とフローを手で書き換えていない。直すなら plan.json を直して manifest.py を叩き直している"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "画面マップのあるアプリ（このリポジトリの tests/fixtures/app）で、2つ変えた。詳細画面の共有ボタンを押すと、Safari で作品のページが開くようにした。一覧から詳細を開いて戻ったとき、開いた行が見える位置に一覧が戻るようにした（前は一覧の先頭に戻っていた）。これを確認したい。テストケースを test-case-builder に作らせ、plan.json と manifest.json ができてレビューに出せる状態にする。撮る端末は起動中の iPhone 1台。",
+      "expected_output": "test-case-builder が書いた plan.json と、manifest.py が作った manifest.json とフロー。共有は詳細から始める1項目、戻る位置は一覧から来た経路を固定した項目になっていて、準備のためだけの項目や、同じ項目の繰り返しが無い。",
+      "files": [
+        "tests/fixtures/app/screen-map/"
+      ],
+      "assertions": [
+        "plan.json の一番上は cases で、項目は必ずどれかのテストケースに入っている",
+        "共有を確かめるテストケースは from: detail の1項目（do: [\"tap:detail.share_button\"]）で、手前に「一覧の行をタップして詳細を開く」項目を置いていない。詳細までの経路はスクリプトに任せている",
+        "共有のテストケースに relaunch_after が付いていない（アプリの外に出て終わるだけで、アプリの中に状態を残さない）",
+        "戻る位置の確認は、一覧から来た経路を固定している。行のタップを do の先頭に置いた1項目（from: list、do: [\"tap:list.row.*\", \"tap:BackButton\"]）か、行のタップを撮って確かめる前の項目と、それを期待で {id} で指す後ろの項目のどちらか。from: detail で BackButton だけを押す項目にしていない（それでは一覧から来たかが決まらない）",
+        "戻る位置の期待は、タップした行との関係で書いている（「タップした行が一覧に見えている」）。1つのテストケースに複数の項目をまとめたなら、後ろの項目の期待が前の項目を {id} で指していて、テストケースの題にまとめた理由が読める",
+        "同じ操作・同じ期待の項目（「一覧の行をタップすると詳細に移る」など）を、テストケースをまたいで繰り返していない",
+        "変更に関わらない、アカウントに残る操作（お気に入り、フォロー）を押す項目を立てていない",
+        "manifest.py が経路を組めて manifest.json を書いている。共有の項目は checked が空（アプリの外は確かめない）で、外に居るまま撮る形になっている",
         "manifest.json とフローを手で書き換えていない。直すなら plan.json を直して manifest.py を叩き直している"
       ]
     }

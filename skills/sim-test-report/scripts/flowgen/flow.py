@@ -1,5 +1,6 @@
 """plan.json から、項目ごとの Maestro のフローを作る（manifest.py から呼ぶ）。plan の形は manifest.py --help。
 
+plan はテストケース（`cases`）の集合で、項目は必ずどれかのテストケースに属する。
 項目1つ＝「`from` から `do` を順に叩いて、1枚撮る」。**項目は経路を持たない。**
 前の項目が終わった画面から次の項目の `from` までは bridge.py が繋ぐ（すでに居れば何もしない）。
 ここがするのは、項目の `do` をマップの操作に引き当ててステップにすることと、
@@ -10,6 +11,7 @@
                    └ 項目の do: do_step()
 """
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -22,23 +24,25 @@ from .bridge import Route, Unroutable, emit_path, report_problems
 from .results import resolve_result
 from .steps import Act, See, Shot, nest
 
-PLAN_KEYS = {"app", "repo", "clear_state", "items", "explore"}
-ITEM_KEYS = {"from", "do", "fresh", "title", "expect", "when"}
+PLAN_KEYS = {"app", "repo", "clear_state", "cases"}
+CASE_KEYS = {"title", "items", "relaunch_after", "launch", "explore"}
+ITEM_KEYS = {"id", "from", "do", "title", "expect", "when"}
 DO_KEYS = {"op", "runtime", "input", "pick", "in"}
-EXPLORE_KEYS = {"from", "title", "expect", "reason", "when"}
+REF = re.compile(r"\{([^{}\s]*)\}")     # 期待の中で、同じテストケースの前の項目を指す
 
 
 def shot_name(n):
-    """項目の名前。並び順から振る（explore は items の続きの番号）。証跡・ダンプ・
-    フローのファイル名になる。端末はディレクトリで分けるので、名前には入れない。"""
+    """項目の名前。テストケースをまたいで並び順から通しで振る（explore のテストケースも
+    その場の番号）。証跡・ダンプ・フローのファイル名になる。端末はディレクトリで分けるので、
+    名前には入れない。"""
     return "test_{:02d}".format(n)
 
 
 # ---------- plan を読む ----------
 
 def load_plan(path):
-    """plan.json を読み、鍵を確かめて返す。**知らない鍵は綴り違い** — 黙って無視すると、
-    その指定が効かないまま走る。
+    """plan.json を読み、鍵とテストケースの形を確かめて返す。**知らない鍵は綴り違い** — 黙って
+    無視すると、その指定が効かないまま走る。
 
     `repo`（アプリのリポジトリ）は必須。plan の画面 id と要素 id は、そのリポジトリの画面マップを
     前提に書いたものなので、どのマップかも plan が持つ。相対パスなら plan の置き場所から読み、
@@ -51,7 +55,10 @@ def load_plan(path):
     unknown = set(plan) - PLAN_KEYS
     if unknown:
         hint = ""
-        if unknown & {"runtime", "inputs"}:
+        if unknown & {"items", "explore"}:
+            hint = ("。項目はテストケースに入れる（{\"cases\": [{\"title\": …, \"items\": [...]}]}）。"
+                    "経路が組めないテストケースには \"explore\": 理由 を付ける")
+        elif unknown & {"runtime", "inputs"}:
             hint = "。打つ文字の決め方は do の操作に書く（{\"op\": …, \"runtime\": true}）"
         elif "shots_dir" in unknown:
             hint = "。証跡の出力先は manifest.py の引数で決まる"
@@ -62,16 +69,110 @@ def load_plan(path):
                  "画面マップは、その下の screen-map/ にある")
     repo = Path(str(plan["repo"])).expanduser()
     plan["repo"] = str((repo if repo.is_absolute() else Path(path).resolve().parent / repo).resolve())
-    for n, it in enumerate(plan.get("explore") or [], 1):
-        unknown = set(it) - EXPLORE_KEYS
-        if unknown:
-            sys.exit("plan の explore[{}] に知らない鍵: {}（使えるのは {}）".format(
-                n, ", ".join(sorted(unknown)), ", ".join(sorted(EXPLORE_KEYS))))
+    read_cases(plan)
     return plan
 
 
+def read_cases(plan):
+    """plan の cases を確かめて、テストケースの並びにする。
+
+    [{title, launch, relaunch_after, explore, items: [{name, item, expect}]}]。`name` は
+    テストケースをまたいだ通し番号、`item` は plan の項目そのまま、`expect` は前の項目を指す
+    `{id}` を証跡の名前に展開したもの（「test_04（一覧の行をタップすると詳細に移る）」）。
+
+    **テストケースの中の項目は前の項目に依存してよく、テストケースどうしは依存しない。**
+    なので `{id}` で指せるのは、同じテストケースの中の自分より前の項目だけ。
+    """
+    cases = plan.get("cases")
+    if cases is None:
+        cases = []
+    if not isinstance(cases, list):
+        sys.exit("plan の cases はテストケースの配列で書く")
+    out, titles, n = [], set(), 0
+    for c, case in enumerate(cases, 1):
+        where = " cases[{}] ".format(c)
+        if not isinstance(case, dict):
+            sys.exit("plan の{}はテストケース（{{\"title\": …, \"items\": [...]}}）で書く".format(where))
+        unknown = set(case) - CASE_KEYS
+        if unknown:
+            hint = ""
+            if unknown & {"from", "do", "expect"}:
+                hint = "。項目はテストケースの items に入れる"
+            elif "fresh" in unknown:
+                hint = "。後に状態を残すなら relaunch_after、起動そのものを確かめるなら launch"
+            elif "reason" in unknown:
+                hint = "。経路が組めない理由は \"explore\": 理由 で書く"
+            sys.exit("plan の{}に知らない鍵: {}（使えるのは {}）{}".format(
+                where, ", ".join(sorted(unknown)), ", ".join(sorted(CASE_KEYS)), hint))
+        title = case.get("title")
+        if not isinstance(title, str) or not title.strip():
+            sys.exit("plan の{}に title（何の機能を確かめるまとまりか）が無い".format(where))
+        where = "テストケース「{}」".format(title)
+        if title in titles:
+            sys.exit("plan の{}が2つある。テストケースの題は分ける（マニフェストとレポートで"
+                     "まとまりを引く鍵になる）".format(where))
+        titles.add(title)
+        for k in ("relaunch_after", "launch"):
+            if k in case and not isinstance(case[k], bool):
+                sys.exit("plan の{}の {} は true / false で書く".format(where, k))
+        explore = case.get("explore")
+        if "explore" in case and not (isinstance(explore, str) and explore.strip()):
+            sys.exit("plan の{}の explore には、経路が組めない理由を文で書く".format(where))
+        items = case.get("items")
+        if not isinstance(items, list) or not items:
+            sys.exit("plan の{}に items（項目）が無い".format(where))
+        ids, rows = {}, []
+        for item in items:
+            n += 1
+            name = shot_name(n)
+            if not isinstance(item, dict):
+                sys.exit("plan の {} の項目は {{\"from\": …, \"title\": …, \"expect\": …}} で書く".format(name))
+            unknown = set(item) - ITEM_KEYS
+            if unknown:
+                hint = ""
+                if "fresh" in unknown:
+                    hint = ("。起動し直せるのはテストケースの境目だけ。後に状態を残すテストケースに "
+                            "relaunch_after、起動そのものを確かめるテストケースに launch を付ける")
+                elif "shot" in unknown:
+                    hint = "。証跡の名前は並び順から振る"
+                elif unknown & {"steps", "goto"}:
+                    hint = "。経路は書かない — from に着くまではスクリプトが計算する"
+                elif unknown & {"runtime", "inputs"}:
+                    hint = "。値の決め方は do の操作に書く（{\"op\": …, \"runtime\": true}）"
+                elif "screen" in unknown:
+                    hint = "。操作を始める画面は from"
+                elif "reason" in unknown:
+                    hint = "。経路が組めない理由は、テストケースに \"explore\": 理由 で書く"
+                sys.exit("plan の {} に知らない鍵: {}（使えるのは {}）{}".format(
+                    name, ", ".join(sorted(unknown)), ", ".join(sorted(ITEM_KEYS)), hint))
+            if not item.get("from"):
+                sys.exit("plan の {} に from（操作を始める画面）が無い".format(name))
+            expect = item.get("expect", "")
+            for ref in REF.findall(expect if isinstance(expect, str) else ""):
+                if ref not in ids:
+                    sys.exit("plan の {} の expect の {{{}}} が指す項目が無い。指せるのは同じテストケースの"
+                             "自分より前の項目の id だけ（{}）".format(
+                                 name, ref, ", ".join(ids) or "前に id の付いた項目が無い"))
+            expect = REF.sub(lambda m: ids[m.group(1)], expect) if isinstance(expect, str) else expect
+            if "id" in item:
+                iid = item["id"]
+                if not (isinstance(iid, str) and re.fullmatch(r"[A-Za-z0-9_.-]+", iid)):
+                    sys.exit("plan の {} の id は英数字と _ . - で書く: {}".format(
+                        name, json.dumps(iid, ensure_ascii=False)))
+                if iid in ids:
+                    sys.exit("plan の{}の id「{}」が {} で使われている".format(where, iid, ids[iid]))
+                ids[iid] = "{}（{}）".format(name, item.get("title", ""))
+            rows.append({"name": name, "item": item, "expect": expect})
+        out.append({"title": title, "launch": bool(case.get("launch")),
+                    "relaunch_after": bool(case.get("relaunch_after")),
+                    "explore": explore, "items": rows})
+    return out
+
+
 def read_items(plan):
-    """plan の items を確かめて、[{name, from, do: [(操作id, 値の決め方)], fresh, when}] にする。
+    """フローを組む項目を確かめて、[{name, from, do: [(操作id, 値の決め方)], restart, when}] にする。
+
+    `explore` の付いたテストケースは入れない（経路が組めず、フローを持たない）。
 
     `do` の要素は操作id（`"tap:Search"` / `"see:list.footer"`）か、値の決め方を添えた
     `{"op": 操作id, "runtime": true}` / `{"op": 操作id, "input": 値}`（打つ文字）/
@@ -82,54 +183,45 @@ def read_items(plan):
     `when` は項目の前提（マップの `when` の文言をそのまま写す）。条件つきの辺と、
     結果が分かれる操作の枝は、ここに同じ文言があるときだけ使う。
 
-    `fresh` が真の項目は、アプリを起動し直した直後から始める（その項目の前提）。
-    `title` / `expect` は読まない（manifest.py が読む）。`explore` も見ない —
-    経路が組めなかった項目で、フローを持たない。
+    `restart` が真の項目は、アプリを起動し直した直後から始める。**テストケースの頭にしか
+    立たない** — そのテストケースに `launch` があるか、フローで走る直前のテストケースに
+    `relaunch_after` があるとき。テストケースの途中で起動し直すと、前の項目を当てにしている
+    項目の前提が消える。
     """
-    out = []
-    for n, item in enumerate(plan.get("items") or [], 1):
-        name = shot_name(n)
-        unknown = set(item) - ITEM_KEYS
-        if unknown:
-            hint = ""
-            if "shot" in unknown:
-                hint = "。証跡の名前は並び順から振る"
-            elif unknown & {"steps", "goto"}:
-                hint = "。経路は書かない — from に着くまではスクリプトが計算する"
-            elif unknown & {"runtime", "inputs"}:
-                hint = "。値の決め方は do の操作に書く（{\"op\": …, \"runtime\": true}）"
-            elif "screen" in unknown:
-                hint = "。操作を始める画面は from"
-            sys.exit("plan の {} に知らない鍵: {}（使えるのは {}）{}".format(
-                name, ", ".join(sorted(unknown)), ", ".join(sorted(ITEM_KEYS)), hint))
-        if not item.get("from"):
-            sys.exit("plan の {} に from（操作を始める画面）が無い".format(name))
-        do = item.get("do") or []
-        if isinstance(do, (str, dict)):
-            sys.exit("plan の {} の do は配列で書く: {}".format(name, json.dumps(do, ensure_ascii=False)))
-        ops = []
-        for d in do:
-            if isinstance(d, str):
-                ops.append((d, {}))
-                continue
-            modes = [k for k in ("runtime", "input", "pick") if k in d] if isinstance(d, dict) else []
-            within = read_in(d.get("in")) if isinstance(d, dict) and "in" in d else None
-            bad = not isinstance(d, dict) or not d.get("op") or set(d) - DO_KEYS \
-                or len(modes) > 1 or (not modes and within is None) or d.get("runtime") not in (None, True) \
-                or ("pick" in d and not (isinstance(d["pick"], str) and d["pick"].strip())) \
-                or within is False
-            if bad:
-                sys.exit("plan の {} の do の要素は操作id か {{\"op\": 操作id, \"input\": 値}} か "
-                         "{{\"op\": 操作id, \"runtime\": true}} か {{\"op\": 操作id, \"pick\": 条件}}、"
-                         "親を選ぶなら {{\"op\": 操作id, \"in\": 親の ID か [外から順の ID] か "
-                         "{{\"pick\": 条件}}}}: {}".format(name, json.dumps(d, ensure_ascii=False)))
-            how = {modes[0]: d[modes[0]]} if modes else {}
-            if within is not None:
-                how["in"] = within
-            ops.append((d["op"], how))
-        when = item.get("when") or []
-        out.append({"name": name, "from": item["from"], "do": ops, "fresh": bool(item.get("fresh")),
-                    "when": tuple([when] if isinstance(when, str) else when)})
+    out, dirty = [], False
+    for case in read_cases(plan):
+        if case["explore"]:
+            continue       # フローで走らないので、前のテストケースが残した状態もそのまま次へ渡る
+        for k, row in enumerate(case["items"]):
+            item, name = row["item"], row["name"]
+            do = item.get("do") or []
+            if isinstance(do, (str, dict)):
+                sys.exit("plan の {} の do は配列で書く: {}".format(name, json.dumps(do, ensure_ascii=False)))
+            ops = []
+            for d in do:
+                if isinstance(d, str):
+                    ops.append((d, {}))
+                    continue
+                modes = [k2 for k2 in ("runtime", "input", "pick") if k2 in d] if isinstance(d, dict) else []
+                within = read_in(d.get("in")) if isinstance(d, dict) and "in" in d else None
+                bad = not isinstance(d, dict) or not d.get("op") or set(d) - DO_KEYS \
+                    or len(modes) > 1 or (not modes and within is None) or d.get("runtime") not in (None, True) \
+                    or ("pick" in d and not (isinstance(d["pick"], str) and d["pick"].strip())) \
+                    or within is False
+                if bad:
+                    sys.exit("plan の {} の do の要素は操作id か {{\"op\": 操作id, \"input\": 値}} か "
+                             "{{\"op\": 操作id, \"runtime\": true}} か {{\"op\": 操作id, \"pick\": 条件}}、"
+                             "親を選ぶなら {{\"op\": 操作id, \"in\": 親の ID か [外から順の ID] か "
+                             "{{\"pick\": 条件}}}}: {}".format(name, json.dumps(d, ensure_ascii=False)))
+                how = {modes[0]: d[modes[0]]} if modes else {}
+                if within is not None:
+                    how["in"] = within
+                ops.append((d["op"], how))
+            when = item.get("when") or []
+            out.append({"name": name, "from": item["from"], "do": ops,
+                        "restart": k == 0 and (case["launch"] or dirty),
+                        "when": tuple([when] if isinstance(when, str) else when)})
+        dirty = case["relaunch_after"]
     return out
 
 
@@ -149,7 +241,7 @@ def read_in(v):
 def build_steps(mp, items):
     """項目を順にステップ列にする。(ステップ列, 組めなかった理由, 補足)。
 
-    項目ごとに: `fresh` なら起動し直す → bridge.py で `from` まで繋ぐ → `do` を1つずつ
+    項目ごとに: `restart` なら起動し直す → bridge.py で `from` まで繋ぐ → `do` を1つずつ
     ステップにする → 撮る。**組めなかったらそこで止める**（先の項目は、手前の項目が
     終わった画面を前提にしているので、組んでも意味が無い）。
     """
@@ -159,7 +251,7 @@ def build_steps(mp, items):
         tag = "({}) goto {}".format(name, item["from"])
         first = len(steps)
         try:
-            if item["fresh"] and steps:
+            if item["restart"] and steps:
                 steps.append(route.restart())
             steps += route.to(item["from"], item["when"])
             for op, how in item["do"]:
@@ -306,7 +398,7 @@ def write_flows(plan, out_dir, timeout=10000):
     items = read_items(plan)
     app, clear = plan.get("app"), bool(plan.get("clear_state"))
     if not items:
-        sys.exit("plan の items が空（経路が組めた項目が無いならフローは要らない）")
+        sys.exit("plan にフローで撮る項目が無い（全テストケースが explore ならフローは要らない）")
     if not app:
         sys.exit("plan に app（bundle id）が要る（xcrun simctl listapps <UDID> で調べる）")
     mp = load_map(plan.get("repo"))
@@ -315,7 +407,7 @@ def write_flows(plan, out_dir, timeout=10000):
         report_problems(problems)
         sys.exit(2)
 
-    by_shot = {shot_name(n): it for n, it in enumerate(plan.get("items") or [], 1)}
+    by_shot = {row["name"]: (case, row) for case in read_cases(plan) for row in case["items"]}
     d = Path(out_dir)
     d.mkdir(parents=True, exist_ok=True)
     written = []
@@ -326,7 +418,7 @@ def write_flows(plan, out_dir, timeout=10000):
         files = []
         for k, (p_start, p_steps) in enumerate(parts):
             last = k == len(parts) - 1
-            # 自分で起動するのは1本目と fresh の項目の、最初の本だけ。他は居る場所から続ける
+            # 自分で起動するのは1本目と、起動し直すテストケースの頭の項目の、最初の本だけ。他は居る場所から続ける
             flow, _ = emit_flow(mp, p_steps, app, clear, None, timeout, p_start, launch=lch and k == 0,
                                 names=names)
             name = shot + ".yaml" if last else "{}.{}.yaml".format(shot, k + 1)
@@ -339,11 +431,12 @@ def write_flows(plan, out_dir, timeout=10000):
         # 何番目か（_INDEX）は run_flows.py が数えるので入れない
         inputs = {v: "" for v, use in uses.items()
                   if use != "index" and not (v in picks and not picks[v]["pick"])}
-        it = by_shot.get(shot, {})
-        written.append({"name": shot, "title": it.get("title", ""),
-                        "from": it.get("from"), "fresh": bool(it.get("fresh")),
+        case, row = by_shot[shot]
+        it = row["item"]
+        written.append({"name": shot, "case": case["title"], "title": it.get("title", ""),
+                        "from": it.get("from"),
                         "when": it.get("when") or [],
-                        "do": it.get("do") or [], "expect": it.get("expect", ""),
+                        "do": it.get("do") or [], "expect": row["expect"],
                         "screen": screen, "checked": checked, "launch": lch,
                         "inputs": inputs, "input_use": uses, "picks": picks,
                         "parts": files, "flow": files[-1]["flow"]})
