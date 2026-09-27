@@ -13,6 +13,11 @@
 進捗ログは `<出力先>/progress_<端末>.log`。実行時に決める値は端末ごと — その端末の
 画面を見て決める。
 
+**前の回の残りを片付けてから撮る。** 最初から撮るときは進捗ログを書き直し、マニフェストに
+無い名前の証跡とダンプを消す。撮る項目は、撮る前にその項目の前の回の証跡とダンプを消し、
+判定を `PENDING` に戻す（撮れずに終わっても、前の回の画像と OK がレポートに残らない）。
+再開と撮り直し（`--only`）のときは進捗ログに区切りの行を足して続ける。
+
 **未定で止まったら、叩き直すと続きから走る。** 撮り終えた端末は飛ばし、止まった端末の
 止まった項目から走る。状態はマニフェストの `resume` に書き、走り切ったら消す。
 
@@ -341,6 +346,15 @@ def contains_problem(dump, see, value):
             "この中の行の ID の一部を書く — 打った語と同じとは限らない（作者で絞り込めば、行の ID は作品名）")
 
 
+def forget(shots, sec):
+    """その項目の前の回の証跡・ダンプを消し、判定を PENDING に戻す。"""
+    for ext in (".png", ".txt"):
+        f = shots / (sec["name"] + ext)
+        if f.exists():
+            f.unlink()
+    sec["desc"], sec["note"], sec["result"] = "", "", "PENDING"
+
+
 def parts_of(sec):
     """セクションのフローを、走らせる順に [(フロー, その前に決める値)] で。"""
     parts = sec.get("parts") or [{"flow": sec["flow"], "decide": None}]
@@ -378,6 +392,18 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, only=Non
         with log.open("a", encoding="utf-8") as f:
             f.write(text + "\n")
 
+    if only:
+        logline("--- 撮り直し: " + ", ".join(only))
+    elif resume_name:
+        logline(f"--- 再開: {resume_name} の {resume_part + 1}本目から")
+    else:
+        # 最初から撮るときは、進捗ログと、マニフェストに無い名前の証跡を消す
+        log.write_text("", encoding="utf-8")
+        current = {s["name"] for s in manifest["sections"]}
+        for old in list(shots.glob("*.png")) + list(shots.glob("*.txt")):
+            if old.stem not in current:
+                old.unlink()
+
     print(f"--- {device}（{udid}）")
     done, lost, broken = 0, [], False
     for i, sec in targets:
@@ -387,6 +413,9 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, only=Non
         dest = scratch if replay else shots
         if sec.get("launch"):
             broken = False          # ここから鎖が切り替わる
+        if not replay and not (name == resume_name and resume_part):
+            # 撮れずに終わっても前の回の証跡と OK が残らないように、先に消す
+            forget(shots, sec)
         if broken:
             lost.append(f"{device} {line}")
             logline(f"{line} 撮影できず 続きなので、前のフローの失敗で飛ばした")
@@ -511,7 +540,6 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, only=Non
             logline(f"{line} なぞった（撮り直しの前提）")
             continue
         sh(["inspect", udid, name, str(shots)])   # 出力は捨てる
-        sec["desc"], sec["note"], sec["result"] = "", "", "PENDING"   # 証跡が入れ替わったので判定も捨てる
         done += 1
         picked = ", ".join(f"{k}={v}" + (f"（{notes[k]}）" if k in notes else "")
                            for k, v in dev["picked"].items() if not k.endswith("_INDEX"))

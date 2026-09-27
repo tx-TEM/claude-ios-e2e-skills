@@ -284,16 +284,18 @@ def screen_of(text):
     return None if (s is None or s.startswith("【不明】")) else s
 
 def run_key(save_to):
-    """実行の区切り。証跡の出力先（`…/sim-test-report-<slug>/shots`）から取る。
+    """ダンプの置き場（`.work/dumps/` の下）。実行ごとに分けて、上書きされないようにする。
 
-    **平置きにすると実行をまたいで上書きされる。** 証跡の名前は実行ごとに
-    似るので（`iphone_01_list`）、記録として残す目的が果たせない。
-    出力先を渡されないとき（探索の下見など）は日付に落とす。
+    - `<出力先>/shots/<端末>` → `<出力先の名前>/<端末>`
+    - `<出力先>/shots` → `<出力先の名前>`
+    - 出力先が無い（探索の下見など） → `_probe/<日付>`
     """
     if save_to:
         d = Path(save_to).expanduser().resolve()
+        if d.parent.name == "shots":
+            return "{}/{}".format(d.parent.parent.name or "misc", d.name)
         return (d.parent.name if d.name == "shots" else d.name) or "misc"
-    return time.strftime("%Y-%m-%d")
+    return "_probe/" + time.strftime("%Y-%m-%d")
 
 
 def cmd_inspect(udid, name, save_to=None):

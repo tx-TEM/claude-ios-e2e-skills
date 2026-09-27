@@ -189,6 +189,10 @@ build_report.py が result の無いセクションを拒むため（判定し�
 引き継ぐ。** 引き継ぎのキーは証跡の名前。`title` / `expect` は plan が正で、
 直すなら plan を直して叩き直す。
 
+**出力先の名前は `sim-test-report-<日付>-<テーマ>`**（`sim-test-report-20260928-search`）。
+並べれば時系列になり、スキル側の `.work/flows/` とダンプの置き場も同じ名前になる。
+形が違えば警告を出す（止めはしない）。
+
 **実行時に決めた値（`inputs`）も、同じ変数名のものは引き継ぐ。** 撮り直し
 （`run_flows.py --only`）は手前の項目をなぞるので、前に撮ったときの値が要る。
 消すと、手前の項目の判断を撮り直しのたびにやり直すことになる。plan を直して
@@ -196,6 +200,7 @@ build_report.py が result の無いセクションを拒むため（判定し�
 — データが変わっていれば古い値で走るので、見て直せるように。
 """
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -330,6 +335,9 @@ def main():
     blank = sum(1 for s in sections if not s["flow"])
     empty = [s["name"] for s in sections if not s["title"] or not s["expect"]]
     print(out)
+    if not re.fullmatch(r"sim-test-report-\d{8}-.+", out_dir.resolve().name):
+        print(f"  出力先の名前 {out_dir.resolve().name} が sim-test-report-<日付>-<テーマ> の形でない"
+              "（例 sim-test-report-20260928-search）。回ごとに分かれるように付け直すとよい")
     print(f"  {len(sections)}セクション × {len(devices)}端末")
     for n in devices:
         print(f"    {n}: {info[n]['model']} ({info[n]['os']})  {info[n]['udid']}")

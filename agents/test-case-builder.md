@@ -19,7 +19,7 @@ tools: Read, Grep, Glob, Bash
 - **差分**（ベースとブランチ、または PR番号）か「なし」。**欄ごと無ければ止まる**（「なし」と書かれていれば、差分の無い入口で立てる）
 - 変更の意図（なぜ変えたか、何を狙ったか）。あれば使う
 - **対象アプリのリポジトリのパス**
-- **証跡の出力先ディレクトリ**（`manifest.py` の `<出力先>`。例: `~/Desktop/sim-test-report-<slug>/`。証跡はその下の `shots/` に撮る）
+- **証跡の出力先ディレクトリ**（`manifest.py` の `<出力先>`。例: `~/Desktop/sim-test-report-<日付>-<テーマ>/`。証跡はその下の `shots/` に撮る）
 - **撮る端末とシミュレーターの UDID**（`iphone=<UDID>`。両方でもよい。`manifest.py --device` にそのまま渡す）
 - **対象アプリの bundle id**（plan の `app`）
 - iPad も対象にするか
@@ -248,8 +248,8 @@ python3 $R check   --repo $M     # 到達できない画面、切れている箇
 テストケースごとに、項目の「どこから何を確かめ、何が見えるはずか」を `plan.json` に書き、`manifest.py` に渡す。
 `manifest.py` がフローとマニフェストを作る。**項目・操作・期待の元はこの1つだけ。**
 
-置き場は `~/.claude/skills/sim-test-report/.work/flows/<slug>/plan.json`（スキル側。**アプリのリポジトリの下に作らない**）。`<slug>` は
-証跡の出力先と同じもの（`sim-test-report-<テーマ>`）。
+置き場は `~/.claude/skills/sim-test-report/.work/flows/<出力先の名前>/plan.json`（スキル側。**アプリのリポジトリの下に作らない**）。
+`<出力先の名前>` は証跡の出力先ディレクトリの名前（`sim-test-report-<日付>-<テーマ>`）。
 
 ```json
 {
@@ -411,8 +411,8 @@ manifest.py は理由を返して終了コード 2 で終わる。**その文言
 ```
 ## 作ったもの
 
-plan:     ~/.claude/skills/sim-test-report/.work/flows/<slug>/plan.json
-manifest: ~/Desktop/sim-test-report-<slug>/manifest.json
+plan:     ~/.claude/skills/sim-test-report/.work/flows/<出力先の名前>/plan.json
+manifest: ~/Desktop/sim-test-report-<日付>-<テーマ>/manifest.json
 入口:     差分（PR #11（feature-x）の先頭から作業ツリーまで、4ファイル）
           ユーザーの指示で範囲外: 並び替えの既定値（「検索だけ見て」）
 
