@@ -259,6 +259,8 @@ class SeeWaits(unittest.TestCase):
         self.assertEqual(rows[0]["input_use"],
                          {"LIST_SEARCH_FIELD": "text", "LIST_ROW": "selector"})
         self.assertEqual(set(rows[0]["inputs"]), {"LIST_SEARCH_FIELD", "LIST_ROW"})
+        # 待つ行のパターン。run_flows.py が走らせる前に、語を含む行があるかを確かめるのに使う（#85）
+        self.assertEqual(rows[0]["sees"], {"LIST_ROW": {"pattern": "list.row.*", "exclude": []}})
 
     def test_values_only_on_patterns(self):
         code, err = build_err([{"from": "list", "title": "a", "expect": "a",
@@ -1751,6 +1753,47 @@ def write_flows_path(items, repo=FIXTURE):
         flows_of.write_flows(plan, out)
     shutil.rmtree(out)
     return o.getvalue()
+
+
+class SeeContainsCheck(unittest.TestCase):
+    """#85: 見たい行が含む語（see の runtime）は、走らせる前に今の画面の行と照らす。"""
+
+    tearDown = AutoPickRun.tearDown
+
+    def setUp(self):
+        AutoPickRun.setUp(self)
+        (self.flows / "test_01.yaml").write_text(
+            "appId: x\nenv:\n  SHOTS: ''\n  LIST_ROW: ''\n---\n- scrollUntilVisible:\n    element:\n"
+            "      id: '^list\\.row\\..*${LIST_ROW}.*'\n", encoding="utf-8")
+        self.sec.update(input_use={"LIST_ROW": "selector"}, picks={},
+                        sees={"LIST_ROW": {"pattern": "list.row.*", "exclude": []}})
+
+    def resume(self, value):
+        self.sec["devices"]["iphone"]["inputs"] = {"LIST_ROW": value}
+        with contextlib.redirect_stdout(io.StringIO()) as o:
+            got = RF["run_device"]({"sections": [self.sec]}, self.out / "manifest.json",
+                                   self.flows, "iphone", "AAAA", ("test_01", 1))
+        return got, o.getvalue()
+
+    def test_word_in_a_row_runs(self):
+        (stopped, done, _), _ = self.resume("C++")
+        self.assertEqual((stopped, done), (None, 1))
+        body = [a[2] for a in self.calls if a[0] == "run" and a[3] == "test_01"][0]
+        self.assertIn("LIST_ROW: 'C\\+\\+'", body)
+
+    def test_word_in_no_row_stops_and_lists_rows(self):
+        # 作者で絞り込んだのに作者名で待つ、のように、行の ID に入っていない語
+        (stopped, _, _), out = self.resume("夏目")
+        self.assertEqual(stopped, ("test_01", 1))
+        self.assertEqual([a for a in self.calls if a[0] == "run"], [])
+        self.assertIn("「夏目」を ID に含む list.row.* の行が、いまの画面に無い", out)
+        self.assertIn("C++入門", out)
+        self.assertIn("坊っちゃん", out)   # 画面外でもダンプに出ている行は並べる
+
+    def test_whole_id_stops(self):
+        (stopped, _, _), out = self.resume("list.row.C++入門")
+        self.assertEqual(stopped, ("test_01", 1))
+        self.assertIn("行の ID をまるごと書いている", out)
 
 
 class PickInsideParent(unittest.TestCase):

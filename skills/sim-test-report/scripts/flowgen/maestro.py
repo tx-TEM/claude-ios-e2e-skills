@@ -233,6 +233,25 @@ def runtime_picks(mp, steps, names):
     return out
 
 
+def runtime_sees(mp, steps, names):
+    """見たい行が含む語（`see` の `runtime`）の、変数名 → {"pattern": ID, "exclude": [ID]}。
+
+    **走らせる側（run_flows.py）が、書かれた語を走らせる前に確かめるのに使う**（#85）。
+    フローは `^<接頭辞>.*<語>.*` の ID を探すので、語が今の画面の行の ID に入っていなければ
+    必ず落ちる（作者で絞り込んだのに、ID が作品名の行を作者名で待つ、など）。
+    `exclude` は `runtime_picks()` と同じ（行の中の要素を行と数えない）。
+    """
+    out = {}
+    for st in steps:
+        if not (isinstance(st, See) and st.later):
+            continue
+        prefix = pattern_prefix(st.target)
+        others = sorted(str(el.get("id")) for el in mp.screens[st.screen].elements
+                        if el.get("id") != st.target and str(el.get("id") or "").startswith(prefix))
+        out[var_of(st, names)] = {"pattern": st.target, "exclude": others}
+    return out
+
+
 def sel_id(value):
     """マップの id を Maestro のセレクタにする。
 

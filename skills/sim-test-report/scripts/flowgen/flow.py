@@ -15,7 +15,7 @@ import re
 import sys
 from pathlib import Path
 
-from .maestro import (add_returns, add_reveals, assign_vars, emit_flow, runtime_picks, runtime_uses,
+from .maestro import (add_returns, add_reveals, assign_vars, emit_flow, runtime_picks, runtime_sees, runtime_uses,
                       shot_context, split_at_shots, split_parts, var_of)
 from screenmap.map import load_map
 from screenmap.screen import DO_OPS, GESTURES, is_pattern, pattern_prefix
@@ -427,6 +427,7 @@ def write_flows(plan, out_dir, timeout=10000):
         screen, checked = shot_context(mp, seg_start, seg_steps)
         uses = runtime_uses(seg_steps, names)
         picks = runtime_picks(mp, seg_steps, names)
+        sees = runtime_sees(mp, seg_steps, names)
         # 走らせる側（や LLM）が埋める値。見えている1件目を選ぶものは run_flows.py が埋めるので入れない
         # 何番目か（_INDEX）は run_flows.py が数えるので入れない
         inputs = {v: "" for v, use in uses.items()
@@ -438,7 +439,7 @@ def write_flows(plan, out_dir, timeout=10000):
                         "when": it.get("when") or [],
                         "do": it.get("do") or [], "expect": row["expect"],
                         "screen": screen, "checked": checked, "launch": lch,
-                        "inputs": inputs, "input_use": uses, "picks": picks,
+                        "inputs": inputs, "input_use": uses, "picks": picks, "sees": sees,
                         "parts": files, "flow": files[-1]["flow"]})
     print(emit_path(mp, steps, notes))
     print("\n  フロー（{}本）: {}".format(len(written), out_dir))
