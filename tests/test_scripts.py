@@ -50,10 +50,24 @@ def load_run_flows():
 RF = load_run_flows()
 
 
-def write_flows(items, repo=FIXTURE):
-    """plan から フローを書いて、(行, {ファイル名: 中身}) を返す。経路の表示は捨てる。"""
+def cases_of(items):
+    """テストの便宜。項目を1つずつテストケースにする。項目に `launch` を書くと、その項目だけの
+    テストケースに付く（そこでアプリを起動し直す）。まとまりを確かめるテストは cases を直に書く。"""
+    out = []
+    for n, it in enumerate(items, 1):
+        it = dict(it)
+        case = {"title": "{}. {}".format(n, it.get("title", "")), "items": [it]}
+        if it.pop("launch", False):
+            case["launch"] = True
+        out.append(case)
+    return out
+
+
+def write_flows(items, repo=FIXTURE, cases=None):
+    """plan から フローを書いて、(行, {ファイル名: 中身}) を返す。経路の表示は捨てる。
+    `cases` を渡せばそれをそのまま使う（items は無視する）。"""
     out = Path(tempfile.mkdtemp())
-    plan = {"app": "jp.example.App", "repo": str(repo), "items": items}
+    plan = {"app": "jp.example.App", "repo": str(repo), "cases": cases or cases_of(items)}
     with contextlib.redirect_stdout(io.StringIO()):
         rows = flows_of.write_flows(plan, out)
     flows = {p.name: p.read_text(encoding="utf-8") for p in sorted(out.glob("*.yaml"))}
@@ -92,7 +106,7 @@ class Snapshot(unittest.TestCase):
              "do": ["tap:Search"]},
             {"from": "list", "title": "末尾まで読む", "expect": "フッターが出る",
              "do": ["see:list.footer"]},
-            {"from": "list", "fresh": True, "title": "行を開く", "expect": "詳細が開く",
+            {"from": "list", "launch": True, "title": "行を開く", "expect": "詳細が開く",
              "do": ["tap:list.row.*"]},
             {"from": "detail", "title": "戻る", "expect": "一覧に戻る",
              "do": ["tap:BackButton"]},
@@ -194,7 +208,7 @@ class ScrollUp(unittest.TestCase):
     def test_restart_starts_at_top(self):
         rows, flows = write_flows([
             {"from": "list", "title": "a", "expect": "a", "do": ["see:list.footer"]},
-            {"from": "list", "fresh": True, "title": "b", "expect": "b",
+            {"from": "list", "launch": True, "title": "b", "expect": "b",
              "do": [{"op": "text:list.search_field", "input": "猫"}]}])
         self.assertEqual(ups(flows["test_02.yaml"]), [])
 
@@ -270,7 +284,7 @@ class RuntimeInputs(unittest.TestCase):
         rows, flows = write_flows([
             {"from": "list", "title": "a", "expect": "a",
              "do": [{"op": "text:list.search_field", "runtime": True}]},
-            {"from": "list", "fresh": True, "title": "b", "expect": "b",
+            {"from": "list", "launch": True, "title": "b", "expect": "b",
              "do": [{"op": "tap:list.row.*", "pick": "いちばん長い名前"}]}])
         return rows, flows
 
@@ -315,11 +329,11 @@ class Manifest(unittest.TestCase):
     def test_manifest_from_plan(self):
         work = Path(tempfile.mkdtemp())
         plan = work / "plan.json"
-        plan.write_text(json.dumps({"app": "jp.example.App", "repo": str(FIXTURE), "items": [
-            {"from": "list", "title": "a", "expect": "a",
-             "do": ["tap:list.row.*"]}],
-            "explore": [{"from": "settings", "title": "b", "expect": "b",
-                         "reason": "画面 settings がマップに無い"}]}), encoding="utf-8")
+        plan.write_text(json.dumps({"app": "jp.example.App", "repo": str(FIXTURE), "cases": [
+            {"title": "A", "items": [{"from": "list", "title": "a", "expect": "a",
+                                      "do": ["tap:list.row.*"]}]},
+            {"title": "B", "explore": "画面 settings がマップに無い",
+             "items": [{"from": "settings", "title": "b", "expect": "b"}]}]}), encoding="utf-8")
         out = work / "out"
         run_manifest([plan, out, "--device", "iphone=AAAA", "--device", "ipad=BBBB"])
         m = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
@@ -339,8 +353,9 @@ class Manifest(unittest.TestCase):
         self.assertEqual([i["src"] for i in first["images"]],
                          ["shots/iphone/test_01.png", "shots/ipad/test_01.png"])
         self.assertEqual(first["result"], "PENDING")
-        # 経路が組めなかった項目は末尾に、フロー無しで並ぶ
+        # 経路が組めなかったテストケースの項目は、フロー無しで並ぶ
         self.assertEqual(explore["name"], "test_02")
+        self.assertEqual(explore["case"], "B")
         self.assertIsNone(explore["flow"])
         self.assertEqual(explore["input_use"], {})
 
@@ -350,7 +365,8 @@ class Manifest(unittest.TestCase):
         out = work / "out"
 
         def build(items):
-            plan.write_text(json.dumps({"app": "x", "repo": str(FIXTURE), "items": items}), encoding="utf-8")
+            plan.write_text(json.dumps({"app": "x", "repo": str(FIXTURE), "cases": cases_of(items)}),
+                            encoding="utf-8")
             printed = run_manifest([plan, out, "--device", "iphone=AAAA"])
             return json.loads((out / "manifest.json").read_text(encoding="utf-8")), printed
 
@@ -361,7 +377,7 @@ class Manifest(unittest.TestCase):
         (out / "manifest.json").write_text(json.dumps(m, ensure_ascii=False), encoding="utf-8")
 
         # 同じ変数なら引き継ぎ、引き継いだことを出す
-        m, printed = build([dict(text, fresh=True)])
+        m, printed = build([dict(text, launch=True)])
         self.assertEqual(m["sections"][0]["devices"]["iphone"]["inputs"],
                          {"LIST_SEARCH_FIELD": "牛乳(1L)"})
         self.assertIn("test_01 iphone: LIST_SEARCH_FIELD=牛乳(1L)", printed)
@@ -372,6 +388,115 @@ class Manifest(unittest.TestCase):
         self.assertEqual(m["sections"][0]["devices"]["iphone"]["inputs"], {"LIST_ROW": ""})
         shutil.rmtree(Path(m["flows"]), ignore_errors=True)
         shutil.rmtree(work)
+
+
+class Cases(unittest.TestCase):
+    """#78: plan はテストケースの集合。起動し直すのはテストケースの境目だけ。"""
+
+    def case(self, title, *froms, **flags):
+        return dict({"title": title, "items": [
+            {"from": f, "title": "{} {}".format(title, n), "expect": "x"} for n, f in enumerate(froms, 1)]},
+            **flags)
+
+    def launches(self, cases):
+        rows, _ = write_flows(None, cases=cases)
+        return [(r["name"], r["launch"]) for r in rows]
+
+    def refused(self, plan):
+        with self.assertRaises(SystemExit) as cm:
+            flows_of.read_cases(plan)
+        return str(cm.exception.code)
+
+    def test_items_in_a_case_continue(self):
+        # テストケースの中では起動し直さない。後ろのテストケースも、前が relaunch_after を付けなければ続き
+        self.assertEqual(self.launches([self.case("A", "list", "detail"), self.case("B", "list")]),
+                         [("test_01", True), ("test_02", False), ("test_03", False)])
+
+    def test_relaunch_after_restarts_the_next_case(self):
+        self.assertEqual(self.launches([self.case("A", "list", "detail", relaunch_after=True),
+                                        self.case("B", "list", "detail")]),
+                         [("test_01", True), ("test_02", False), ("test_03", True), ("test_04", False)])
+
+    def test_launch_restarts_its_own_head(self):
+        self.assertEqual(self.launches([self.case("A", "list"), self.case("B", "list", launch=True)]),
+                         [("test_01", True), ("test_02", True)])
+
+    def test_explore_case_keeps_its_place_and_passes_relaunch_on(self):
+        # 探索のテストケースはフローで走らないので、前の relaunch_after はその次のテストケースに効く
+        cases = [self.case("A", "list", relaunch_after=True),
+                 self.case("X", "list", explore="画面 history がマップに無い"),
+                 self.case("B", "list")]
+        self.assertEqual(self.launches(cases), [("test_01", True), ("test_03", True)])
+
+    def test_refs_expand_to_the_earlier_item(self):
+        case = self.case("A", "list", "detail")
+        case["items"][0]["id"] = "open"
+        case["items"][1]["expect"] = "{open}で開いたもの"
+        rows, _ = write_flows(None, cases=[case])
+        self.assertEqual(rows[1]["expect"], "test_01（A 1）で開いたもの")
+        self.assertEqual([r["case"] for r in rows], ["A", "A"])
+
+    def test_refs_only_to_earlier_items_in_the_same_case(self):
+        a, b = self.case("A", "list"), self.case("B", "list", "detail")
+        a["items"][0]["id"] = "open"
+        b["items"][0]["expect"] = "{open}"
+        self.assertIn("{open} が指す項目が無い", self.refused({"cases": [a, b]}))
+        b = self.case("B", "list", "detail")
+        b["items"][0]["expect"] = "{later}"
+        b["items"][1]["id"] = "later"
+        self.assertIn("{later} が指す項目が無い", self.refused({"cases": [b]}))
+
+    def test_duplicate_ids_and_titles_are_refused(self):
+        c = self.case("A", "list", "detail")
+        c["items"][0]["id"] = c["items"][1]["id"] = "x"
+        self.assertIn("id「x」が test_01", self.refused({"cases": [c]}))
+        self.assertIn("テストケース「A」が2つある", self.refused({"cases": [self.case("A", "list")] * 2}))
+
+    def test_item_cannot_restart(self):
+        c = self.case("A", "list")
+        c["items"][0]["fresh"] = True
+        out = self.refused({"cases": [c]})
+        self.assertIn("起動し直せるのはテストケースの境目だけ", out)
+        c = self.case("A", "list", fresh=True)
+        self.assertIn("relaunch_after", self.refused({"cases": [c]}))
+
+    def test_old_shape_is_refused(self):
+        f = Path(tempfile.mkdtemp()) / "plan.json"
+        f.write_text(json.dumps({"app": "x", "repo": str(FIXTURE), "items": [], "explore": []}), encoding="utf-8")
+        with self.assertRaises(SystemExit) as cm:
+            flows_of.load_plan(f)
+        shutil.rmtree(f.parent)
+        self.assertIn("項目はテストケースに入れる", str(cm.exception.code))
+
+    def test_manifest_lists_cases(self):
+        work = Path(tempfile.mkdtemp())
+        plan = work / "plan.json"
+        plan.write_text(json.dumps({"app": "x", "repo": str(FIXTURE), "cases": [
+            self.case("A", "list", "detail", relaunch_after=True),
+            self.case("X", "list", explore="画面 history がマップに無い"),
+            self.case("B", "list", launch=True)]}), encoding="utf-8")
+        run_manifest([plan, work / "out", "--device", "iphone=AAAA"])
+        m = json.loads((work / "out" / "manifest.json").read_text(encoding="utf-8"))
+        shutil.rmtree(Path(m["flows"]), ignore_errors=True)
+        shutil.rmtree(work)
+        self.assertEqual([(s["name"], s["case"], bool(s["flow"])) for s in m["sections"]],
+                         [("test_01", "A", True), ("test_02", "A", True),
+                          ("test_03", "X", False), ("test_04", "B", True)])
+        self.assertEqual(m["cases"], [
+            {"title": "A", "launch": False, "relaunch_after": True, "explore": None,
+             "items": ["test_01", "test_02"]},
+            {"title": "X", "launch": False, "relaunch_after": False, "explore": "画面 history がマップに無い",
+             "items": ["test_03"]},
+            {"title": "B", "launch": True, "relaunch_after": False, "explore": None, "items": ["test_04"]}])
+
+    def test_report_heads_where_the_case_changes(self):
+        ns = runpy.run_path(str(SCRIPTS / "build_report.py"), run_name="build_report")
+        heads = ns["case_heads"]([
+            {"case": "一覧から開く", "title": "a"}, {"case": "一覧から開く", "title": "b"},
+            {"case": "起動する", "title": "起動する"},        # 1項目で題が同じなら見出しは要らない
+            {"case": "絞り込む", "title": "語を打つ"},
+            {"title": "case の無いセクション"}])
+        self.assertEqual(heads, {1: "一覧から開く", 4: "絞り込む"})
 
 
 class PlanRepo(unittest.TestCase):
@@ -391,18 +516,18 @@ class PlanRepo(unittest.TestCase):
 
     def test_repo_is_required(self):
         with self.assertRaises(SystemExit) as cm:
-            self.load({"app": "x", "items": []})
+            self.load({"app": "x", "cases": []})
         self.assertIn("plan に repo（アプリのリポジトリ）が要る", str(cm.exception.code))
 
     def test_relative_repo_is_read_from_the_plan_file(self):
         app = self.work / "app"
         app.mkdir()
-        plan = self.load({"app": "x", "repo": "../app", "items": []})
+        plan = self.load({"app": "x", "repo": "../app", "cases": []})
         self.assertEqual(plan["repo"], str(app.resolve()))
 
     def test_manifest_refuses_repo_argument(self):
         f = self.work / "plan.json"
-        f.write_text(json.dumps({"app": "x", "repo": str(FIXTURE), "items": []}), encoding="utf-8")
+        f.write_text(json.dumps({"app": "x", "repo": str(FIXTURE), "cases": []}), encoding="utf-8")
         with self.assertRaises(SystemExit) as cm:
             run_manifest([f, self.work / "out", "--repo", FIXTURE, "--device", "iphone=AAAA"])
         self.assertIn("plan の repo に書く", str(cm.exception.code))
@@ -524,7 +649,7 @@ class RetakeRuns(unittest.TestCase):
         {"name": "test_01", "flow": "test_01.yaml", "launch": True},
         {"name": "test_02", "flow": "test_02.yaml", "launch": False},
         {"name": "test_03", "flow": "test_03.yaml", "launch": False},
-        {"name": "test_04", "flow": "test_04.yaml", "launch": True},    # fresh
+        {"name": "test_04", "flow": "test_04.yaml", "launch": True},    # 起動し直すテストケースの頭
         {"name": "test_05", "flow": "test_05.yaml", "launch": False},
         {"name": "test_06", "flow": None},                             # explore
     ]
@@ -748,7 +873,7 @@ class Interrupts(unittest.TestCase):
     def test_auto_show_as_target_waits_instead_of_closing(self):
         # 自動表示そのものを確かめる項目。被さる先（detail）に着いたら、閉じずに出るまで待つ
         rows, flows = write_flows([
-            {"from": "review_dialog", "fresh": True, "title": "レビュー依頼が出る",
+            {"from": "review_dialog", "launch": True, "title": "レビュー依頼が出る",
              "expect": "レビュー依頼のダイアログが出ている"}], self.repo)
         flow = flows["test_01.yaml"]
         self.assertNotIn("runFlow", flow)
@@ -762,7 +887,7 @@ class Interrupts(unittest.TestCase):
     def test_closing_the_auto_show_returns_to_host(self):
         # 閉じる操作そのものも確かめられる。戻り先は履歴で被さる先
         rows, flows = write_flows([
-            {"from": "review_dialog", "fresh": True, "title": "後でで閉じる",
+            {"from": "review_dialog", "launch": True, "title": "後でで閉じる",
              "expect": "詳細画面に戻っている",
              "do": ["tap:review_dialog.later_button"]}], self.repo)
         flow = flows["test_01.yaml"]
@@ -773,8 +898,8 @@ class Interrupts(unittest.TestCase):
 
     def test_other_items_still_close_it(self):
         rows, flows = write_flows([
-            {"from": "review_dialog", "fresh": True, "title": "a", "expect": "a"},
-            {"from": "detail", "fresh": True, "title": "b", "expect": "b"}], self.repo)
+            {"from": "review_dialog", "launch": True, "title": "a", "expect": "a"},
+            {"from": "detail", "launch": True, "title": "b", "expect": "b"}], self.repo)
         self.assertNotIn("runFlow", flows["test_01.yaml"])
         self.assertIn("runFlow", flows["test_02.yaml"])
 
@@ -949,7 +1074,7 @@ class Flows(unittest.TestCase):
         # 次の項目が起動し直すなら、戻す操作は挟まない
         rows, flows = write_flows([
             {"from": "detail", "title": "a", "expect": "a", "do": ["tap:detail.share_button"]},
-            {"from": "list", "fresh": True, "title": "b", "expect": "b", "do": []}])
+            {"from": "list", "launch": True, "title": "b", "expect": "b", "do": []}])
         self.assertNotIn("アプリの外から", flows["test_02.yaml"])
         self.assertIn("- stopApp", flows["test_02.yaml"])
 
@@ -1598,7 +1723,7 @@ class Nesting(unittest.TestCase):
 def write_flows_path(items, repo=FIXTURE):
     """plan から フローを書いて、人が読む経路を返す。"""
     out = Path(tempfile.mkdtemp())
-    plan = {"app": "jp.example.App", "repo": str(repo), "items": items}
+    plan = {"app": "jp.example.App", "repo": str(repo), "cases": cases_of(items)}
     with contextlib.redirect_stdout(io.StringIO()) as o:
         flows_of.write_flows(plan, out)
     shutil.rmtree(out)

@@ -7,8 +7,8 @@
 そのマップを前提に書いたものなので、plan が持つ（引数では渡さない）。
 
 証跡は `<出力先>/shots/<端末>/<名前>.png` に撮る。名前は項目の並び順から振る
-（`test_01`, `test_02`, …。explore は items の続きの番号）。**1つのテストケースを複数の端末で
-撮れる**（`--device iphone=<UDID> --device ipad=<UDID>`）。フローは端末によらず1組で、撮影先だけを
+（`test_01`, `test_02`, …。テストケースをまたいで通しで、explore のテストケースもその場の番号）。
+**同じ項目を複数の端末で撮れる**（`--device iphone=<UDID> --device ipad=<UDID>`）。フローは端末によらず1組で、撮影先だけを
 `${SHOTS}` のまま書き、run_flows.py が端末に合わせて埋める。どの端末で撮るか、どこに出すかは
 撮る側の設定で、テストケース（plan）は持たない。
 
@@ -21,31 +21,70 @@
    （manifest は書かない）。組めたら読める経路を出す
 2. 返ってきた項目ごとの行から manifest.json を組む。証跡1枚＝1セクション
 
-plan.json の形。**項目1つ＝ from から do を順に叩いて、1枚撮る。**
+plan.json の形。**plan はテストケースの集合で、項目は必ずどれかのテストケースに属する。**
+**項目1つ＝ from から do を順に叩いて、1枚撮る。**
 
     {"app": "<bundle id>",
      "repo": "<アプリのリポジトリ>",
      "clear_state": false,
-     "items": [
-       {"from": "browse"},
-       {"from": "browse",
-        "do": [{"op": "text:browse.search_field", "runtime": true}]},
-       {"from": "browse",
-        "do": [{"op": "text:browse.search_field", "input": "zzzz"}]},
-       {"from": "browse", "fresh": true,
-        "do": ["tap:browse.book_row.*"]},
-       {"from": "browse",
-        "do": [{"op": "tap:browse.book_row.*", "pick": "貸出中の本"}]},
-       {"from": "browse", "do": ["see:browse.section.recommend"]},
-       {"from": "browse",
-        "do": [{"op": "text:browse.search_field", "input": "猫"},
-               {"op": "see:browse.book_row.*", "input": "猫"}]},
-       {"from": "book_detail",
-        "do": ["tap:book_detail.card_link", "see:text:図書カード"]},
-       {"from": "book_detail", "when": ["ログイン中"],
-        "do": ["tap:book_detail.register_button"]}]}
+     "cases": [
+       {"title": "さがす画面を開くと一覧が出る",
+        "items": [{"from": "browse", "title": "…", "expect": "…"}]},
+       {"title": "キーワードで絞り込める", "relaunch_after": true,
+        "items": [
+          {"from": "browse",
+           "do": [{"op": "text:browse.search_field", "runtime": true}]},
+          {"from": "browse",
+           "do": [{"op": "text:browse.search_field", "input": "zzzz"}]}]},
+       {"title": "一覧から詳細を開ける",
+        "items": [
+          {"id": "open", "from": "browse", "do": ["tap:browse.book_row.*"]},
+          {"from": "book_detail", "do": ["see:book_detail.section.related"],
+           "expect": "{open} で開いた作品の関連作品が並ぶ"}]},
+       {"title": "条件に合う行を開ける",
+        "items": [
+          {"from": "browse",
+           "do": [{"op": "tap:browse.book_row.*", "pick": "貸出中の本"}]}]},
+       {"title": "語を含む行だけが残る", "relaunch_after": true,
+        "items": [
+          {"from": "browse",
+           "do": [{"op": "text:browse.search_field", "input": "猫"},
+                  {"op": "see:browse.book_row.*", "input": "猫"}]}]},
+       {"title": "図書カードを開ける",
+        "items": [
+          {"from": "book_detail",
+           "do": ["tap:book_detail.card_link", "see:text:図書カード"]}]},
+       {"title": "ログイン中に登録できる",
+        "items": [
+          {"from": "book_detail", "when": ["ログイン中"],
+           "do": ["tap:book_detail.register_button"]}]},
+       {"title": "起動するとお知らせが出る", "launch": true,
+        "items": [{"from": "notice_sheet"}]},
+       {"title": "履歴から開き直せる", "explore": "画面 history がマップに無い",
+        "items": [{"from": "browse", "title": "…", "expect": "…"}]}]}
+
   repo      アプリのリポジトリ（必須）。画面マップはその下の screen-map/。
             相対パスなら plan の置き場所から読む。マニフェストにも写す
+
+テストケース（cases の要素）:
+  title     何の機能を確かめるまとまりか（必須。plan の中で重ねない）。
+            マニフェストのセクションの `case` と、レポートの見出しになる
+  items     項目の並び（必須）。**テストケースの中の項目は前の項目に依存して
+            よく、テストケースどうしは依存しない。** 前の項目の結果を見て
+            確かめるものは同じテストケースに入れる
+  relaunch_after  このテストケースが終わったらアプリを起動し直す。**後に
+            状態（入力、絞り込み、開いたキーボード、画面の積み重なり）を
+            残す側が付ける。** 後ろのテストケースは前に何が来るかを知らない。
+            登録・削除のような残るデータの変更は、起動し直しても戻らない
+  launch    このテストケースはアプリを起動し直してから始める。**起動した
+            ときの表示そのもの**（起動するとお知らせが出る）を確かめるとき
+            だけ。きれいな状態から始めたいだけなら、前のテストケースに
+            relaunch_after を付ける
+  explore   経路が組めなかった理由（「画面 history がマップに無い」）。
+            付いたテストケースはフローを持たず、その場にセクションとして
+            並ぶ（sim-driver が探索で撮る）。1項目でも組めなければ付ける
+
+項目（items の要素）:
   from      その項目の操作を始める画面。**項目は経路を持たない** —
             前の項目が終わった画面から from までは、ここで計算して
             繋ぐ（すでに居れば何もしない）
@@ -84,12 +123,11 @@ plan.json の形。**項目1つ＝ from から do を順に叩いて、1枚撮�
   when      項目の前提。マップの `when` の文言をそのまま写す（["ログイン中"]）。
             条件つきの要素と、結果が分かれる操作の枝は、ここに同じ文言が
             あるときだけ使う。意味は読まない — 文字列が一致するかだけ
-  fresh     その項目はアプリを起動し直した直後から始める。**項目の前提で
-            あって、フローの切り方ではない** — 前の項目の状態（絞り込み、
-            変えたデータ）が残ると前提が崩れるときだけ付ける
-  title / expect  確認項目と期待。そのままマニフェストに入る
-  explore   経路が組めなかった項目（from / title / expect / reason）。
-            フローを持たず、末尾にセクションとして並ぶ
+  id        同じテストケースの後ろの項目が、期待の中で `{id}` と書いて
+            この項目を指すための名前（英数字と _ . -）。要るときだけ
+  title / expect  確認項目と期待。そのままマニフェストに入る。expect の
+            `{id}` は「test_04（その項目の title）」に展開される。番号で
+            書かない — 並べ替えや削除でずれる
 
 **フローはスキル側の `.work/flows/<出力先の名前>/` に書き、その場所をマニフェストの `flows` に
 記録する。** run_flows.py はそこから読む。アプリのリポジトリには何も作らない。
@@ -104,7 +142,8 @@ plan.json の形。**項目1つ＝ from から do を順に叩いて、1枚撮�
 `build_report.py` へ直に渡す。確認環境は撮影する端末を決めるまで決まらない。
 
 **`launch` をそのまま持ってくる。** そのフローが自分でアプリを起動するかどうかで、
-**鎖の切れ目**を表す（1本目と plan で `fresh` を付けた項目が `true`）。`run_flows.py` は
+**鎖の切れ目**を表す（1本目と、起動し直すテストケース — `launch` の付いたもの、
+フローで走る直前のテストケースに `relaunch_after` が付いたもの — の頭の項目が `true`）。`run_flows.py` は
 落ちたときにどこまで諦めるかをこれで決め、レビューと判定は**そこでアプリが
 起動し直ることを知らないと証跡を読み違える**（前の項目の状態が続いているのか、
 まっさらなのか）。
@@ -124,8 +163,15 @@ plan.json の形。**項目1つ＝ from から do を順に叩いて、1枚撮�
 **埋める側は正規表現のエスケープをかけない。** 各値がセレクタ（正規表現）に入るか
 inputText に入るかは `input_use` に書いてあり、エスケープは run_flows.py がする。
 
-plan の `explore` は**経路が組めなかった項目**。`flow` を持たないので `run_flows.py` は
-飛ばし、sim-driver が探索で撮る。**末尾に並ぶ** — 自動確認の付かない項目がまとまる。
+plan で `explore` の付いたテストケースは**経路が組めなかったもの**。その項目は `flow` を
+持たないので `run_flows.py` は飛ばし、sim-driver が探索で撮る。**plan の並びのまま、その場に
+並ぶ** — 証跡の番号とレビューの並びを、探索に回したかどうかで動かさない。
+
+**セクションの `case` は、その項目が属するテストケースの題。** 同じ `case` の項目は、後ろの
+項目が前の項目の結果を当てにしている。判定は期待に出てくる前の項目の証跡も読み、sim-driver は
+同じテストケースの中で起動し直さない。テストケースそのもの（`launch` / `relaunch_after` /
+`explore`、どの項目を含むか）はマニフェストの `cases` に並ぶ。レビューの「ここでアプリを
+起動し直す」や、レポートの見出しはここから出す。
 
 なぜスクリプトなのか。一覧の中身（証跡の名前、画面、自動確認のID、フローの
 ファイル名）は flowgen が既に計算したもので、**手で写すとタイポの余地ができる。**
@@ -190,14 +236,15 @@ def main():
     devices = names
 
     plan = flows_of.load_plan(plan_path)
-    items, explore = plan.get("items") or [], plan.get("explore") or []
+    cases = flows_of.read_cases(plan)
+    flowed = any(not c["explore"] for c in cases)
 
     # フローは端末によらず1組。撮影先は ${SHOTS} のままで、run_flows.py が端末ごとに埋める。
     # **置き場はスキル側の .work に固定する。** 呼ぶ側のカレント（アプリのリポジトリ）に
     # 作ると、誰も片付けない。スキル側なら maestrod.py sweep が古いものを消す
     flows = FLOWS / out_dir.resolve().name
-    rows = flows_of.write_flows(plan, flows) if items else []
-    if items:
+    rows = {r["name"]: r for r in (flows_of.write_flows(plan, flows) if flowed else [])}
+    if flowed:
         print()
 
     out = out_dir / "manifest.json"
@@ -209,17 +256,17 @@ def main():
             old = json.loads(out.read_text(encoding="utf-8"))
             kept = {sec.get("name"): sec for sec in old.get("sections", []) if sec.get("name")}
             top = {k: v for k, v in old.items()
-                   if k not in ("sections", "title", "meta", "resume")}
+                   if k not in ("sections", "cases", "title", "meta", "resume")}
         except Exception:
             pass
 
-    # フローのある行 ＋ 探索のぶん。探索は末尾に積む
-    entries = list(rows) + [{"name": flows_of.shot_name(len(items) + n),
-                             "title": it.get("title", ""), "from": it.get("from"),
-                             "fresh": bool(it.get("fresh")), "do": it.get("do") or [],
-                             "when": it.get("when") or [],
-                             "expect": it.get("expect", "")}
-                            for n, it in enumerate(explore, 1)]
+    # plan の並びのまま。探索のテストケースもその場に置く（フローは持たない）
+    entries = [rows[r["name"]] if not c["explore"] else
+               {"name": r["name"], "case": c["title"],
+                "title": r["item"].get("title", ""), "from": r["item"].get("from"),
+                "do": r["item"].get("do") or [], "when": r["item"].get("when") or [],
+                "expect": r["expect"]}
+               for c in cases for r in c["items"]]
 
     sections = []
     for e in entries:
@@ -229,7 +276,7 @@ def main():
             "name": name,                      # 証跡・ダンプ・フローのファイル名。引き継ぎの鍵
             "title": e.get("title", ""),       # 確認項目。plan が正
             "from": e.get("from"),             # 操作を始める画面（plan）
-            "fresh": e.get("fresh", False),    # 起動し直した直後から始める（plan）
+            "case": e.get("case"),             # 属するテストケースの題（plan）。cases を引く鍵
             "do": e.get("do", []),             # 確かめる操作（plan）。レビューで読み上げる
             "screen": e.get("screen"),         # 撮った画面（経路の計算）。探索は撮るまで決まらない
             "expect": e.get("expect", ""),     # 証跡の中で何を確かめるか。plan が正
@@ -258,7 +305,11 @@ def main():
             "result": prev.get("result", "PENDING"),
         })
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(dict(top, repo=plan["repo"], devices=info, flows=str(flows), sections=sections),
+    # テストケースそのもの。レビューの「ここで起動し直す」、sim-driver の起動、レポートの見出し
+    case_list = [{"title": c["title"], "launch": c["launch"], "relaunch_after": c["relaunch_after"],
+                  "explore": c["explore"], "items": [r["name"] for r in c["items"]]} for c in cases]
+    out.write_text(json.dumps(dict(top, repo=plan["repo"], devices=info, flows=str(flows),
+                                   cases=case_list, sections=sections),
                               ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     carried = []
     for sec in sections:
