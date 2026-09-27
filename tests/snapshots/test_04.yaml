@@ -7,6 +7,8 @@ env:
     visible:
       id: '^list$'
     timeout: 10000
+# list: hideKeyboard — 打ったあとに開いたキーボードを閉じる
+- hideKeyboard
 # list: see list.footer — 一覧の末尾
 - scrollUntilVisible:
     element:

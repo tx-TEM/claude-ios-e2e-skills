@@ -204,7 +204,8 @@ def check_elements(sid, scr, f):
         if el.get("in_tree") is False:
             f.breaks.append("{}: {} は in_tree: false（座標が要る）".format(sid, eid))
         if el.get("by") == "label":
-            f.breaks.append("{}: {} はラベル指定（ローカライズで壊れる）".format(sid, eid))
+            # ラベルで押すのは、ID を振れない OS の要素（クリアボタン、タブ、アラートのボタン）に
+            # 決めて使うもの。弱い箇所としては出さない（毎回言われても直しようがない）
             if is_pattern(eid):
                 f.bad.append("{}: {} はラベル指定なのでパターンにできない".format(sid, eid))
         if el.get("when") and el.get("actions"):
@@ -254,6 +255,7 @@ def check_action(mp, sid, a, ids, f):
             where, unknown_keys(a.raw, keys), ", ".join(sorted(keys))))
     if not a.summary:
         f.todo.append("{} に summary が無い".format(where))
+    check_leaves(mp, sid, a, where, f)
 
     exp = a.raw.get("expect")
     items = exp if isinstance(exp, list) else ([exp] if exp is not None else [])
@@ -266,6 +268,38 @@ def check_action(mp, sid, a, ids, f):
     screens = sum(check_expect(mp, a, where, e, ids, f) for e in items)
     if screens > 1 and not any(whens):
         f.bad.append("{} に移る先が2つある（状態で分かれるなら when を書く）".format(where))
+
+
+def check_leaves(mp, sid, a, where, f):
+    """後に残る状態（`leaves`）と、それを既定に戻す操作（`reset`）。#83。
+
+    `reset` は同じ画面の操作を `tap:<id>` の形で指す。その操作自体が状態を残すなら、戻した
+    ことにならない。入力欄に打つ操作（`text`）は、たいてい語と絞り込みを残すので、書いて
+    いなければ書き足す候補に出す（残らないと分かっているなら、書かなくてよい）。
+    """
+    leaves, reset = a.raw.get("leaves"), a.raw.get("reset")
+    if "leaves" in a.raw and not (isinstance(leaves, str) and leaves.strip()):
+        f.bad.append("{} の leaves には、何が残るかを文で書く".format(where))
+    if "reset" not in a.raw:
+        if a.op == "text" and not leaves:
+            f.todo.append("{} に leaves が無い（入力欄の語や絞り込みが後に残るなら書く。"
+                          "既定に戻す操作があれば reset も）".format(where))
+        return
+    if not leaves:
+        f.bad.append("{} の reset は leaves と一緒に書く（何を戻すのかが要る）".format(where))
+    b = next((x for x in mp.screens[sid].actions if "{}:{}".format(x.op, x.target) == reset), None)
+    if b is None:
+        f.bad.append("{} の reset「{}」が {} の操作に無い（同じ画面の操作を tap:<id> の形で書く）"
+                     .format(where, reset, sid))
+        return
+    if b.raw.get("leaves"):
+        f.bad.append("{} の reset「{}」自体が leaves を持つ（戻す操作が状態を残すと、戻したことにならない）"
+                     .format(where, reset))
+    if not b.in_tree():
+        f.bad.append("{} の reset「{}」は in_tree: false（フローでは押せない）".format(where, reset))
+    if b.when():
+        f.todo.append("{} の reset「{}」は条件つき（when: {}）の要素。出ていないと戻せない"
+                      .format(where, reset, b.when()))
 
 
 def check_expect(mp, a, where, e, ids, f):

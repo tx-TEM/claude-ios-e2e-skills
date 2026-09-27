@@ -30,7 +30,7 @@ plan.json の形。**plan はテストケースの集合で、項目は必ずど
      "cases": [
        {"title": "さがす画面を開くと一覧が出る",
         "items": [{"from": "browse", "title": "…", "expect": "…"}]},
-       {"title": "キーワードで絞り込める", "relaunch_after": true,
+       {"title": "キーワードで絞り込める",
         "items": [
           {"from": "browse",
            "do": [{"op": "text:browse.search_field", "runtime": true}]},
@@ -45,7 +45,7 @@ plan.json の形。**plan はテストケースの集合で、項目は必ずど
         "items": [
           {"from": "browse",
            "do": [{"op": "tap:browse.book_row.*", "pick": "貸出中の本"}]}]},
-       {"title": "語を含む行だけが残る", "relaunch_after": true,
+       {"title": "語を含む行だけが残る",
         "items": [
           {"from": "browse",
            "do": [{"op": "text:browse.search_field", "input": "猫"},
@@ -73,14 +73,13 @@ plan.json の形。**plan はテストケースの集合で、項目は必ずど
             よく、テストケースどうしは依存しない。** まとめるのは、後ろの
             項目の期待が前の項目の結果を指すときと、後ろの項目の結果が
             どこから来たかで変わるとき（戻り先など）だけ。それ以外は分ける
-  relaunch_after  このテストケースが終わったらアプリを起動し直す。**後に
-            状態（入力、絞り込み、開いたキーボード、画面の積み重なり）を
-            残す側が付ける。** 後ろのテストケースは前に何が来るかを知らない。
-            登録・削除のような残るデータの変更は、起動し直しても戻らない
   launch    このテストケースはアプリを起動し直してから始める。**起動した
             ときの表示そのもの**（起動するとお知らせが出る）を確かめるとき
-            だけ。きれいな状態から始めたいだけなら、前のテストケースに
-            relaunch_after を付ける
+            だけ。きれいな状態から始めたいだけなら付けない
+
+  **後に残る状態（入力欄の語、絞り込み、セグメントの選択）の後始末は plan に
+  書かない。** 画面マップの操作の `leaves`（残る状態）と `reset`（既定に戻す
+  操作）から、テストケースの後にスクリプトが reset を叩くか、起動し直す
   explore   経路が組めなかった理由（「画面 history がマップに無い」）。
             付いたテストケースはフローを持たず、その場にセクションとして
             並ぶ（sim-driver が探索で撮る）。1項目でも組めなければ付ける
@@ -146,7 +145,7 @@ plan.json の形。**plan はテストケースの集合で、項目は必ずど
 
 **`launch` をそのまま持ってくる。** そのフローが自分でアプリを起動するかどうかで、
 **鎖の切れ目**を表す（1本目と、起動し直すテストケース — `launch` の付いたもの、
-フローで走る直前のテストケースに `relaunch_after` が付いたもの — の頭の項目が `true`）。`run_flows.py` は
+画面マップの `leaves` に `reset` が無くて起動し直すもの — の頭の項目が `true`）。`run_flows.py` は
 落ちたときにどこまで諦めるかをこれで決め、レビューと判定は**そこでアプリが
 起動し直ることを知らないと証跡を読み違える**（前の項目の状態が続いているのか、
 まっさらなのか）。
@@ -172,9 +171,11 @@ plan で `explore` の付いたテストケースは**経路が組めなかっ�
 
 **セクションの `case` は、その項目が属するテストケースの題。** 同じ `case` の項目は、後ろの
 項目が前の項目の結果を当てにしている。判定は期待に出てくる前の項目の証跡も読み、sim-driver は
-同じテストケースの中で起動し直さない。テストケースそのもの（`launch` / `relaunch_after` /
+同じテストケースの中で起動し直さない。テストケースそのもの（`launch` /
 `explore`、どの項目を含むか）はマニフェストの `cases` に並ぶ。レビューの「ここでアプリを
-起動し直す」や、レポートの見出しはここから出す。
+起動し直す」や、レポートの見出しはここから出す。`after` はテストケースの後始末で、
+画面マップの `leaves` / `reset` から flowgen が決めたもの（`relaunch`: 次の頭で起動し直す、
+`resets`: 叩いて戻す操作、`leaves`: 残る状態の文）。何も要らなければ null（#83）。
 
 なぜスクリプトなのか。一覧の中身（証跡の名前、画面、自動確認のID、フローの
 ファイル名）は flowgen が既に計算したもので、**手で写すとタイポの余地ができる。**
@@ -312,8 +313,10 @@ def main():
         })
     out.parent.mkdir(parents=True, exist_ok=True)
     # テストケースそのもの。レビューの「ここで起動し直す」、sim-driver の起動、レポートの見出し
-    case_list = [{"title": c["title"], "launch": c["launch"], "relaunch_after": c["relaunch_after"],
-                  "explore": c["explore"], "items": [r["name"] for r in c["items"]]} for c in cases]
+    # after はテストケースの後始末（画面マップの leaves / reset から flowgen が決めたもの。#83）
+    case_list = [{"title": c["title"], "launch": c["launch"], "explore": c["explore"],
+                  "after": (rows.get(c["items"][-1]["name"]) or {}).get("after"),
+                  "items": [r["name"] for r in c["items"]]} for c in cases]
     out.write_text(json.dumps(dict(top, repo=plan["repo"], devices=info, flows=str(flows),
                                    cases=case_list, sections=sections),
                               ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

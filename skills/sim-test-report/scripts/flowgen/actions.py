@@ -60,7 +60,16 @@ class Scroll:
         return "scroll {}".format(self.direction)
 
 
-Action = Union[Tap, Input, InputLater, Scroll]
+@dataclass
+class HideKeyboard:
+    """キーボードを閉じる。マップの操作ではなく、テストケースの後に状態を戻すときに flowgen が足す（#83）。"""
+    summary: Optional[str] = "打ったあとに開いたキーボードを閉じる"
+
+    def label(self):
+        return "hideKeyboard"
+
+
+Action = Union[Tap, Input, InputLater, Scroll, HideKeyboard]
 
 
 def resolve_action(spec: ActionSpec, target: Optional[str] = None, how: Optional[dict] = None):
