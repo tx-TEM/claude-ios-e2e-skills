@@ -2,14 +2,12 @@ appId: jp.example.App
 env:
   SHOTS: ''
 ---
-# 続き: アプリの外から
-# アプリの外から detail に戻す
-- launchApp:
-    stopApp: false
+# 続き: detail から
 - extendedWaitUntil:
     visible:
       id: '^detail$'
     timeout: 10000
+# detail: detail.review_button が画面にあることは run_flows.py が確かめてある
 # detail: tap detail.review_button — レビューを書く画面を開く → login_alert
 - scrollUntilVisible:
     element:

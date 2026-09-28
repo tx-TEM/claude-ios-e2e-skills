@@ -28,9 +28,3 @@ appId: jp.example.App
     timeout: 10000
 - waitForAnimationToEnd:
     timeout: 3000
-# 次で使う list.row.* が見えるまでスクロールして止める（ここで押すものを決める）
-- scrollUntilVisible:
-    element:
-      id: '^list\.row\..*'
-    direction: DOWN
-    timeout: 60000

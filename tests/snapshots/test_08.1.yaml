@@ -1,0 +1,10 @@
+appId: jp.example.App
+---
+# 続き: アプリの外から
+# アプリの外から detail に戻す
+- launchApp:
+    stopApp: false
+- extendedWaitUntil:
+    visible:
+      id: '^detail$'
+    timeout: 10000

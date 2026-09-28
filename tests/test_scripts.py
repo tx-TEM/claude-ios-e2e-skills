@@ -886,13 +886,14 @@ class Interrupts(unittest.TestCase):
 
     def test_checked_in_pre_flow(self):
         # 値を決める手前で詳細に着く。割れた途中の本でも閉じる
-        # （1本目: 一覧まで / 2本目: 行を押して詳細、戻る / 3本目: 入力）
+        # （1本目: 一覧まで / 2本目: 行があると確かめたあと、見えるまで / 3本目: 行を押して詳細、戻る /
+        #   4本目: 入力）
         rows, flows = write_flows([
             {"from": "list", "title": "a", "expect": "a",
              "do": ["tap:list.row.*", "tap:BackButton",
                     {"op": "text:list.search_field", "runtime": True}]}], self.repo)
-        self.assertEqual([p["decide"] for p in rows[0]["parts"]], [None, "LIST_ROW", "LIST_SEARCH_FIELD"])
-        self.assertIn("runFlow", flows[rows[0]["parts"][1]["flow"]])
+        self.assertEqual([p["decide"] for p in rows[0]["parts"]], [None, None, "LIST_ROW", "LIST_SEARCH_FIELD"])
+        self.assertIn("runFlow", flows[rows[0]["parts"][2]["flow"]])
 
     def test_label_dismiss(self):
         # 閉じるボタンに ID が振れない（UIAlertAction など）ときは、ほかの操作と同じく by: label
@@ -922,8 +923,10 @@ class Interrupts(unittest.TestCase):
             {"from": "review_dialog", "launch": True, "title": "後でで閉じる",
              "expect": "詳細画面に戻っている",
              "do": ["tap:review_dialog.later_button"]}], self.repo)
+        # 閉じるボタンを確かめる手前で割れる（#107）。2本目は被さったダイアログの続きから
+        self.assertEqual(waits(flows["test_01.1.yaml"])[-2:], ["^home$", "^review_dialog$"])
         flow = flows["test_01.yaml"]
-        self.assertEqual(waits(flow)[-4:], ["^home$", "^review_dialog$", "^detail$", "^detail\\.title$"])
+        self.assertEqual(waits(flow), ["^review_dialog$", "^detail$", "^detail\\.title$"])
         self.assertEqual(rows[0]["screen"], "detail")
         # 戻る操作で戻った画面では、自動表示を確かめない（入ったときに出るもの）
         self.assertNotIn("runFlow", flow)
@@ -1093,7 +1096,8 @@ class Flows(unittest.TestCase):
         rows, flows = write_flows([
             {"from": "detail", "title": "a", "expect": "a", "do": ["tap:detail.share_button"]},
             {"from": "detail", "title": "b", "expect": "b", "do": ["tap:detail.follow_button"]}])
-        first, second = flows["test_01.yaml"], flows["test_02.yaml"]
+        # 2つ目は同じ画面で続くが、外から戻す本と、確かめてから押す本に割れる（#107）
+        first, second = flows["test_01.yaml"], flows["test_02.1.yaml"] + flows["test_02.yaml"]
         ext = first[first.index("# アプリの外（safari）に出る"):]
         self.assertNotIn("launchApp", ext)
         self.assertIn("waitForAnimationToEnd", ext)
@@ -1118,7 +1122,9 @@ class Flows(unittest.TestCase):
     def test_pattern_value_can_be_fixed(self):
         rows, flows = write_flows([{"from": "list", "title": "a", "expect": "a",
                                     "do": ["tap:list.row.C++入門"]}])
-        self.assertEqual(rows[0]["parts"], [{"flow": "test_01.yaml", "decide": None}])
+        self.assertEqual(rows[0]["parts"], [{"flow": "test_01.1.yaml", "decide": None},
+                                            {"flow": "test_01.yaml", "decide": None,
+                                             "check": {"id": "list.row.C++入門", "up": False}}])
         self.assertIn("id: '^list\\.row\\.C\\+\\+入門$'", flows["test_01.yaml"])
 
     def test_pattern_on_the_way_is_picked(self):
@@ -1152,7 +1158,7 @@ class Flows(unittest.TestCase):
     def test_same_pattern_twice_gets_two_vars(self):
         rows, flows = write_flows([{"from": "list", "title": "a", "expect": "a",
                                     "do": ["tap:list.row.*", "tap:BackButton", "tap:list.row.*"]}])
-        self.assertEqual([p["decide"] for p in rows[0]["parts"]], [None, "LIST_ROW", "LIST_ROW_2"])
+        self.assertEqual([p["decide"] for p in rows[0]["parts"]], [None, None, "LIST_ROW", "LIST_ROW_2"])
 
 
 class AutoShowAfter(unittest.TestCase):
@@ -1355,6 +1361,161 @@ class CoveredRows(unittest.TestCase):
         out, on = self.run_elements(dump)
         self.assertEqual(on["tab.search"], "○")
         self.assertEqual(on["browse.row.A"], "裏")
+
+
+class CheckAtItemHead(unittest.TestCase):
+    """#107: from まで運ぶ本と、do の本を割り、その間で do の最初の要素を確かめる。"""
+
+    def checks(self, rows):
+        return [p.get("check") for p in rows[0]["parts"]]
+
+    def test_route_and_do_are_split(self):
+        rows, flows = write_flows([{"from": "detail", "do": ["tap:detail.favorite_button"]}])
+        self.assertEqual(self.checks(rows), [None, {"id": "detail.favorite_button", "up": False}])
+        # 経路の本は from に着いたところで終わり、do の操作は後ろの本にだけある
+        self.assertNotIn("favorite_button", flows["test_01.1.yaml"])
+        self.assertIn("tapOn:\n    id: '^detail\\.favorite_button$'", flows["test_01.yaml"])
+
+    def test_same_screen_is_checked_before_the_first_part(self):
+        # 前の項目と同じ画面で続く（経路が無い）なら割らず、その本の前で確かめる
+        rows, _ = write_flows(None, cases=[{"title": "T", "items": [
+            {"from": "list", "title": "a", "expect": "a"},
+            {"from": "list", "do": ["see:list.footer"], "title": "b", "expect": "b"}]}])
+        self.assertEqual([p["check"] for p in rows[1]["parts"]], [{"id": "list.footer", "up": False}])
+
+    def test_scrolled_screen_is_searched_upward_too(self):
+        # 同じテストケースで下まで見た画面に戻って来たら、上も探す
+        rows, _ = write_flows(None, cases=[{"title": "T", "items": [
+            {"from": "list", "do": ["see:list.footer"], "title": "a", "expect": "a"},
+            {"from": "list", "do": ["tap:list.row.C++入門"], "title": "b", "expect": "b"}]}])
+        self.assertEqual(rows[1]["parts"][0]["check"], {"id": "list.row.C++入門", "up": True})
+
+    def test_nothing_to_look_up_by_id_is_not_checked(self):
+        # 要素の無い操作（gestures）と、マップに無い文言は、ダンプの id で探せない
+        rows, _ = write_flows([{"from": "list", "do": ["scroll:down"]},
+                               {"from": "detail", "do": ["tap:detail.share_button", "see:text:図書カード"]}])
+        self.assertEqual(self.checks(rows), [None])
+        # 詳細の共有ボタンは確かめる（経路の途中で行を選ぶ本は、その前に割れている）
+        self.assertEqual(self.checks(rows[1:])[-1], {"id": "detail.share_button", "up": False})
+
+
+class SeekRun(unittest.TestCase):
+    """#107: 項目の頭で、do の最初の要素をダンプを読みながら探す。送っても見えている ID が
+    変わらなければ端で、その項目はそこで諦める（フローの scrollUntilVisible の60秒を払わない）。
+
+    run_item() に check のある本を渡し、画面を読むたびに `self.dumps` を頭から1つずつ返す
+    （尽きたら最後のものを返し続ける）。
+    """
+
+    TOP = (DUMP_HEAD + dump_line(195, 60, "○", "list", "")
+           + dump_line(195, 300, "○", "list.row.こころ", ""))
+    MID = (DUMP_HEAD + dump_line(195, 60, "○", "list", "")
+           + dump_line(195, 300, "○", "list.row.坊っちゃん", ""))
+    FOOTER = MID + dump_line(195, 700, "○", "list.footer", "")
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.out = self.tmp / "out"
+        self.flows = self.tmp / "flows"
+        self.flows.mkdir(parents=True)
+        self.out.mkdir()
+        (self.flows / "test_01.1.yaml").write_text("appId: x\n---\n", encoding="utf-8")
+        (self.flows / "test_01.yaml").write_text("appId: x\nenv:\n  SHOTS: ''\n---\n", encoding="utf-8")
+        self.sec = {"name": "test_01", "flow": "test_01.yaml",
+                    "devices": {"iphone": {"inputs": {}, "picked": {}}},
+                    "desc": "", "note": "", "result": "PENDING"}
+        self.row = {"parts": [{"flow": "test_01.1.yaml", "decide": None},
+                              {"flow": "test_01.yaml", "decide": None,
+                               "check": {"id": "list.footer", "up": False}}],
+                    "input_use": {}, "picks": {}, "sees": {}}
+        self.saved = {k: RF[k] for k in ("sh", "HERE")}
+        RF["HERE"] = self.tmp / "scripts"
+        self.calls, self.dumps = [], [self.TOP]
+
+        def fake_sh(args, quiet=True):
+            self.calls.append(args)
+            if args[0] == "inspect" and len(args) == 3:
+                state = self.tmp / ".work" / "state"
+                state.mkdir(parents=True, exist_ok=True)
+                dump = self.dumps.pop(0) if len(self.dumps) > 1 else self.dumps[0]
+                (state / "last_dump_AAAA.txt").write_text(dump, encoding="utf-8")
+            return 0
+        RF["sh"] = fake_sh
+
+    def tearDown(self):
+        RF.update(self.saved)
+        shutil.rmtree(self.tmp)
+
+    def run_item(self):
+        shots = self.out / "shots" / "iphone"
+        shots.mkdir(parents=True, exist_ok=True)
+        dv = RF["DeviceRun"]("iphone", "AAAA", shots, self.tmp / "replay", self.flows,
+                             self.out / "progress_iphone.log", "jp.example.App")
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            return RF["run_item"](dv, self.sec, self.row, False)
+
+    def swipes(self):
+        """探すために流したスクロールのフロー（向き）。"""
+        return [Path(a[2][1:]).stem.replace("_seek_", "") for a in self.calls
+                if a[0] == "run" and "_seek_" in a[2]]
+
+    def flows_run(self):
+        """走らせた項目の本（run の名前）。"""
+        return [a[3] for a in self.calls if a[0] == "run" and "_seek_" not in a[2]]
+
+    def test_on_screen_needs_no_swipe(self):
+        self.dumps = [self.FOOTER]
+        self.assertEqual(self.run_item(), ("done", None))
+        self.assertEqual(self.swipes(), [])
+        self.assertEqual(self.flows_run(), ["test_01.1", "test_01"])
+
+    def test_in_the_tree_off_screen_is_found(self):
+        # ツリーにあれば、画面外でも次の本の scrollUntilVisible が届く。送らない
+        self.dumps = [self.TOP + dump_line(195, 1400, "×", "list.footer", "")]
+        self.assertEqual(self.run_item(), ("done", None))
+        self.assertEqual(self.swipes(), [])
+
+    def test_found_after_swiping(self):
+        self.dumps = [self.TOP, self.MID, self.FOOTER]
+        self.assertEqual(self.run_item(), ("done", None))
+        self.assertEqual(self.swipes(), ["down", "down"])
+        self.assertEqual(self.flows_run(), ["test_01.1", "test_01"])
+        # スクロールのフローは、項目と同じアプリで1回送るだけ
+        body = self.flows / "_seek_down.yaml"
+        self.assertEqual(body.read_text(encoding="utf-8"), "appId: jp.example.App\n---\n- scroll\n")
+
+    def test_gives_up_at_the_bottom(self):
+        # 送っても見えている ID が変わらない。下の端なので、do の本は走らせずに諦める
+        self.dumps = [self.TOP, self.MID, self.MID]
+        got = self.run_item()
+        self.assertEqual(got, ("failed", "list.footer が画面に無い（下の端まで探した）"))
+        self.assertEqual(self.swipes(), ["down", "down"])
+        self.assertEqual(self.flows_run(), ["test_01.1"])
+        log = (self.out / "progress_iphone.log").read_text(encoding="utf-8")
+        self.assertIn("test_01 撮影できず list.footer が画面に無い", log)
+
+    def test_up_only_on_a_screen_that_may_be_scrolled(self):
+        self.row["parts"][1]["check"]["up"] = True
+        self.dumps = [self.MID, self.MID, self.TOP, self.TOP]
+        got = self.run_item()
+        self.assertEqual(got, ("failed", "list.footer が画面に無い（上下の端まで探した）"))
+        self.assertEqual(self.swipes(), ["down", "up", "up"])
+        self.assertIn("direction: DOWN", (self.flows / "_seek_up.yaml").read_text(encoding="utf-8"))
+
+    def test_growing_list_stops_after_the_limit(self):
+        # 読み込みで伸び続ける一覧は端に着かない。回数で諦める
+        self.dumps = [DUMP_HEAD + dump_line(195, 300, "○", "list.row.{}".format(n), "")
+                      for n in range(RF["SEEK_SWIPES"] + 2)]
+        got = self.run_item()
+        self.assertEqual(got, ("failed", "list.footer が見つからない（{}回送っても端に着かない）"
+                                         .format(RF["SEEK_SWIPES"])))
+        self.assertEqual(len(self.swipes()), RF["SEEK_SWIPES"])
+
+    def test_pattern_target_matches_any_row(self):
+        self.row["parts"][1]["check"]["id"] = "list.row.*"
+        self.dumps = [self.TOP]
+        self.assertEqual(self.run_item(), ("done", None))
+        self.assertEqual(self.swipes(), [])
 
 
 class AutoPickRun(unittest.TestCase):
@@ -1672,13 +1833,16 @@ class Nesting(unittest.TestCase):
 
     def test_pattern_parent_is_chosen_at_run_time(self):
         rows, flows = write_flows([{"from": "recommend", "do": ["see:recommend.more"]}])
-        # 親を選ぶ手前で割る。前の本は親のどれかが見えるまでスクロールして止まる
+        # 親を選ぶ手前で割る。前の本は親のどれかが見えるまでスクロールして止まる。その前に、
+        # 経路の本と、親があるかを確かめる本に割れる（#107）
         self.assertEqual(rows[0]["parts"], [{"flow": "test_01.1.yaml", "decide": None},
+                                            {"flow": "test_01.2.yaml", "decide": None,
+                                             "check": {"id": "recommend.carousel.*", "up": False}},
                                             {"flow": "test_01.yaml", "decide": "RECOMMEND_CAROUSEL"}])
         self.assertEqual(rows[0]["picks"]["RECOMMEND_CAROUSEL"],
                          {"pattern": "recommend.carousel.*", "pick": "", "exclude": []})
         self.assertEqual(rows[0]["inputs"], {})
-        self.assertIn("id: '^recommend\\.carousel\\..*'", flows["test_01.1.yaml"])
+        self.assertIn("id: '^recommend\\.carousel\\..*'", flows["test_01.2.yaml"])
         body = flows["test_01.yaml"]
         self.assertIn("  RECOMMEND_CAROUSEL: ''", body)
         self.assertIn("    id: '^${RECOMMEND_CAROUSEL}$'\n    direction: DOWN\n    centerElement: true", body)
@@ -1694,7 +1858,8 @@ class Nesting(unittest.TestCase):
     def test_in_names_the_parent(self):
         rows, flows = write_flows([{"from": "recommend",
                                     "do": [{"op": "tap:recommend.more", "in": "recommend.carousel.9"}]}])
-        self.assertEqual(len(rows[0]["parts"]), 1)
+        self.assertEqual(len(rows[0]["parts"]), 2)
+        self.assertEqual(rows[0]["parts"][1]["check"], {"id": "recommend.carousel.9", "up": False})
         body = flows["test_01.yaml"]
         self.assertIn("- tapOn:\n    id: '^recommend\\.more$'\n    childOf:\n"
                       "      id: '^recommend\\.carousel\\.9$'", body)
@@ -1711,7 +1876,9 @@ class Nesting(unittest.TestCase):
     def test_child_pattern_is_picked_inside_the_parent(self):
         rows, flows = write_flows([{"from": "recommend", "do": ["tap:recommend.book.*"]}])
         self.assertEqual([p["decide"] for p in rows[0]["parts"]],
-                         [None, "RECOMMEND_CAROUSEL", "RECOMMEND_BOOK"])
+                         [None, None, "RECOMMEND_CAROUSEL", "RECOMMEND_BOOK"])
+        # 項目の頭で確かめるのは、いちばん外の親（横に送る中までは探さない。#107）
+        self.assertEqual(rows[0]["parts"][1]["check"], {"id": "recommend.carousel.*", "up": False})
         self.assertEqual(rows[0]["picks"]["RECOMMEND_BOOK"]["within"], {"var": "RECOMMEND_CAROUSEL"})
         body = flows["test_01.yaml"]
         # 親の値は前の本で決まっているが、この本でも使う
@@ -1721,7 +1888,8 @@ class Nesting(unittest.TestCase):
 
     def test_fixed_parent_needs_no_choice(self):
         rows, flows = write_flows([{"from": "recommend", "do": ["tap:recommend.filter.新着"]}])
-        self.assertEqual(len(rows[0]["parts"]), 1)
+        self.assertEqual(len(rows[0]["parts"]), 2)   # 経路と、親を確かめてから押す本（#107）
+        self.assertEqual(rows[0]["parts"][1]["check"], {"id": "recommend.filter_bar", "up": False})
         body = flows["test_01.yaml"]
         self.assertIn("childOf:\n          id: '^recommend\\.filter_bar$'", body)
         # 押した要素そのものの結果（selected: self）も、同じ親の中を見る
@@ -1862,7 +2030,9 @@ class CaseRunBase:
         self.manifest = json.loads((self.out / "manifest.json").read_text(encoding="utf-8"))
         self.flows = self.tmp / "flows"
         self.calls, self.failing, self.fail_once = [], set(), set()
-        self.dump = FirstVisible.DUMP
+        # 項目の頭で探す要素（#107）も見えている画面。探しに送ると、ダンプが変わらないので端になる
+        self.dump = (FirstVisible.DUMP + dump_line(195, 120, "○", "list.search_field", "")
+                     + dump_line(195, 700, "○", "list.footer", ""))
         self.saved = {k: RF[k] for k in ("sh", "HERE")}
         RF["HERE"] = self.tmp / "scripts"
 
@@ -2136,7 +2306,9 @@ class RetakeRun(CaseRunBase, unittest.TestCase):
         self.assertEqual((stopped, done, lost), (None, 1, []))
         runs = [(c, n, d) for c, n, d, _ in self.calls]
         # 手前の項目は作業用の置き場（replay の下の端末名）に撮り、ダンプは取らない
-        self.assertEqual(runs, [("run", "test_03.1", "iphone"), ("inspect", "test_03.pick1", ""),
+        # 起動し直す本の頭では確かめられないので、起動の本のあとで確かめる（#107）
+        self.assertEqual(runs, [("run", "test_03.1", "iphone"), ("inspect", "test_03.seek1", ""),
+                                ("run", "test_03.2", "iphone"), ("inspect", "test_03.pick2", ""),
                                 ("run", "test_03", "iphone"),
                                 ("run", "test_04", "iphone"), ("inspect", "test_04", "")])
         # テストケースの頭で起動し直す（前のテストケースはなぞらない）
@@ -2180,7 +2352,7 @@ class RetakeRun(CaseRunBase, unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             RF["run_device"](self.manifest, self.out / "manifest.json", self.flows, "iphone", "AAAA",
                              None, ["test_04"], False, True)
-        self.assertEqual(self.runs(), ["test_03.1", "test_03", "test_04"])
+        self.assertEqual(self.runs(), ["test_03.1", "test_03.2", "test_03", "test_04"])
         self.assertIn("# 手で足した待ち", self.body("test_04"))
         self.assertIn("（手で直したフローで）", self.log())
 

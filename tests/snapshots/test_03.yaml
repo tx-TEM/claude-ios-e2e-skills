@@ -7,8 +7,7 @@ env:
     visible:
       id: '^list$'
     timeout: 10000
-# list: hideKeyboard — 打ったあとに開いたキーボードを閉じる
-- hideKeyboard
+# list: list.search_field が画面にあることは run_flows.py が確かめてある
 # list: text list.search_field — 入力が止まると絞り込む
 - scrollUntilVisible:
     element:

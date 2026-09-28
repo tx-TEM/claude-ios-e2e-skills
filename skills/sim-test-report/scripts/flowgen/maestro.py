@@ -11,7 +11,7 @@ from typing import Optional
 from screenmap.screen import BACKWARD, is_pattern, pattern_prefix
 from .actions import HideKeyboard, Input, InputLater, Scroll, Tap
 from .results import Arrive, External, Hidden, Selected, Value, Visible
-from .steps import Act, Await, Enter, Restart, See, Shot, goes_out, stays_out, waits_text
+from .steps import Act, Await, Check, Enter, Restart, See, Shot, goes_out, stays_out, waits_text
 
 from .flowyaml import Comment, Raw, render
 
@@ -162,6 +162,8 @@ def add_reveals(steps, state=None):
             state.clear()
         elif isinstance(st, Await):
             state.forget(st.to)
+        elif isinstance(st, Check):
+            st.up = state.is_scrolled(st.screen)
         elif isinstance(st, Enter):
             out.append(Show(st, st.item, state.is_scrolled(st.screen)))
             state.mark(st.screen)
@@ -420,6 +422,8 @@ def reveal(key, value, center=False, up=False, extra=None):
     時間切れ（落ちない）になり、上向きで見つかる。scrollUntilVisible はスクロールの端を
     検知しない（Orchestra.scrollUntilVisible）ので、この時間切れは上限いっぱいかかる。
     上限を縮めると、長く下までスクロールしたあとで上に戻りきれないので縮めない。
+    **項目の `do` の最初の要素は、ここに来る前に run_flows.py がダンプで探してある**（Check、
+    #107）。無ければそこで諦めるので、確かめたい要素が無いときにこの上限を払うことは無い。
 
     **下を先にする。** 画面は上端から始まるので、`up` の付かない画面と同じく、下にある
     要素はこれまでどおりの速さで見つかる。待ちが増えるのは上にある要素（`up` が無いと
@@ -695,6 +699,10 @@ class FlowWriter:
             self.at = st.to
         elif isinstance(st, Shot):
             self.out.append({"takeScreenshot": "${" + SHOTS_VAR + "}/" + st.name})
+        elif isinstance(st, Check):
+            # 何も叩かない。この本を走らせる前に、run_flows.py がダンプで探してある
+            self.out.append(Comment("{}: {} が画面にあることは run_flows.py が確かめてある".format(
+                st.screen, st.target)))
         elif isinstance(st, Return):
             self.out.append(Comment("アプリの外から {} に戻す".format(st.screen)))
             self.out.append({"launchApp": {"stopApp": False}})
@@ -874,7 +882,7 @@ def shot_context(mp, seg_start, seg_steps):
     """
     at, checked = seg_start, mp.anchor(seg_start)
     for st in seg_steps:
-        if isinstance(st, (Shot, Reveal, Show, Return, Enter)):
+        if isinstance(st, (Shot, Reveal, Show, Return, Enter, Check)):
             continue
         if isinstance(st, Restart):
             at = mp.start
@@ -914,17 +922,21 @@ def split_at_shots(mp, steps, start, launch_first=True):
     return out
 
 
-def split_parts(seg_start, seg_steps):
-    """実行時に値を決めるステップの手前で切る。[(起点, ステップ列), ...]。
+def split_parts(seg_start, seg_steps, launch=False):
+    """実行時に値を決めるステップと、Check の手前で切る。[(起点, ステップ列), ...]。
 
     **値を決めるには、目的の画面に着いていて、選ぶ対象が見えている必要がある。**
     手前までを1本にして先に走らせ、止まったところで画面を見て決める。
     切る箇所ごとに1本増える（途中の一覧で1件選び、着いた先でまた選ぶ、など）。
     操作の直前には Reveal（対象までのスクロール）があるので、それが前の本の最後に残る。
+
+    **Check（#107）は、`from` までの経路を前の本にして切る。** 経路が無ければ（前の項目から
+    同じ画面で続ける）切らずに、その本の頭で確かめる。ただし起動し直す本（`launch`）の頭では
+    切る — 起動する前の画面を確かめても意味が無い。
     """
     parts, cur, at, start = [], [], seg_start, seg_start
     for st in seg_steps:
-        if needs_value(st):
+        if needs_value(st) or (isinstance(st, Check) and (cur or (launch and not parts))):
             parts.append((start, cur))
             cur, start = [], at
         cur.append(st)

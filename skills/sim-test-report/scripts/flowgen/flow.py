@@ -33,10 +33,10 @@ from .maestro import (Return, ScrollState, add_returns, add_reveals, assign_vars
                       var_of)
 from screenmap.map import load_map
 from screenmap.screen import DO_OPS, GESTURES, is_pattern, pattern_prefix
-from .actions import HideKeyboard, resolve_action
+from .actions import HideKeyboard, Scroll, resolve_action
 from .bridge import Route, Unroutable, emit_path, report_problems
 from .results import resolve_result
-from .steps import Act, Restart, See, Shot, nest
+from .steps import Act, Check, Enter, Restart, See, Shot, nest
 
 PLAN_KEYS = {"app", "repo", "clear_state", "cases"}
 CASE_KEYS = {"title", "items", "launch", "explore"}
@@ -324,6 +324,7 @@ class CaseBuild:
     typed: bool
     touched: list                 # テストケースの中で使った leaves のある操作。落ちたときに戻す候補
     ends: dict                    # 項目の名前 → その項目を撮り終えた時点の route.trail の長さ
+    checks: list = field(default_factory=list)   # [(do の最初のステップ, その手前に置く Check)]（#107）
 
 
 def build_case(mp, items, cursor):
@@ -359,7 +360,7 @@ def build_case(mp, items, cursor):
             restart = True     # マップが変わって戻す操作が引けない。起動し直しに倒す
         else:
             _, restart = clean_up(mp, route, steps, specs, cursor.typed, items[0])
-    left, touched, typed, ends = [], [], False, {}
+    left, touched, typed, ends, checks = [], [], False, {}, []
     for n, item in enumerate(items):
         name = item["name"]
         tag = "({}) goto {}".format(name, item["from"])
@@ -368,7 +369,7 @@ def build_case(mp, items, cursor):
             if n == 0 and restart:
                 steps.append(route.restart())
             steps += route.to(item["from"], item["when"])
-            for op, how in item["do"]:
+            for k, (op, how) in enumerate(item["do"]):
                 tag = "({}) do {}".format(name, op)
                 spec, _, _ = resolve(mp, route.at, op)
                 if spec is not None:
@@ -381,7 +382,11 @@ def build_case(mp, items, cursor):
                     left.append((route.at, spec))
                     touched.append((route.at, spec))
                 typed = typed or (spec is not None and spec.op == "text")
+                at = route.at
                 sts, wrong = do_step(mp, route, op, how, item["when"])
+                target = check_target(sts[0]) if k == 0 and sts else None
+                if target:
+                    checks.append((sts[0], Check(at, target, name)))
                 steps += sts
                 # 値の決め方の間違い。経路は組めるので、ほかの間違いもまとめて出す
                 problems += [("call", "({}) {}".format(name, m)) for m in wrong]
@@ -393,7 +398,26 @@ def build_case(mp, items, cursor):
         ends[name] = len(route.trail)
         if problems:
             break
-    return CaseBuild(steps, problems, route.notes, route, left, typed, touched, ends)
+    return CaseBuild(steps, problems, route.notes, route, left, typed, touched, ends, checks)
+
+
+def check_target(st):
+    """項目の頭で、画面にあるかを確かめる要素の id（#107）。確かめないなら None。
+
+    `st` は `do` の最初のステップ。子の要素なら、いちばん外の親（横に送る親の中までは
+    探さない）。マップに無い文言（`see:text:`）、ラベルで指す要素、要素の無い操作
+    （`scroll:down`）は、ダンプの id で探せないので確かめない。
+    """
+    within = st.outer if isinstance(st, Enter) else getattr(st, "within", None) or []
+    if within:
+        return within[0].value or within[0].id
+    if isinstance(st, Enter):
+        return st.target
+    if isinstance(st, See):
+        return None if st.text or st.by_label else st.target
+    if isinstance(st, Act) and not isinstance(st.action, (Scroll, HideKeyboard)):
+        return None if st.action.by_label else st.action.target
+    return None
 
 
 def clean_up(mp, route, steps, left, typed, nxt):
@@ -597,13 +621,18 @@ def render_case(mp, app, clear, cursor, build, timeout=10000):
     打つ文字、パターンの要素のどれを押すか。前の本で目的の画面に着き、対象が
     見えるまでスクロールして止まり、走らせる側が値を決めてから次の本を走らせる。
 
+    **`from` に着いたところでも割る**（Check、#107）。走らせる側が `do` の最初の要素を
+    ダンプで探し、無ければその項目はそこで諦める。本の `check` がその要素。
+
     行は項目ごとに、フローの中身（`flows`: ファイル名 → 中身）と、ここで計算した欄
     （撮った画面・自動確認のID・フローのファイル名・起動し直すか・実行時に決める値）。
 
     **フローは端末によらず同じ書き方。** 撮影先は `${SHOTS}` のまま書き、走らせる側
     （run_flows.py）が端末に合わせて埋める。
     """
-    steps = list(build.steps)
+    # do の最初のステップの手前に Check を挟む。ここでフローを割り、run_flows.py が確かめる（#107）
+    checks = {id(st): ck for st, ck in build.checks}
+    steps = [x for st in build.steps for x in ([checks[id(st)]] if id(st) in checks else []) + [st]]
     if cursor.out and not (steps and isinstance(steps[0], Restart)):
         # 前のテストケースがアプリの外に居るまま終わった。戻してから始める
         steps.insert(0, Return(cursor.out, steps[0].item if steps else None))
@@ -613,7 +642,7 @@ def render_case(mp, app, clear, cursor, build, timeout=10000):
     rows = []
     for seg_start, seg_steps, shot, lch in split_at_shots(mp, steps, cursor.at, launch_first=False):
         names = assign_vars(seg_steps)
-        parts = split_parts(seg_start, seg_steps)
+        parts = split_parts(seg_start, seg_steps, launch=lch)
         files, texts = [], {}
         for k, (p_start, p_steps) in enumerate(parts):
             last = k == len(parts) - 1
@@ -622,7 +651,11 @@ def render_case(mp, app, clear, cursor, build, timeout=10000):
                                 names=names)
             fname = shot + ".yaml" if last else "{}.{}.yaml".format(shot, k + 1)
             texts[fname] = flow
-            files.append({"flow": fname, "decide": var_of(p_steps[0], names) if k > 0 else None})
+            head = p_steps[0] if p_steps else None
+            files.append({"flow": fname,
+                          "decide": var_of(head, names) if k > 0 and needs_value(head) else None})
+            if isinstance(head, Check):
+                files[-1]["check"] = {"id": head.target, "up": head.up}
         screen, checked = shot_context(mp, seg_start, seg_steps)
         uses = runtime_uses(seg_steps, names)
         picks = runtime_picks(mp, seg_steps, names)

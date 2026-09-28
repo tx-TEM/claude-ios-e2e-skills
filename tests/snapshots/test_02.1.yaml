@@ -5,6 +5,7 @@ appId: jp.example.App
     visible:
       id: '^list$'
     timeout: 10000
+# list: list.search_field が画面にあることは run_flows.py が確かめてある
 # 次で使う list.search_field が見えるまでスクロールして止める（ここで打つ文字を決める）
 - scrollUntilVisible:
     element:

@@ -81,6 +81,11 @@
 1件に絞る。値はアクセシビリティ ID そのもの（ダンプの id の欄）。条件つきの選択は
 `<ID>#2`（見えている同じ ID の行のうち上から2件目）とも書ける。
 
+**`from` に着いたところでもフローは割れていて（本の `check`）、`do` の最初の要素をここで
+探す**（`seek()`、#107）。着いた画面が意図した状態になっていないと要素がそもそも無く、フローの
+`scrollUntilVisible` は端を検知しないので上限の60秒を払ってから落ちる。ダンプを読みながら1回ずつ
+送り、見えている ID が変わらなければ端として、その項目は撮れなかったことにして次へ進む。
+
 **見たい行が含む語（`see` の `runtime`）は、走らせる前に今の画面で確かめる**（`contains_problem()`、#85）。
 行の ID をまるごと書いた、または語が今の画面のどの行の ID にも入っていないなら、走らせずに止めて
 表示中の行を並べる。フローは必ず落ちるうえ、落ちると「撮れなかった」項目として別の判断に回る。
@@ -385,6 +390,67 @@ def contains_problem(dump, see, value):
             "この中の行の ID の一部を書く — 打った語と同じとは限らない（作者で絞り込めば、行の ID は作品名）")
 
 
+SEEK_SWIPES = 20   # 1つの向きに送る回数の上限。理由は seek()
+
+
+def seek_flow(dv, direction):
+    """1回だけスクロールするフロー（seek() が使う）。向きは FlowWriter.scroll と同じ書き方。"""
+    f = dv.fdir / f"_seek_{direction}.yaml"
+    body = "- scroll\n" if direction == "down" else "- swipe:\n    direction: DOWN\n"
+    f.write_text(f"appId: {dv.app}\n---\n{body}", encoding="utf-8")
+    return f
+
+
+def seek(dv, name, k, check):
+    """`do` の最初の要素（`check["id"]`）を、ダンプを読みながら探す（#107）。見つかれば None、
+    無ければ理由の文。
+
+    着いた画面が意図した状態になっていない（ログインしていない、データが無い）と、確かめたい
+    要素がそもそも無い。フローの `scrollUntilVisible` はスクロールの端を検知しないので、無い
+    要素では上限の60秒（上にも探すなら120秒）をまるごと払ってから落ちる。ここでは:
+
+    - **ダンプにあれば、画面外でも見つかったとする。** ツリーにある要素なら、次の本の頭の
+      `scrollUntilVisible` がすぐに届く
+    - 無ければ1回スクロールしては読み直す。**画面の中に見えている ID が送る前と同じなら端。**
+      上にも探すのは、スクロールされたままかもしれない画面（`check["up"]`）だけ。前に進む
+      遷移で着いた画面は一番上から始まる
+    - 読み込みで伸び続ける一覧では端に着かないので、1つの向きに SEEK_SWIPES 回で諦める。
+      1回（送って読み直す）は実測で約3秒なので、20回で約60秒 — フローの上限と同じ時間で、
+      届く距離は長い（`scrollUntilVisible` は60秒で8〜12回）。30回にしたら、伸び続ける一覧で
+      約90秒かかり、今までより遅くなった（AozoraReader のさがす画面）
+
+    画面を読めない・スクロールのフローが落ちたときは、確かめずに次の本に任せる（今までどおり
+    `scrollUntilVisible` で探す）。
+    """
+    target = check["id"]
+    prefix = target[:-1] if target.endswith("*") else None
+
+    def found(dump):
+        return any(r["id"] == target or (prefix is not None and r["id"].startswith(prefix)
+                                         and len(r["id"]) > len(prefix))
+                   for r in dump_rows(dump))
+
+    dump = read_dump(dv.udid, f"{name}.seek{k}")
+    if dump is None or found(dump):
+        return None
+    seen = set(shown_ids(dump))
+    for direction in ("down", "up") if check.get("up") else ("down",):
+        flow = seek_flow(dv, direction)
+        for _ in range(SEEK_SWIPES):
+            if sh(["run", dv.udid, "@" + str(flow), f"{name}.seek{k}", str(dv.scratch)]) != 0:
+                return None
+            dump = read_dump(dv.udid, f"{name}.seek{k}")
+            if dump is None or found(dump):
+                return None
+            now = set(shown_ids(dump))
+            if now == seen:
+                break                                 # 送っても変わらない。この向きの端
+            seen = now
+        else:
+            return f"{target} が見つからない（{SEEK_SWIPES}回送っても端に着かない）"
+    return f"{target} が画面に無い（{'上下' if check.get('up') else '下'}の端まで探した）"
+
+
 def forget(shots, sec):
     """その項目の前の回の証跡・ダンプを消し、判定を PENDING に戻す。"""
     for ext in (".png", ".txt"):
@@ -397,8 +463,8 @@ def forget(shots, sec):
 class DeviceRun:
     """1台ぶんを撮るときの置き場。run_item() に渡す。"""
 
-    def __init__(self, device, udid, shots, scratch, fdir, log):
-        self.device, self.udid = device, udid
+    def __init__(self, device, udid, shots, scratch, fdir, log, app=None):
+        self.device, self.udid, self.app = device, udid, app
         self.shots, self.scratch, self.fdir, self.log = shots, scratch, fdir, log
 
     def logline(self, text):
@@ -410,7 +476,8 @@ def run_item(dv, sec, row, replay, first=0):
     """1項目のフローを、`first` 本目から順に走らせる。("done", None) / ("failed", 理由) / ("stopped", 何本目か)。
 
     `row` はその項目を組んだ行（flowgen の render_case()）。`parts` を順に走らせ、値を決める本の
-    前で値を決める（picks / sees / input_use）。
+    前で値を決める（picks / sees / input_use）。`check` のある本の前では、`do` の最初の要素が
+    画面にあるかを確かめ、無ければその項目はそこで諦める（seek()、#107）。
     """
     device, udid, logline = dv.device, dv.udid, dv.logline
     shots, fdir = dv.shots, dv.fdir
@@ -420,11 +487,17 @@ def run_item(dv, sec, row, replay, first=0):
     dev["picked"] = {} if first == 0 else dev.get("picked") or {}
     picks, sees, uses = row["picks"], row["sees"], row["input_use"]
     notes = {}   # 同じ名前の行があったときの、何件目を押したか
-    parts = [(p["flow"], p.get("decide")) for p in row["parts"]]
+    parts = [(p["flow"], p.get("decide"), p.get("check")) for p in row["parts"]]
     for k in range(first, len(parts)):
-        flow_name, decide = parts[k]
+        flow_name, decide, check = parts[k]
         last = k == len(parts) - 1
         flow = fdir / flow_name
+        if check:
+            why = seek(dv, name, k, check)
+            if why:
+                logline(f"{line} 撮影できず {why}")
+                print(f"{line} {why}", file=sys.stderr)
+                return ("failed", why)
         if decide:
             pk = picks.get(decide)
             given = (dev.get("inputs") or {}).get(decide)
@@ -561,7 +634,7 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, only=Non
             sys.exit(f"再開先 {resume_name} が見つからない。ある名前: {', '.join(names)}")
         runs = runs[at:]
 
-    dv = DeviceRun(device, udid, shots, scratch, fdir, log)
+    dv = DeviceRun(device, udid, shots, scratch, fdir, log, plan["app"])
     logline = dv.logline
 
     if prepare:

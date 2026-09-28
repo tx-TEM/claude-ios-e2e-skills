@@ -160,6 +160,26 @@ class Shot:
 
 
 @dataclass
+class Check:
+    """`from` に着いたところで、`do` の最初の要素が画面にあるかを run_flows.py が確かめる（#107）。
+
+    **フローはここで割る。** 前の本が `from` まで運び、run_flows.py がダンプを読んで `target` を
+    探してから次の本（`do` の操作と撮影）を走らせる。着いた画面が意図した状態になって
+    いない（ログインしていない、データが無い）と、確かめたい要素がそもそも無い。フローの
+    `scrollUntilVisible` はスクロールの端を検知しないので、無い要素では上限の60秒をまるごと
+    払う。ダンプなら、送る前後で見えている ID が変わらないことで端が分かる。
+
+    `target` は要素の id（パターンなら `*` で終わる）。子の要素なら、いちばん外の親。
+    横に送る親の中までは探さない（それはフローの `reveal_within()` がする）。
+    """
+    screen: str
+    target: str
+    item: Optional[str] = None
+    up: bool = False                  # 下の端で見つからなければ上も探すか（maestro.add_reveals が決める）
+    to = None
+
+
+@dataclass
 class Restart:
     """アプリを起動し直す（起動し直すテストケースの頭）。起点に戻る。"""
     item: Optional[str] = None
