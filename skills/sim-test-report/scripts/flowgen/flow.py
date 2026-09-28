@@ -1,4 +1,4 @@
-"""plan.json から、項目ごとの Maestro のフローを作る（manifest.py から呼ぶ）。plan の形は manifest.py --help。
+"""plan.json から、項目ごとの Maestro のフローを作る。plan の形は manifest.py --help。
 
 plan はテストケース（`cases`）の集合で、項目は必ずどれかのテストケースに属する。
 項目1つ＝「`from` から `do` を順に叩いて、1枚撮る」。**項目は経路を持たない。**
@@ -6,23 +6,37 @@ plan はテストケース（`cases`）の集合で、項目は必ずどれか�
 ここがするのは、項目の `do` をマップの操作に引き当ててステップにすることと、
 できたステップ列を maestro.py でフローに書くこと。
 
-  plan の項目 ──→ build_steps() ──→ ステップ列 ──→ write_flows() ──→ フロー（撮影ごとに1本）
+**フローはテストケースごとに、走らせる直前に組む。** 途中で1本落ちても、落ちた地点の画面から
+次のテストケースを組めるように。テストケースをまたいで持ち越すもの（居る画面、履歴、
+スクロール、アプリの外に居るか、後に残した状態）は `Cursor` に持たせて受け渡す。
+
+  plan の項目 ─→ build_case() ─→ ステップ列 ─→ render_case() ─→ フロー（撮影ごとに1本）＋次の Cursor
+  （1テストケース）├ 頭: 前のテストケースの後始末（clean_up）か、起動し直し
                    ├ 項目の間: bridge.py（Route.to）
                    └ 項目の do: do_step()
+
+呼ぶのは2か所。
+
+- manifest.py（手順0）: `plan_rows()`。テストケースごとに起動直後の画面から組めるかを確かめる
+- run_flows.py（手順1）: `build_case()` と `render_case()`。前のテストケースが終わった状態から組む
 """
 import json
 import re
 import sys
 from pathlib import Path
 
-from .maestro import (add_returns, add_reveals, assign_vars, emit_flow, runtime_picks, runtime_sees, runtime_uses,
-                      shot_context, split_at_shots, split_parts, var_of)
+from dataclasses import dataclass, field
+from typing import Optional
+
+from .maestro import (Return, ScrollState, add_returns, add_reveals, assign_vars, emit_flow, needs_value,
+                      runtime_picks, runtime_sees, runtime_uses, shot_context, split_at_shots, split_parts,
+                      var_of)
 from screenmap.map import load_map
 from screenmap.screen import DO_OPS, GESTURES, is_pattern, pattern_prefix
 from .actions import HideKeyboard, resolve_action
 from .bridge import Route, Unroutable, emit_path, report_problems
 from .results import resolve_result
-from .steps import Act, See, Shot, nest
+from .steps import Act, Restart, See, Shot, nest
 
 PLAN_KEYS = {"app", "repo", "clear_state", "cases"}
 CASE_KEYS = {"title", "items", "launch", "explore"}
@@ -183,7 +197,7 @@ def read_items(plan):
 
     `restart` が真の項目は、アプリを起動し直した直後から始める。**テストケースの頭にしか
     立たない** — そのテストケースに `launch` があるとき。後に残った状態で起動し直すかは、
-    ここではなく build_steps() が画面マップの `leaves` / `reset` から決める。テストケースの
+    ここではなく build_case() が画面マップの `leaves` / `reset` から決める。テストケースの
     途中で起動し直すと、前の項目を当てにしている項目の前提が消える。
     """
     out = []
@@ -234,43 +248,125 @@ def read_in(v):
     return False
 
 
+# ---------- テストケースをまたいで持ち越すもの ----------
+
+@dataclass
+class Cursor:
+    """前のテストケースが終わった状態。次のテストケースはここから組む。
+
+    - `at` / `stack`: 居る画面と、歩いてきた履歴（bridge.py の Route と同じもの）
+    - `scroll`: どの画面がスクロールされているかもしれないか（maestro.py の ScrollState）
+    - `out`: アプリの外に居るまま終わったなら、戻す画面。次のテストケースの頭で戻す
+    - `restart`: 次のテストケースの頭で起動し直す
+    - `left` / `typed`: 後に残した状態（画面マップの `leaves` のある操作を [(画面, 操作id)]）と、
+      入力欄に打ったか。次のテストケースの頭で `reset` を叩いてキーボードを閉じる（clean_up）。
+      戻せなければ、そこで起動し直す
+    - `recovered`: 前のテストケースのフローが落ち、落ちた地点の画面から繋ぐ。頭の項目が
+      落ちたら、繋ぎ方が悪かったのかもしれないので、起動し直してもう1回だけ走らせる
+
+    **JSON にできる形だけで持つ。** 入力が未定で止まったとき、そのテストケースを組んだ
+    状態をマニフェストに書いておき、叩き直したときに同じフローを組み直す。
+    """
+    at: str
+    stack: list
+    scroll: ScrollState = field(default_factory=ScrollState)
+    out: Optional[str] = None
+    restart: bool = False
+    left: list = field(default_factory=list)
+    typed: bool = False
+    recovered: bool = False
+
+    @classmethod
+    def fresh(cls, mp):
+        """何も走らせていない。起動から始める。"""
+        return cls(mp.start, [mp.start], ScrollState(), restart=True)
+
+    def to_json(self):
+        return {"at": self.at, "stack": list(self.stack), "scroll": self.scroll.to_json(),
+                "out": self.out, "restart": self.restart, "left": [list(x) for x in self.left],
+                "typed": self.typed, "recovered": self.recovered}
+
+    @classmethod
+    def from_json(cls, d):
+        return cls(d["at"], list(d["stack"]), ScrollState.from_json(d.get("scroll")), d.get("out"),
+                   bool(d.get("restart")), [tuple(x) for x in d.get("left") or []],
+                   bool(d.get("typed")), bool(d.get("recovered")))
+
+
+def op_id(spec):
+    return "{}:{}".format(spec.op, spec.target)
+
+
+def flow_cases(plan):
+    """フローで撮るテストケースの並び。[{title, items, next}]。`items` は read_items() の行、
+    `next` は次のフローで撮るテストケースの頭の項目（無ければ None）。後始末をするか
+    （次が起動し直すなら要らない）を決めるのに使う。"""
+    out = []
+    for item in read_items(plan):
+        if not out or out[-1]["title"] != item["case"]:
+            out.append({"title": item["case"], "items": [], "next": None})
+        out[-1]["items"].append(item)
+    for k in range(len(out) - 1):
+        out[k]["next"] = out[k + 1]["items"][0]
+    return out
+
+
 # ---------- 項目をステップにする ----------
 
-def build_steps(mp, items):
-    """項目を順にステップ列にする。(ステップ列, 組めなかった理由, 補足, テストケースの後始末)。
+@dataclass
+class CaseBuild:
+    """1テストケースを組んだ結果。"""
+    steps: list
+    problems: list
+    notes: list
+    route: object                 # 組み終えたところの Route（居る画面・履歴・trail）
+    left: list                    # 最後まで走ったときに後に残るもの [(画面, 操作の定義)]
+    typed: bool
+    touched: list                 # テストケースの中で使った leaves のある操作。落ちたときに戻す候補
+    ends: dict                    # 項目の名前 → その項目を撮り終えた時点の route.trail の長さ
 
-    項目ごとに: `restart` なら起動し直す → bridge.py で `from` まで繋ぐ → `do` を1つずつ
-    ステップにする → 撮る。**組めなかったらそこで止める**（先の項目は、手前の項目が
-    終わった画面を前提にしているので、組んでも意味が無い）。
+
+def build_case(mp, items, cursor):
+    """1テストケースの項目を順にステップ列にする（CaseBuild）。`cursor` の状態から始める。
+
+    頭で、前のテストケースが残したものを片付ける（clean_up）。起動し直すテストケース
+    （`launch`）や、`cursor.restart` なら、代わりに起動し直す。そのあと項目ごとに:
+    bridge.py で `from` まで繋ぐ → `do` を1つずつステップにする → 撮る。**組めなかったら
+    そこで止める**（先の項目は、手前の項目が終わった画面を前提にしているので、組んでも
+    意味が無い）。
 
     **テストケースの後始末は画面マップが決める**（#83）。テストケースの `do` で、マップに
-    `leaves`（後に残る状態）のある操作を使ったら、そのテストケースを撮り終えたあとに:
+    `leaves`（後に残る状態）のある操作を使ったら、次のテストケースの頭で（clean_up）:
 
     - 全部に `reset`（既定に戻す操作）があれば、その画面まで繋いで `reset` を叩く
-    - `reset` の無いものが1つでもあれば、次のテストケースの頭で起動し直す
+    - `reset` の無いものが1つでもあれば、起動し直す
     - `reset` まで経路が組めなければ、起動し直しに倒す
     - **テストケースの中ですでに `reset` の操作を叩いていたら、その `leaves` は片付いている。**
       後始末には入れない（クリアで絞り込みを解除するテストケース、など）
 
-    **キーボードは、そのテストケースで入力欄に打っていれば最後に閉じる**（`hideKeyboard`）。
-    `reset` を叩いたならそのあと。戻す状態が無くても閉じる（テストケースの中でクリアして
-    終わった、打った操作にマップの `leaves` が無い、など）。テストケースの中の項目の間では
-    閉じない — 後ろの項目が、打ったあとにキーボードのキー（検索キー）を押すことがある。
-
-    次のテストケースがもともと起動し直す（`launch`）なら何もしない。最後の
-    テストケースの後も何もしない。後始末は {テストケースの題: {"relaunch", "resets", "leaves"}} で
-    返し、マニフェストの `cases` に載る（レビューで「ここで〜する」と読み上げる）。
+    **キーボードは、そのテストケースで入力欄に打っていれば、次のテストケースの頭で閉じる**
+    （`hideKeyboard`）。`reset` を叩いたならそのあと。戻す状態が無くても閉じる（テスト
+    ケースの中でクリアして終わった、打った操作にマップの `leaves` が無い、など）。テスト
+    ケースの中の項目の間では閉じない — 後ろの項目が、打ったあとにキーボードのキー
+    （検索キー）を押すことがある。
     """
-    route, steps, problems, afters = Route(mp), [], [], {}
-    left, typed, restart_next = [], False, False
+    route = Route(mp, cursor.at, cursor.stack)
+    steps, problems = [], []
+    restart = cursor.restart or items[0]["restart"]
+    if not restart and (cursor.left or cursor.typed):
+        specs = [(sid, resolve(mp, sid, op)[0]) for sid, op in cursor.left]
+        if any(spec is None for _, spec in specs):
+            restart = True     # マップが変わって戻す操作が引けない。起動し直しに倒す
+        else:
+            _, restart = clean_up(mp, route, steps, specs, cursor.typed, items[0])
+    left, touched, typed, ends = [], [], False, {}
     for n, item in enumerate(items):
         name = item["name"]
         tag = "({}) goto {}".format(name, item["from"])
-        first = len(steps)
+        first = 0 if n == 0 else len(steps)
         try:
-            if (item["restart"] or restart_next) and steps:
+            if n == 0 and restart:
                 steps.append(route.restart())
-            restart_next = False
             steps += route.to(item["from"], item["when"])
             for op, how in item["do"]:
                 tag = "({}) do {}".format(name, op)
@@ -279,34 +375,30 @@ def build_steps(mp, items):
                     # テストケースの中で reset の操作をもう叩いたなら、その状態はもう戻っている。
                     # 後始末でもう一度叩くと、戻した結果その要素が消えている（空の入力欄では
                     # クリアボタンが出ない）ことがあり、そこで落ちる
-                    done = "{}:{}".format(spec.op, spec.target)
+                    done = op_id(spec)
                     left = [(sid, l) for sid, l in left if not (sid == route.at and l.reset == done)]
                 if spec is not None and spec.leaves:
                     left.append((route.at, spec))
+                    touched.append((route.at, spec))
                 typed = typed or (spec is not None and spec.op == "text")
                 sts, wrong = do_step(mp, route, op, how, item["when"])
                 steps += sts
                 # 値の決め方の間違い。経路は組めるので、ほかの間違いもまとめて出す
                 problems += [("call", "({}) {}".format(name, m)) for m in wrong]
             steps.append(Shot(name))
-            if item.get("case_last"):
-                nxt = items[n + 1] if n + 1 < len(items) else None
-                after, restart_next = clean_up(mp, route, steps, left, typed, nxt)
-                if after:
-                    afters[item["case"]] = after
-                left, typed = [], False
         except Unroutable as e:
             problems += [(kind, "{}: {}".format(tag, msg)) for kind, msg in e.problems]
         for st in steps[first:]:
             st.item = name
+        ends[name] = len(route.trail)
         if problems:
             break
-    return steps, problems, route.notes, afters
+    return CaseBuild(steps, problems, route.notes, route, left, typed, touched, ends)
 
 
 def clean_up(mp, route, steps, left, typed, nxt):
-    """テストケースの後始末（build_steps の説明）。(マニフェストに載せる後始末, 次の頭で起動し直すか)。
-    steps には `reset` と、キーボードを閉じるステップを足す。"""
+    """前のテストケースの後始末（build_case の説明）。(マニフェストに載せる後始末, 起動し直すか)。
+    steps には `reset` と、キーボードを閉じるステップを足す。`nxt` は後始末のあとに始める項目。"""
     if nxt is None or nxt["restart"]:
         return None, False
     if not left:
@@ -325,6 +417,9 @@ def clean_up(mp, route, steps, left, typed, nxt):
         for sid, op in resets:
             steps += route.to(sid)
             sts, _ = do_step(mp, route, op, {}, ())
+            if any(needs_value(st) for st in sts):
+                # 戻す操作に走らせるときに決める値が要る（パターンの要素など）。後始末ではフローを割らない
+                raise Unroutable([("call", "reset に値が要る")])
             steps += sts
         if typed:
             steps.append(Act(route.at, HideKeyboard(), []))
@@ -334,6 +429,55 @@ def clean_up(mp, route, steps, left, typed, nxt):
         route.at, route.stack = at, stack
         return {"relaunch": True, "resets": [], "leaves": leaves}, True
     return {"relaunch": False, "resets": [op for _, op in resets], "leaves": leaves}, False
+
+
+def stack_at(build, name, screen):
+    """フローが落ちたあと、落ちた地点の画面 `screen` に積まれていた履歴。
+
+    組んだときに居た画面と履歴（route.trail）を、落ちた項目 `name` を撮り終えるところまで
+    後ろから見て、`screen` に居たときのものを採る。**組んだ予定のどこにも無い画面なら、
+    その画面だけ** — どこから来たか分からないので、戻る操作が要る経路は組めなくなる
+    （組めなければ起動し直しに倒す）。
+    """
+    trail = build.route.trail[:build.ends.get(name, len(build.route.trail))]
+    for at, stack in reversed(trail):
+        if at == screen:
+            return list(stack)
+    return [screen]
+
+
+def screen_at(mp, ids):
+    """画面に出ている ID の並びから、居る画面を決める。(画面, anchor が見えている画面の並び)。
+
+    **anchor が見えている画面がちょうど1つのときだけ決める。** 無い（アラート、システムの
+    ダイアログ、アプリの外）か、2つ以上ある（シートの下に元の画面の anchor が残る、など）
+    なら None で、呼ぶ側は起動し直す。
+    """
+    def hit(anchor):
+        if anchor.endswith("*"):
+            return any(i.startswith(anchor[:-1]) for i in ids)
+        return anchor in ids
+    hits = sorted(sid for sid, scr in mp.screens.items() if scr.anchor and hit(str(scr.anchor)))
+    return (hits[0] if len(hits) == 1 else None), hits
+
+
+def recovered(mp, build, name, screen):
+    """落ちたあと、次のテストケースをどこから組むか（Cursor）。`screen` は落ちた地点の画面
+    （決まらなければ None）。
+
+    - 画面が決まらなければ、起動し直す
+    - 決まれば、その画面と、そこに積まれていた履歴（stack_at）から繋ぐ。スクロールは
+      分からないので、どの画面も「スクロールされているかもしれない」とみなす
+    - 後に残したかもしれないもの（そのテストケースで使った `leaves` のある操作を全部）は、
+      次のテストケースの頭で `reset` を叩いてみる。どこで落ちたかで、もう叩いたかは変わる
+      ので全部を対象にし、叩けなければ（頭の項目が落ちたら）起動し直してもう1回走らせる
+    """
+    if screen is None:
+        return Cursor(mp.start, [mp.start], ScrollState(), restart=True)
+    left = list(dict.fromkeys((sid, op_id(spec)) for sid, spec in build.touched))
+    return Cursor(screen, stack_at(build, name, screen), ScrollState(unknown=True), None, False,
+                  left, build.typed or any(spec.op == "text" for _, spec in build.touched),
+                  recovered=True)
 
 
 def resolve(mp, at, wanted):
@@ -442,57 +586,43 @@ def branch_of(action, at, given):
 
 # ---------- フローに書く ----------
 
-def write_flows(plan, out_dir, timeout=10000):
-    """plan.json の項目ごとに Maestro のフローを out_dir に書き、項目ごとの行を返す。
+def render_case(mp, app, clear, cursor, build, timeout=10000):
+    """組んだテストケース（CaseBuild）を、撮影ごとのフローにする。(項目ごとの行, 次の Cursor)。
 
     **項目（撮影）ごとに1本ずつ。** 走らせる側は順に run して inspect するだけで、
-    証跡と同名のダンプが揃う。2本目以降は前の続き（起動し直さない）。
-    標準出力には読める経路を出す（レビューの2段目）。組めなければ理由を出して
-    終了コード 2 で終わり、何も書かない。
+    証跡と同名のダンプが揃う。2本目以降は前の続き（起動し直さない）。テストケースの
+    頭の本は、`cursor` の画面からの続きか、起動し直し（`Restart` が頭にあれば）。
 
     **実行時に値を決める操作があれば、項目のフローをその手前で割る**（`parts`）。
     打つ文字、パターンの要素のどれを押すか。前の本で目的の画面に着き、対象が
     見えるまでスクロールして止まり、走らせる側が値を決めてから次の本を走らせる。
 
-    返す行は、plan の項目の欄（`title` / `expect` / `from`）と、ここで計算した欄
-    （撮った画面・自動確認のID・フローのファイル名・起動し直すか・実行時に決める値）を
-    1つにしたもの。呼ぶ側が plan と突き合わせずに済むように。
+    行は項目ごとに、フローの中身（`flows`: ファイル名 → 中身）と、ここで計算した欄
+    （撮った画面・自動確認のID・フローのファイル名・起動し直すか・実行時に決める値）。
 
-    **フローは端末によらず1組。** 撮影先は `${SHOTS}` のまま書き、走らせる側
-    （run_flows.py）が端末に合わせて埋める。経路も操作も端末で変わらない。
+    **フローは端末によらず同じ書き方。** 撮影先は `${SHOTS}` のまま書き、走らせる側
+    （run_flows.py）が端末に合わせて埋める。
     """
-    items = read_items(plan)
-    app, clear = plan.get("app"), bool(plan.get("clear_state"))
-    if not items:
-        sys.exit("plan にフローで撮る項目が無い（全テストケースが explore ならフローは要らない）")
-    if not app:
-        sys.exit("plan に app（bundle id）が要る（xcrun simctl listapps <UDID> で調べる）")
-    mp = load_map(plan.get("repo"))
-    steps, problems, notes, afters = build_steps(mp, items)
-    if problems:
-        report_problems(problems)
-        sys.exit(2)
-
-    by_shot = {row["name"]: (case, row) for case in read_cases(plan) for row in case["items"]}
-    d = Path(out_dir)
-    d.mkdir(parents=True, exist_ok=True)
-    # 前の回のフローが残らないように、書く前に消す（plan.json は残す）
-    for old in d.glob("*.yaml"):
-        old.unlink()
-    written = []
-    # 押す前のスクロール（Reveal）と、外から戻す操作（Return）を挟んでから切る。経路の表示（emit_path）は挟む前の steps で出す
-    for seg_start, seg_steps, shot, lch in split_at_shots(mp, add_returns(add_reveals(steps)), None):
+    steps = list(build.steps)
+    if cursor.out and not (steps and isinstance(steps[0], Restart)):
+        # 前のテストケースがアプリの外に居るまま終わった。戻してから始める
+        steps.insert(0, Return(cursor.out, steps[0].item if steps else None))
+    scroll = cursor.scroll.copy()
+    # 押す前のスクロール（Reveal）と、外から戻す操作（Return）を挟んでから切る
+    steps, out = add_returns(add_reveals(steps, scroll))
+    rows = []
+    for seg_start, seg_steps, shot, lch in split_at_shots(mp, steps, cursor.at, launch_first=False):
         names = assign_vars(seg_steps)
         parts = split_parts(seg_start, seg_steps)
-        files = []
+        files, texts = [], {}
         for k, (p_start, p_steps) in enumerate(parts):
             last = k == len(parts) - 1
-            # 自分で起動するのは1本目と、起動し直すテストケースの頭の項目の、最初の本だけ。他は居る場所から続ける
+            # 自分で起動するのは、起動し直す項目の最初の本だけ。他は居る場所から続ける
             flow, _ = emit_flow(mp, p_steps, app, clear, None, timeout, p_start, launch=lch and k == 0,
                                 names=names)
-            name = shot + ".yaml" if last else "{}.{}.yaml".format(shot, k + 1)
-            (d / name).write_text(flow, encoding="utf-8")
-            files.append({"flow": name, "decide": var_of(p_steps[0], names) if k > 0 else None})
+            fname = shot + ".yaml" if last else "{}.{}.yaml".format(shot, k + 1)
+            texts[fname] = flow
+            files.append({"flow": fname, "decide": var_of(p_steps[0], names) if k > 0 else None})
         screen, checked = shot_context(mp, seg_start, seg_steps)
         uses = runtime_uses(seg_steps, names)
         picks = runtime_picks(mp, seg_steps, names)
@@ -501,22 +631,78 @@ def write_flows(plan, out_dir, timeout=10000):
         # 何番目か（_INDEX）は run_flows.py が数えるので入れない
         inputs = {v: "" for v, use in uses.items()
                   if use != "index" and not (v in picks and not picks[v]["pick"])}
-        case, row = by_shot[shot]
-        it = row["item"]
-        last = row is case["items"][-1]
-        written.append({"name": shot, "case": case["title"], "title": it.get("title", ""),
-                        # テストケースの後始末（画面マップの leaves / reset から。最後の項目にだけ）
-                        "after": afters.get(case["title"]) if last else None,
-                        "from": it.get("from"),
-                        "when": it.get("when") or [],
-                        "do": it.get("do") or [], "expect": row["expect"],
-                        "screen": screen, "checked": checked, "launch": lch,
-                        "inputs": inputs, "input_use": uses, "picks": picks, "sees": sees,
-                        "parts": files, "flow": files[-1]["flow"]})
-    print(emit_path(mp, steps, notes))
-    print("\n  フロー（{}本）: {}".format(len(written), out_dir))
-    for w in written:
-        print("    {}{}  →  ダンプ名 {}  自動確認 {}".format(
-            w["flow"], " ★起動し直す" if w["launch"] else "",
-            w["name"], w["checked"] or "なし"))
-    return written
+        rows.append({"name": shot, "flows": texts, "parts": files, "flow": files[-1]["flow"],
+                     "screen": screen, "checked": checked, "launch": lch,
+                     "inputs": inputs, "input_use": uses, "picks": picks, "sees": sees})
+    end = Cursor(build.route.at, list(build.route.stack), scroll, out, False,
+                 [(sid, op_id(spec)) for sid, spec in build.left], build.typed)
+    return rows, end
+
+
+def plan_rows(plan, timeout=10000):
+    """manifest.py の仕事。テストケースごとに組めるかを確かめ、項目ごとの行を返す。
+    (項目の名前 → 行, テストケースの題 → 後始末)。フローは書かない。
+
+    **テストケースごとに、起動直後の画面から組む。** 走らせるときは前のテストケースが
+    終わった画面から繋ぐが、繋げなければ起動し直して起点から繋ぐ（run_flows.py）。
+    なので、起点から組めることが保証されていれば、どこで落ちても次のテストケースに
+    入れる。テストケースの並び順にも左右されない。テストケースの中は、前の項目が
+    終わった画面から順に繋ぐ。
+
+    組めなければ、**全部のテストケースの理由を**出して終了コード 2 で終わる（テスト
+    ケースどうしは依存しないので、1つ組めなくても他は確かめられる）。組めたら
+    テストケースごとの読める経路を標準出力に出す。
+
+    返す行は `render_case()` の行（フローの中身は除く）。撮る画面と自動確認のIDは
+    `from` と `do` で決まり、どこから繋いだかによらない。後始末（`after`）は、その
+    テストケースを最後まで走らせたあとの `leaves` / `reset` から決める。走らせるときに
+    `reset` の画面まで繋げなければ、そこで起動し直す。
+    """
+    mp = load_map(plan.get("repo"))
+    app, clear = plan.get("app"), bool(plan.get("clear_state"))
+    if not app:
+        sys.exit("plan に app（bundle id）が要る（xcrun simctl listapps <UDID> で調べる）")
+    rows, afters, problems, shown = {}, {}, [], []
+    for case in flow_cases(plan):
+        build = build_case(mp, case["items"], Cursor.fresh(mp))
+        if build.problems:
+            problems += build.problems
+            continue
+        after, _ = clean_up(mp, build.route, [], build.left, build.typed, case["next"])
+        afters[case["title"]] = after
+        steps = build.steps[1:] if build.steps and isinstance(build.steps[0], Restart) else build.steps
+        shown.append("■ {}\n{}".format(case["title"], emit_path(mp, steps, build.notes)))
+        for r in render_case(mp, app, clear, Cursor.fresh(mp), build, timeout)[0]:
+            r.pop("flows")
+            rows[r["name"]] = r
+    if problems:
+        report_problems(problems)
+        sys.exit(2)
+    print("\n\n".join(shown))
+    return rows, afters
+
+
+def plan_of(manifest):
+    """マニフェストから、フローを組むための plan を組み直す。run_flows.py が使う。
+
+    項目の `from` / `do` / `when` はセクションに、テストケースの並びと `launch` / `explore` は
+    `cases` に、アプリ（`app` / `clear_state` / `repo`）はマニフェストの頭にある。plan.json は
+    読まない — マニフェストを作ったあとに plan を直していると、レビューしたものと違う
+    フローを走らせることになる。
+    """
+    for key in ("app", "repo", "cases"):
+        if not manifest.get(key):
+            sys.exit("マニフェストに {} が無い（古いマニフェスト）。manifest.py で作り直す".format(key))
+    secs = {s["name"]: s for s in manifest["sections"]}
+    cases = []
+    for c in manifest["cases"]:
+        case = {"title": c["title"],
+                "items": [{"from": secs[n]["from"], "do": secs[n].get("do") or [],
+                           "when": secs[n].get("when") or []} for n in c["items"]]}
+        if c.get("launch"):
+            case["launch"] = True
+        if c.get("explore"):
+            case["explore"] = c["explore"]
+        cases.append(case)
+    return {"app": manifest["app"], "repo": manifest["repo"],
+            "clear_state": bool(manifest.get("clear_state")), "cases": cases}

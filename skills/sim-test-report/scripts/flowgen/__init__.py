@@ -1,4 +1,4 @@
-"""plan から Maestro のフローを作る部品。叩くのは scripts/ 直下の manifest.py。
+"""plan から Maestro のフローを作る部品。叩くのは scripts/ 直下の manifest.py（組めるかを確かめる）と run_flows.py（撮るときに組む）。
 
   flow.py      plan からフローを作る主体。項目の do をステップにし、項目の間は
                bridge.py で繋ぎ、maestro.py で書く
