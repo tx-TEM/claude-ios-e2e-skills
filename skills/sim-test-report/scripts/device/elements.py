@@ -236,11 +236,17 @@ d = json.load(open(sys.argv[1]))
 compact = isinstance(d, dict) and "ui_schema" in d and "elements" in d
 roots = d["elements"] if compact else [d[0] if isinstance(d, list) else d]
 
+# 寸法はアプリのルート（先頭）から取り、無いときだけほかのルートの最大にする。
+# ディスプレイを複数持つ端末（iPhone Duo）では、別のディスプレイの窓がアプリより
+# 大きなルートとして並ぶ。その寸法で測ると、アプリいっぱいの入れ物が「画面の半分
+# 未満」になって被さる側に数えられ、全要素が裏になった（実測）。
 for root in roots:
     m = B.search((root.get("b") if compact else root.get("attributes", {}).get("bounds")) or "")
     if m:
         x0, y0, x1, y1 = map(int, m.groups())
         W, H = max(W or 0, x1), max(H or 0, y1)
+        if root is roots[0]:
+            break
 if W is None:
     sys.exit("画面の寸法が分からない。ルート要素に bounds が無い。")
 
