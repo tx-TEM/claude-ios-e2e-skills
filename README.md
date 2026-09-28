@@ -72,9 +72,9 @@ clone したディレクトリで `./install.sh` を実行する。`~/.claude/` 
 
 書き方（テストケースの分け方、`launch`、`do` の操作、データに依る値の決め方、期待の書き方）は [test-case-builder.md](agents/test-case-builder.md) と `manifest.py --help` にある。
 
-### 2. フローとテストの定義ファイルを作る（`manifest.py`）
+### 2. テストの定義ファイルを作る（`manifest.py`）
 
-plan から、Maestro のフローとテストの定義ファイル（`manifest.json`）を1本で作る。以降は定義ファイルだけで動く。
+plan から、テストの定義ファイル（`manifest.json`）を作る。以降は定義ファイルだけで動く。フローはここでは書かず、撮るときに `run_flows.py` が組む（手順3）。
 
 ```bash
 python3 ~/.claude/skills/sim-test-report/scripts/manifest.py \
@@ -82,7 +82,7 @@ python3 ~/.claude/skills/sim-test-report/scripts/manifest.py \
   --device iphone=<iPhoneのUDID> --device ipad=<iPadのUDID>
 ```
 
-中で経路を計算する（`scripts/flowgen/bridge.py`。画面マップは screen-map の部品で読む）。plan の各項目について、前の項目が終わった画面から `from` までの経路を画面マップから計算し、`do` の操作と撮影を繋いで、項目ごとのフローとして書き出す。押す前・見る前には必ず見えるまでスクロールし（`scrollUntilVisible`。横スクロールの中の要素は、親を縦に寄せてからその親の上から送る）、画面に着いたら anchor → 読み込み完了の目印（`ready`）→ アニメーションの落ち着きの順に待つ。テストケースの境目では、画面マップの `leaves`（後に残る状態）に `reset`（既定に戻す操作）があればそれを叩き、無ければアプリを起動し直す。`launch` の付いたテストケースも起動し直してから始める。
+経路は `scripts/flowgen/` が計算する（画面マップは screen-map の部品で読む）。plan の各項目について、前の項目が終わった画面から `from` までの経路を画面マップから計算し、`do` の操作と撮影を繋いで、項目ごとのフローにする。押す前・見る前には必ず見えるまでスクロールし（`scrollUntilVisible`。横スクロールの中の要素は、親を縦に寄せてからその親の上から送る）、画面に着いたら anchor → 読み込み完了の目印（`ready`）→ アニメーションの落ち着きの順に待つ。テストケースの境目では、画面マップの `leaves`（後に残る状態）に `reset`（既定に戻す操作）があればそれを叩き、無ければアプリを起動し直す。`launch` の付いたテストケースも起動し直してから始める。
 
 どの語を打つか、どの行を押すかは、そのときの画面を見ないと決まらない。なのでフローに値を書き込まず、その操作の手前でフローを2本に分ける。1本目は対象が見えるところまで進んで止まり、そこで値を決めて、2本目がその値で操作して撮る。値を決めるのは次のどちらか。
 
@@ -97,7 +97,9 @@ python3 ~/.claude/skills/sim-test-report/scripts/manifest.py \
 
 ### 3. フローを走らせる（`run_flows.py`）
 
-フローを順に走らせ、証跡と同名のダンプを撮る。1回で全端末を、1台ずつ撮り切りながら回る。フローを持たない項目は LLM（`sim-driver`）が撮る。
+テストケースごとに、前のテストケースが終わった画面からフローを組んで走らせ、証跡と同名のダンプを撮る。1回で全端末を、1台ずつ撮り切りながら回る。フローを持たない項目は LLM（`sim-driver`）が撮る。
+
+1本落ちても、巻き添えになるのはそのテストケースの残りの項目だけで、次のテストケースから続ける。
 
 ```bash
 python3 ~/.claude/skills/sim-test-report/scripts/run_flows.py \

@@ -64,15 +64,25 @@ def cases_of(items):
 
 
 def write_flows(items, repo=FIXTURE, cases=None):
-    """plan から フローを書いて、(行, {ファイル名: 中身}) を返す。経路の表示は捨てる。
-    `cases` を渡せばそれをそのまま使う（items は無視する）。"""
-    out = Path(tempfile.mkdtemp())
+    """plan から、全部のテストケースが通ったときに走るフローを組んで、(行, {ファイル名: 中身}) を返す。
+    `cases` を渡せばそれをそのまま使う（items は無視する）。
+
+    組めるかは manifest.py と同じく `plan_rows()` で確かめる（組めなければ SystemExit）。フローは
+    run_flows.py と同じく、前のテストケースが終わった状態（Cursor）から1つずつ組む。行には
+    plan_rows() が決めた後始末（`after`、テストケースの最後の項目にだけ）を足す。"""
     plan = {"app": "jp.example.App", "repo": str(repo), "cases": cases or cases_of(items)}
     with contextlib.redirect_stdout(io.StringIO()):
-        rows = flows_of.write_flows(plan, out)
-    flows = {p.name: p.read_text(encoding="utf-8") for p in sorted(out.glob("*.yaml"))}
-    shutil.rmtree(out)
-    return rows, flows
+        static, afters = flows_of.plan_rows(plan)
+    mp = screen_map.load_map(str(repo))
+    cur, rows, flows = flows_of.Cursor.fresh(mp), [], {}
+    for case in flows_of.flow_cases(plan):
+        build = flows_of.build_case(mp, case["items"], cur)
+        got, cur = flows_of.render_case(mp, plan["app"], False, cur, build)
+        for r in got:
+            flows.update(r.pop("flows"))
+            r["after"] = afters.get(case["title"]) if r["name"] == case["items"][-1]["name"] else None
+            rows.append(r)
+    return rows, dict(sorted(flows.items()))
 
 
 def run_manifest(args):
@@ -357,12 +367,16 @@ class Manifest(unittest.TestCase):
         self.assertEqual(m["repo"], str(FIXTURE.resolve()))   # どのマップで組んだかを残す
         first, explore = m["sections"]
         self.assertEqual(first["name"], "test_01")
-        self.assertEqual(first["input_use"], {"LIST_ROW": "selector", "LIST_ROW_INDEX": "index"})
+        # フローを組むのに要るものをマニフェストに写す（run_flows.py は plan.json を読まない）
+        self.assertEqual((m["app"], m["clear_state"]), ("jp.example.App", False))
+        # フローは走らせるときに組む。ここでは名前だけ決め、置き場には何も書かない
+        self.assertEqual(first["flow"], "test_01.yaml")
+        self.assertFalse(Path(m["flows"]).exists())
+        self.assertEqual((first["screen"], first["checked"]), ("detail", "detail"))
         # 条件の無い選択は run_flows.py が決めるので、inputs には入らない
         self.assertEqual(first["devices"]["iphone"], {"inputs": {}, "picked": {}})
-        self.assertEqual(first["picks"], {"LIST_ROW": {"pattern": "list.row.*", "pick": "", "exclude": []}})
-        self.assertEqual(first["parts"], [{"flow": "test_01.1.yaml", "decide": None},
-                                          {"flow": "test_01.yaml", "decide": "LIST_ROW"}])
+        for key in ("parts", "picks", "input_use", "launch"):
+            self.assertNotIn(key, first)
         self.assertEqual([i["src"] for i in first["images"]],
                          ["shots/iphone/test_01.png", "shots/ipad/test_01.png"])
         self.assertEqual(first["result"], "PENDING")
@@ -370,7 +384,6 @@ class Manifest(unittest.TestCase):
         self.assertEqual(explore["name"], "test_02")
         self.assertEqual(explore["case"], "B")
         self.assertIsNone(explore["flow"])
-        self.assertEqual(explore["input_use"], {})
 
     def test_inputs_are_kept_when_rebuilt(self):
         work = Path(tempfile.mkdtemp())
@@ -440,9 +453,9 @@ class Cases(unittest.TestCase):
         case = self.case("A", "list", "detail")
         case["items"][0]["id"] = "open"
         case["items"][1]["expect"] = "{open}で開いたもの"
-        rows, _ = write_flows(None, cases=[case])
+        rows = flows_of.read_cases({"cases": [case]})[0]["items"]
         self.assertEqual(rows[1]["expect"], "test_01（A 1）で開いたもの")
-        self.assertEqual([r["case"] for r in rows], ["A", "A"])
+        self.assertEqual([r["name"] for r in rows], ["test_01", "test_02"])
 
     def test_refs_only_to_earlier_items_in_the_same_case(self):
         a, b = self.case("A", "list"), self.case("B", "list", "detail")
@@ -799,159 +812,6 @@ class DiffScope(unittest.TestCase):
             self.assertNotIn("Other.swift", diffscope.scope(self.repo)["files"])
 
 
-class RetakeRuns(unittest.TestCase):
-    """#24: 撮り直す項目だけを、同じ鎖の頭からなぞって撮る。"""
-
-    SECTIONS = [
-        {"name": "test_01", "flow": "test_01.yaml", "launch": True},
-        {"name": "test_02", "flow": "test_02.yaml", "launch": False},
-        {"name": "test_03", "flow": "test_03.yaml", "launch": False},
-        {"name": "test_04", "flow": "test_04.yaml", "launch": True},    # 起動し直すテストケースの頭
-        {"name": "test_05", "flow": "test_05.yaml", "launch": False},
-        {"name": "test_06", "flow": None},                             # explore
-    ]
-
-    def runs(self, only):
-        return [(s["name"], m) for s, m in RF["retake_runs"](self.SECTIONS, only)]
-
-    def test_fresh_item_runs_alone(self):
-        self.assertEqual(self.runs(["test_04"]), [("test_04", "shot")])
-
-    def test_item_in_chain_replays_from_head(self):
-        self.assertEqual(self.runs(["test_03"]),
-                         [("test_01", "replay"), ("test_02", "replay"), ("test_03", "shot")])
-
-    def test_chain_runs_once_for_two_items(self):
-        self.assertEqual(self.runs(["test_02", "test_05"]),
-                         [("test_01", "replay"), ("test_02", "shot"),
-                          ("test_04", "replay"), ("test_05", "shot")])
-
-    def test_explore_item_is_refused(self):
-        with self.assertRaises(SystemExit) as cm:
-            self.runs(["test_06"])
-        self.assertIn("sim-driver", str(cm.exception.code))
-
-
-class RetakeRun(unittest.TestCase):
-    """#24: run_flows.py --only が実際に何を走らせ、どこへ撮り、何を書き換えるか。
-
-    Maestro は叩かない。`sh` を差し替えて、呼ばれた順と撮影先を記録する。
-    """
-
-    def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
-        self.out = self.tmp / "out"
-        self.flows = self.tmp / "flows"
-        self.flows.mkdir(parents=True)
-        self.out.mkdir()
-        # 鎖は test_01〜03 と test_04〜05。test_02 は実行時の値 X を使う
-        env = {"test_02": ["X"]}
-        self.sections = []
-        for n, launch in [("test_01", True), ("test_02", False), ("test_03", False),
-                          ("test_04", True), ("test_05", False)]:
-            names = ["SHOTS"] + env.get(n, [])
-            (self.flows / f"{n}.yaml").write_text(
-                "appId: x\nenv:\n" + "".join(f"  {k}: ''\n" for k in names)
-                + "---\n- takeScreenshot: '${SHOTS}/" + n + "'\n", encoding="utf-8")
-            parts = [{"flow": f"{n}.yaml", "decide": None}]
-            if env.get(n):
-                (self.flows / f"{n}.1.yaml").write_text("appId: x\n---\n", encoding="utf-8")
-                parts = [{"flow": f"{n}.1.yaml", "decide": None},
-                         {"flow": f"{n}.yaml", "decide": env[n][0]}]
-            self.sections.append({
-                "name": n, "flow": f"{n}.yaml", "launch": launch, "parts": parts,
-                "input_use": {k: "text" for k in env.get(n, [])},
-                "devices": {"iphone": {"inputs": {k: "" for k in env.get(n, [])}}},
-                "desc": f"{n} の前の判定", "note": "", "result": "OK"})
-        self.sections[1]["devices"]["iphone"]["inputs"]["X"] = "牛乳"
-        self.calls, self.failing = [], set()
-        self.saved = {k: RF[k] for k in ("sh", "HERE")}
-        RF["HERE"] = self.tmp / "scripts"
-
-        def fake_sh(args, quiet=True):
-            # run <UDID> <フロー> <名前> <撮影先> / inspect <UDID> <名前> <撮影先>
-            cmd = args[0]
-            name, dest = (args[3], args[4]) if cmd == "run" else (args[2], args[3])
-            body = args[2] if cmd == "run" else ""
-            self.calls.append((cmd, name, Path(dest).name, body))
-            return 1 if (cmd == "run" and name in self.failing) else 0
-        RF["sh"] = fake_sh
-
-    def tearDown(self):
-        RF.update(self.saved)
-        shutil.rmtree(self.tmp)
-
-    def run_device(self, only):
-        manifest = {"sections": self.sections}
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-            return RF["run_device"](manifest, self.out / "manifest.json", self.flows,
-                                    "iphone", "AAAA", None, only)
-
-    def sec(self, name):
-        return next(s for s in self.sections if s["name"] == name)
-
-    def test_replays_head_and_shoots_only_target(self):
-        stopped, done, lost = self.run_device(["test_03"])
-        self.assertEqual((stopped, done, lost), (None, 1, []))
-        runs = [(c, n, d) for c, n, d, _ in self.calls]
-        # 手前の2本は作業用の置き場（replay の下の端末名）に撮り、ダンプは取らない
-        self.assertEqual(runs, [("run", "test_01", "iphone"), ("run", "test_02.1", "iphone"),
-                                ("run", "test_02", "iphone"),
-                                ("run", "test_03", "iphone"), ("inspect", "test_03", "iphone")])
-        replay_dest = self.tmp / ".work" / "replay" / "out" / "iphone"
-        self.assertTrue(replay_dest.is_dir())
-        shots = self.out / "shots" / "iphone"
-        self.assertTrue(shots.is_dir())
-        # なぞった項目の判定はそのまま。撮った項目だけ PENDING
-        self.assertEqual(self.sec("test_01")["result"], "OK")
-        self.assertEqual(self.sec("test_02")["desc"], "test_02 の前の判定")
-        self.assertEqual(self.sec("test_03")["result"], "PENDING")
-        self.assertEqual(self.sec("test_04")["result"], "OK")
-        # なぞる項目にも実行時の値が入る
-        self.assertIn("X: '牛乳'", self.calls[2][3])
-        log = (self.out / "progress_iphone.log").read_text(encoding="utf-8")
-        self.assertIn("test_01 なぞった", log)
-        self.assertIn("test_03 撮影済み", log)
-
-    def test_replay_writes_to_scratch_not_shots(self):
-        self.run_device(["test_02"])
-        body = self.calls[0][3]
-        # test_01 は SHOTS を作業用の置き場に向けて走る
-        self.assertIn(str((self.tmp / ".work" / "replay" / "out" / "iphone").resolve()), body)
-        self.assertNotIn(str((self.out / "shots").resolve()), body)
-
-    def test_fresh_target_runs_alone(self):
-        self.run_device(["test_04"])
-        self.assertEqual([(c, n) for c, n, _, _ in self.calls],
-                         [("run", "test_04"), ("inspect", "test_04")])
-
-    def test_replay_without_value_stops(self):
-        self.sec("test_02")["devices"]["iphone"]["inputs"]["X"] = ""
-        with self.assertRaises(SystemExit) as cm:
-            self.run_device(["test_03"])
-        self.assertIn("test_02 の値が未定", str(cm.exception.code))
-        self.assertIn("前に撮ったときの値が要る", str(cm.exception.code))
-
-    def test_failure_while_replaying_loses_target(self):
-        self.failing.add("test_02")
-        stopped, done, lost = self.run_device(["test_03"])
-        self.assertEqual(done, 0)
-        self.assertEqual(lost, ["iphone test_02（なぞる途中で落ちた）", "iphone test_03"])
-        # 撮れていないので、前の回の判定は捨てて PENDING。前の回の証跡と OK が残っていると
-        # レポートに出てしまう。PENDING なら build_report.py が止める
-        self.assertEqual(self.sec("test_03")["result"], "PENDING")
-        self.assertNotIn(("inspect", "test_03"), [(c, n) for c, n, _, _ in self.calls])
-
-    def test_other_chain_is_not_touched(self):
-        self.run_device(["test_05"])
-        self.assertEqual([n for c, n, _, _ in self.calls if c == "run"], ["test_04", "test_05"])
-
-    def test_full_run_is_unchanged(self):
-        stopped, done, lost = self.run_device(None)
-        self.assertEqual(done, 5)
-        self.assertTrue(all(s["result"] == "PENDING" for s in self.sections))
-
-
 class Leftovers(unittest.TestCase):
     """前の回の残り（フロー、ダンプの置き場、証跡、進捗ログ）が今回のものに紛れない。"""
 
@@ -964,66 +824,6 @@ class Leftovers(unittest.TestCase):
         self.assertEqual(key("/x/sim-test-report-20260928-a/shots/iphone"), "sim-test-report-20260928-a/iphone")
         self.assertEqual(key("/x/sim-test-report-20260928-a/shots"), "sim-test-report-20260928-a")
         self.assertTrue(key(None).startswith("_probe/"))
-
-    def test_old_flows_are_removed_but_not_the_plan(self):
-        out = Path(tempfile.mkdtemp())
-        (out / "test_15.yaml").write_text("old", encoding="utf-8")
-        (out / "plan.json").write_text("{}", encoding="utf-8")
-        plan = {"app": "x", "repo": str(FIXTURE),
-                "cases": [{"title": "A", "items": [{"from": "list", "title": "a", "expect": "a"}]}]}
-        with contextlib.redirect_stdout(io.StringIO()):
-            flows_of.write_flows(plan, out)
-        names = sorted(p.name for p in out.iterdir())
-        shutil.rmtree(out)
-        self.assertEqual(names, ["plan.json", "test_01.yaml"])
-
-
-class FreshRun(unittest.TestCase):
-    """最初から撮るときと、撮る項目ごとに、前の回の証跡と進捗ログを片付ける。"""
-
-    setUp = lambda self: RetakeRun.setUp(self)
-    tearDown = lambda self: RetakeRun.tearDown(self)
-    sec = RetakeRun.sec
-
-    def shots(self):
-        d = self.out / "shots" / "iphone"
-        d.mkdir(parents=True, exist_ok=True)
-        return d
-
-    def run_device(self, only=None, resume=None):
-        manifest = {"sections": self.sections}
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-            return RF["run_device"](manifest, self.out / "manifest.json", self.flows,
-                                    "iphone", "AAAA", resume, only)
-
-    def test_fresh_run_clears_log_and_stale_shots(self):
-        d = self.shots()
-        (d / "test_99.png").write_text("前の回", encoding="utf-8")        # 今回のマニフェストに無い名前
-        (d / "test_99.txt").write_text("前の回", encoding="utf-8")
-        log = self.out / "progress_iphone.log"
-        log.write_text("前の回の行\n", encoding="utf-8")
-        self.run_device()
-        self.assertFalse((d / "test_99.png").exists())
-        self.assertFalse((d / "test_99.txt").exists())
-        self.assertNotIn("前の回の行", log.read_text(encoding="utf-8"))
-
-    def test_failed_item_does_not_keep_the_old_shot_or_verdict(self):
-        d = self.shots()
-        (d / "test_04.png").write_text("前の回", encoding="utf-8")
-        self.failing.add("test_04")
-        self.run_device()
-        self.assertFalse((d / "test_04.png").exists())
-        self.assertEqual(self.sec("test_04")["result"], "PENDING")
-        self.assertEqual(self.sec("test_05")["result"], "PENDING")   # 巻き添えで撮れなかった項目も
-        self.assertEqual(self.sec("test_01")["result"], "PENDING")   # 撮った項目は判定し直す
-
-    def test_retake_appends_to_the_log(self):
-        log = self.out / "progress_iphone.log"
-        log.write_text("最初の回の行\n", encoding="utf-8")
-        self.run_device(only=["test_04"])
-        text = log.read_text(encoding="utf-8")
-        self.assertIn("最初の回の行", text)
-        self.assertIn("--- 撮り直し: test_04", text)
 
 
 class Interrupts(unittest.TestCase):
@@ -1558,7 +1358,10 @@ class CoveredRows(unittest.TestCase):
 
 
 class AutoPickRun(unittest.TestCase):
-    """#50: 条件の無い選択は run_flows.py が画面を読んで決め、picked に書く。"""
+    """#50: 条件の無い選択は run_flows.py が画面を読んで決め、picked に書く。
+
+    1項目を走らせる run_item() を、組んだ行（parts / picks / sees / input_use）を手で渡して叩く。
+    """
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
@@ -1571,13 +1374,14 @@ class AutoPickRun(unittest.TestCase):
             "appId: x\nenv:\n  SHOTS: ''\n  LIST_ROW: ''\n  LIST_ROW_INDEX: ''\n---\n- tapOn:\n"
             "    id: '^${LIST_ROW}$'\n    index: ${LIST_ROW_INDEX}\n",
             encoding="utf-8")
-        self.sec = {"name": "test_01", "flow": "test_01.yaml", "launch": True,
-                    "parts": [{"flow": "test_01.1.yaml", "decide": None},
+        self.sec = {"name": "test_01", "flow": "test_01.yaml",
+                    "devices": {"iphone": {"inputs": {}, "picked": {}}},
+                    "desc": "", "note": "", "result": "PENDING"}
+        self.row = {"parts": [{"flow": "test_01.1.yaml", "decide": None},
                               {"flow": "test_01.yaml", "decide": "LIST_ROW"}],
                     "input_use": {"LIST_ROW": "selector", "LIST_ROW_INDEX": "index"},
                     "picks": {"LIST_ROW": {"pattern": "list.row.*", "pick": "", "exclude": []}},
-                    "devices": {"iphone": {"inputs": {}, "picked": {}}},
-                    "desc": "", "note": "", "result": "PENDING"}
+                    "sees": {}}
         self.saved = {k: RF[k] for k in ("sh", "HERE")}
         RF["HERE"] = self.tmp / "scripts"
         self.calls = []
@@ -1596,14 +1400,18 @@ class AutoPickRun(unittest.TestCase):
         RF.update(self.saved)
         shutil.rmtree(self.tmp)
 
-    def run_device(self):
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-            return RF["run_device"]({"sections": [self.sec]}, self.out / "manifest.json",
-                                    self.flows, "iphone", "AAAA", None)
+    def run_item(self, first=0):
+        """(結果, 標準出力)。結果は ("done", None) / ("failed", 理由) / ("stopped", 何本目か)。"""
+        shots = self.out / "shots" / "iphone"
+        shots.mkdir(parents=True, exist_ok=True)
+        dv = RF["DeviceRun"]("iphone", "AAAA", shots, self.tmp / "replay", self.flows,
+                             self.out / "progress_iphone.log")
+        with contextlib.redirect_stdout(io.StringIO()) as o, contextlib.redirect_stderr(io.StringIO()):
+            got = RF["run_item"](dv, self.sec, self.row, False, first)
+        return got, o.getvalue()
 
     def test_picks_first_visible_and_fills_env(self):
-        stopped, done, lost = self.run_device()
-        self.assertEqual((stopped, done, lost), (None, 1, []))
+        self.assertEqual(self.run_item()[0], ("done", None))
         self.assertEqual(self.sec["devices"]["iphone"]["picked"], {"LIST_ROW": "list.row.C++入門", "LIST_ROW_INDEX": 0})
         body = [a[2] for a in self.calls if a[0] == "run" and a[3] == "test_01"][0]
         self.assertIn("LIST_ROW: 'list\\.row\\.C\\+\\+入門'", body)
@@ -1616,7 +1424,7 @@ class AutoPickRun(unittest.TestCase):
         self.dump = (dump_line(195, -40, "×", "list.row.牛乳", "")
                      + dump_line(195, 300, "○", "list.row.牛乳", "")
                      + dump_line(195, 380, "○", "list.row.牛乳", ""))
-        self.run_device()
+        self.run_item()
         self.assertEqual(self.sec["devices"]["iphone"]["picked"], {"LIST_ROW": "list.row.牛乳", "LIST_ROW_INDEX": 1})
         log = (self.out / "progress_iphone.log").read_text(encoding="utf-8")
         self.assertIn("LIST_ROW=list.row.牛乳（同じ名前 3件のうち上から2件目）", log)
@@ -1626,57 +1434,46 @@ class AutoPickRun(unittest.TestCase):
         self.dump = (dump_line(195, -40, "×", "list.row.牛乳", "")
                      + dump_line(195, 300, "○", "list.row.牛乳", "")
                      + dump_line(195, 380, "○", "list.row.牛乳", ""))
-        self.sec["picks"]["LIST_ROW"]["pick"] = "下の方の牛乳"
+        self.row["picks"]["LIST_ROW"]["pick"] = "下の方の牛乳"
         self.sec["devices"]["iphone"]["inputs"] = {"LIST_ROW": "list.row.牛乳#2"}
-        with contextlib.redirect_stdout(io.StringIO()):
-            RF["run_device"]({"sections": [self.sec]}, self.out / "manifest.json",
-                             self.flows, "iphone", "AAAA", ("test_01", 1))
+        self.run_item(first=1)
         self.assertEqual(self.sec["devices"]["iphone"]["picked"], {"LIST_ROW": "list.row.牛乳", "LIST_ROW_INDEX": 2})
         body = [a[2] for a in self.calls if a[0] == "run"][0]
         self.assertIn("LIST_ROW: 'list\\.row\\.牛乳'", body)
         self.assertIn("LIST_ROW_INDEX: '2'", body)
 
     def test_conditional_pick_not_on_screen_loses_the_item(self):
-        self.sec["picks"]["LIST_ROW"]["pick"] = "x"
+        self.row["picks"]["LIST_ROW"]["pick"] = "x"
         self.sec["devices"]["iphone"]["inputs"] = {"LIST_ROW": "list.row.坊っちゃん"}   # 画面外
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-            stopped, done, lost = RF["run_device"]({"sections": [self.sec]}, self.out / "manifest.json",
-                                                   self.flows, "iphone", "AAAA", ("test_01", 1))
-        self.assertEqual(lost, ["iphone test_01"])
+        self.assertEqual(self.run_item(first=1)[0], ("failed", "list.row.坊っちゃん が画面に見えていない"))
         self.assertIn("list.row.坊っちゃん が画面に見えていない",
                       (self.out / "progress_iphone.log").read_text(encoding="utf-8"))
 
     def test_id_outside_the_pattern_stops(self):
         # 接頭辞を落として書いた（こころ）。押さずに止め、直せば続きから走れる
-        self.sec["picks"]["LIST_ROW"]["pick"] = "x"
+        self.row["picks"]["LIST_ROW"]["pick"] = "x"
         self.sec["devices"]["iphone"]["inputs"] = {"LIST_ROW": "こころ"}
-        with contextlib.redirect_stdout(io.StringIO()) as o:
-            stopped, done, lost = RF["run_device"]({"sections": [self.sec]}, self.out / "manifest.json",
-                                                   self.flows, "iphone", "AAAA", ("test_01", 1))
-        self.assertEqual(stopped, ("test_01", 1))
+        got, out = self.run_item(first=1)
+        self.assertEqual(got, ("stopped", 1))
         self.assertEqual([a for a in self.calls if a[0] == "run"], [])
-        self.assertIn("LIST_ROW の値 こころ が list.row.* に当たらない", o.getvalue())
+        self.assertIn("LIST_ROW の値 こころ が list.row.* に当たらない", out)
 
     def test_nothing_visible_loses_the_item(self):
         self.dump = DUMP_HEAD
-        stopped, done, lost = self.run_device()
-        self.assertEqual((done, lost), (0, ["iphone test_01"]))
+        self.assertEqual(self.run_item()[0], ("failed", "押す list.row.* が画面に見えていない"))
         self.assertIn("押す list.row.* が画面に見えていない",
                       (self.out / "progress_iphone.log").read_text(encoding="utf-8"))
 
     def test_conditional_pick_stops_for_input(self):
-        self.sec["picks"]["LIST_ROW"]["pick"] = "いちばん長い名前"
+        self.row["picks"]["LIST_ROW"]["pick"] = "いちばん長い名前"
         self.sec["devices"]["iphone"]["inputs"] = {"LIST_ROW": ""}
-        stopped, done, lost = self.run_device()
-        self.assertEqual(stopped, ("test_01", 1))
+        self.assertEqual(self.run_item()[0], ("stopped", 1))
         self.assertEqual([a[3] for a in self.calls if a[0] == "run"], ["test_01.1"])
 
     def test_resume_starts_from_the_stopped_part(self):
-        self.sec["picks"]["LIST_ROW"]["pick"] = "いちばん長い名前"
+        self.row["picks"]["LIST_ROW"]["pick"] = "いちばん長い名前"
         self.sec["devices"]["iphone"]["inputs"] = {"LIST_ROW": "list.row.こころ"}
-        with contextlib.redirect_stdout(io.StringIO()):
-            RF["run_device"]({"sections": [self.sec]}, self.out / "manifest.json",
-                             self.flows, "iphone", "AAAA", ("test_01", 1))
+        self.run_item(first=1)
         self.assertEqual([a[3] for a in self.calls if a[0] == "run"], ["test_01"])
 
 
@@ -1939,7 +1736,8 @@ class Nesting(unittest.TestCase):
 
     def test_route_through_a_child_picks_the_first_parent(self):
         # 経路の途中で子を押すときも、親は見えている1件目。おすすめから詳細へはカードを押す
-        path = write_flows_path([{"from": "recommend"}, {"from": "detail"}])
+        path = write_flows_path(None, cases=[{"title": "A", "items": [
+            {"from": "recommend", "title": "a", "expect": "x"}, {"from": "detail", "title": "b", "expect": "x"}]}])
         self.assertIn("recommend.carousel.* のどれの中でするかを決める [見えている1件目]", path)
         self.assertIn("tap recommend.book.* [見えている1件目] in recommend.carousel.*（見えている1件目）", path)
 
@@ -1952,13 +1750,11 @@ class Nesting(unittest.TestCase):
         self.assertIn("in の recommend.filter_bar が親 recommend.carousel.* に当たらない", err)
 
 
-def write_flows_path(items, repo=FIXTURE):
-    """plan から フローを書いて、人が読む経路を返す。"""
-    out = Path(tempfile.mkdtemp())
-    plan = {"app": "jp.example.App", "repo": str(repo), "cases": cases_of(items)}
+def write_flows_path(items, repo=FIXTURE, cases=None):
+    """plan の経路が組めるかを確かめて（manifest.py と同じ plan_rows()）、人が読む経路を返す。"""
+    plan = {"app": "jp.example.App", "repo": str(repo), "cases": cases or cases_of(items)}
     with contextlib.redirect_stdout(io.StringIO()) as o:
-        flows_of.write_flows(plan, out)
-    shutil.rmtree(out)
+        flows_of.plan_rows(plan)
     return o.getvalue()
 
 
@@ -1972,34 +1768,33 @@ class SeeContainsCheck(unittest.TestCase):
         (self.flows / "test_01.yaml").write_text(
             "appId: x\nenv:\n  SHOTS: ''\n  LIST_ROW: ''\n---\n- scrollUntilVisible:\n    element:\n"
             "      id: '^list\\.row\\..*${LIST_ROW}.*'\n", encoding="utf-8")
-        self.sec.update(input_use={"LIST_ROW": "selector"}, picks={},
+        self.row.update(input_use={"LIST_ROW": "selector"}, picks={},
                         sees={"LIST_ROW": {"pattern": "list.row.*", "exclude": []}})
+
+    run_item = AutoPickRun.run_item
 
     def resume(self, value):
         self.sec["devices"]["iphone"]["inputs"] = {"LIST_ROW": value}
-        with contextlib.redirect_stdout(io.StringIO()) as o:
-            got = RF["run_device"]({"sections": [self.sec]}, self.out / "manifest.json",
-                                   self.flows, "iphone", "AAAA", ("test_01", 1))
-        return got, o.getvalue()
+        return self.run_item(first=1)
 
     def test_word_in_a_row_runs(self):
-        (stopped, done, _), _ = self.resume("C++")
-        self.assertEqual((stopped, done), (None, 1))
+        got, _ = self.resume("C++")
+        self.assertEqual(got, ("done", None))
         body = [a[2] for a in self.calls if a[0] == "run" and a[3] == "test_01"][0]
         self.assertIn("LIST_ROW: 'C\\+\\+'", body)
 
     def test_word_in_no_row_stops_and_lists_rows(self):
         # 作者で絞り込んだのに作者名で待つ、のように、行の ID に入っていない語
-        (stopped, _, _), out = self.resume("夏目")
-        self.assertEqual(stopped, ("test_01", 1))
+        got, out = self.resume("夏目")
+        self.assertEqual(got, ("stopped", 1))
         self.assertEqual([a for a in self.calls if a[0] == "run"], [])
         self.assertIn("「夏目」を ID に含む list.row.* の行が、いまの画面に無い", out)
         self.assertIn("C++入門", out)
         self.assertIn("坊っちゃん", out)   # 画面外でもダンプに出ている行は並べる
 
     def test_whole_id_stops(self):
-        (stopped, _, _), out = self.resume("list.row.C++入門")
-        self.assertEqual(stopped, ("test_01", 1))
+        got, out = self.resume("list.row.C++入門")
+        self.assertEqual(got, ("stopped", 1))
         self.assertIn("行の ID をまるごと書いている", out)
 
 
@@ -2010,12 +1805,12 @@ class PickInsideParent(unittest.TestCase):
         {"b": "[0,220][402,410]", "rid": "recommend.carousel.8"},
         {"b": "[0,478][402,668]", "rid": "recommend.carousel.9"}]}]})
 
-    run_device = AutoPickRun.run_device
+    run_item = AutoPickRun.run_item
     tearDown = AutoPickRun.tearDown
 
     def setUp(self):
         AutoPickRun.setUp(self)
-        self.sec["picks"] = {"LIST_ROW": {"pattern": "list.row.*", "pick": "", "exclude": [],
+        self.row["picks"] = {"LIST_ROW": {"pattern": "list.row.*", "pick": "", "exclude": [],
                                           "within": {"var": "PARENT"}}}
         self.sec["devices"]["iphone"]["inputs"] = {"PARENT": "recommend.carousel.9"}
         self.dump = (DUMP_HEAD
@@ -2028,16 +1823,417 @@ class PickInsideParent(unittest.TestCase):
 
     def test_picks_first_visible_in_the_parent(self):
         # 上のカルーセルの行（上の段）は、画面の上のほうに見えていても選ばない
-        self.run_device()
+        self.run_item()
         self.assertEqual(self.sec["devices"]["iphone"]["picked"]["LIST_ROW"], "list.row.下の段")
 
     def test_missing_parent_loses_the_item(self):
         self.sec["devices"]["iphone"]["inputs"] = {"PARENT": "recommend.carousel.3"}
-        stopped, done, lost = self.run_device()
-        self.assertEqual(lost, ["iphone test_01"])
+        self.assertEqual(self.run_item()[0], ("failed", "親 recommend.carousel.3 が画面に無い"))
         self.assertIn("親 recommend.carousel.3 が画面に無い",
                       (self.out / "progress_iphone.log").read_text(encoding="utf-8"))
 
+
+
+class CaseRunBase:
+    """run_flows.py の run_device を、fixture のマップから manifest.py で作ったマニフェストで走らせる。
+
+    Maestro は叩かない。`sh` を差し替えて、走らせたフロー（名前・撮影先・中身）を記録する。
+    `failing` に入れた run 名は落ち、`fail_once` に入れたものは1回目だけ落ちる。画面を読むと
+    `self.dump` が返る（既定は一覧の anchor が見えている画面）。
+    """
+
+    CASES = [
+        {"title": "A", "items": [{"from": "list", "title": "a1", "expect": "x"},
+                                 {"from": "list", "do": ["see:list.footer"], "title": "a2", "expect": "x"}]},
+        {"title": "B", "items": [{"from": "list", "do": ["tap:list.row.*"], "title": "b1", "expect": "x"},
+                                 {"from": "detail", "title": "b2", "expect": "x"}]},
+        {"title": "C", "launch": True, "items": [{"from": "home", "title": "c1", "expect": "x"}]},
+        {"title": "D", "items": [{"from": "list", "title": "d1", "expect": "x"}]},
+    ]
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.repo = getattr(self, "repo", None) or FIXTURE
+        plan = self.tmp / "plan.json"
+        plan.write_text(json.dumps({"app": "jp.example.App", "repo": str(self.repo), "cases": self.CASES},
+                                   ensure_ascii=False), encoding="utf-8")
+        self.out = self.tmp / "out"
+        run_manifest([plan, self.out, "--device", "iphone=AAAA"])
+        self.manifest = json.loads((self.out / "manifest.json").read_text(encoding="utf-8"))
+        self.flows = self.tmp / "flows"
+        self.calls, self.failing, self.fail_once = [], set(), set()
+        self.dump = FirstVisible.DUMP
+        self.saved = {k: RF[k] for k in ("sh", "HERE")}
+        RF["HERE"] = self.tmp / "scripts"
+
+        def fake_sh(args, quiet=True):
+            cmd = args[0]
+            if cmd == "run":
+                target, name, dest = args[2], args[3], args[4]
+                body = Path(target[1:]).read_text(encoding="utf-8") if target.startswith("@") else target
+                self.calls.append(("run", name, Path(dest).name, body))
+                if name in self.fail_once:
+                    self.fail_once.discard(name)
+                    return 1
+                return 1 if name in self.failing else 0
+            if cmd == "inspect":
+                self.calls.append(("inspect", args[2], "", ""))
+                if len(args) == 3:
+                    state = self.tmp / ".work" / "state"
+                    state.mkdir(parents=True, exist_ok=True)
+                    (state / "last_dump_AAAA.txt").write_text(self.dump, encoding="utf-8")
+            return 0
+        RF["sh"] = fake_sh
+
+    def tearDown(self):
+        RF.update(self.saved)
+        shutil.rmtree(self.tmp)
+
+    def run_device(self, only=None, resume=None):
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            return RF["run_device"](self.manifest, self.out / "manifest.json", self.flows,
+                                    "iphone", "AAAA", resume, only)
+
+    def runs(self):
+        return [n for c, n, _, _ in self.calls if c == "run"]
+
+    def body(self, name, nth=0):
+        return [b for c, n, _, b in self.calls if c == "run" and n == name][nth]
+
+    def sec(self, name):
+        return next(s for s in self.manifest["sections"] if s["name"] == name)
+
+    def log(self):
+        return (self.out / "progress_iphone.log").read_text(encoding="utf-8")
+
+
+class CaseRun(CaseRunBase, unittest.TestCase):
+    """テストケースごとに組んで走らせる。落ちたら、そのテストケースの残りだけ飛ばして次へ繋ぐ。"""
+
+    def test_all_cases_run_in_order(self):
+        stopped, done, lost = self.run_device()
+        self.assertEqual((stopped, done, lost), (None, 6, []))
+        self.assertEqual(self.runs(), ["test_01", "test_02", "test_03.1", "test_03", "test_04",
+                                       "test_05", "test_06"])
+        # 起動するのは最初と、launch の付いたテストケースの頭だけ。ほかは前の続き
+        self.assertEqual(["launchApp" in self.body(n) for n in
+                          ("test_01", "test_02", "test_03.1", "test_04", "test_05", "test_06")],
+                         [True, False, False, False, True, False])
+        # フローは端末ごとの置き場に書く
+        self.assertTrue((self.flows / "iphone" / "test_03.1.yaml").exists())
+
+    def test_failure_skips_only_the_rest_of_its_case(self):
+        self.failing.add("test_01")
+        stopped, done, lost = self.run_device()
+        self.assertEqual(lost, ["iphone test_01", "iphone test_02"])
+        self.assertEqual(done, 4)
+        self.assertNotIn("test_02", self.runs())
+        log = self.log()
+        self.assertIn("test_02 撮影できず 同じテストケースの test_01 が落ちたので飛ばした", log)
+        # 撮れなかったことは端末ごとに残す。判定（result）ではない
+        dev = lambda n: self.sec(n)["devices"]["iphone"]
+        self.assertEqual(dev("test_01")["unexpected"], {"kind": "failed", "reason": "フローが失敗"})
+        self.assertEqual(dev("test_02")["unexpected"],
+                         {"kind": "skipped", "reason": "同じテストケースの test_01 が落ちた"})
+        self.assertNotIn("unexpected", dev("test_03"))
+        self.assertEqual(self.sec("test_01")["result"], "PENDING")
+        self.assertIn("test_01 のあと: 画面 list に居る。test_03 はそこから繋ぐ", log)
+        # 落ちた地点の画面から繋ぐ。起動し直さず、どこまでスクロールしたか分からないので上も探す
+        body = self.body("test_03.1")
+        self.assertNotIn("launchApp", body)
+        self.assertIn("続き: list から", body)
+        self.assertIn("direction: UP", body)
+
+    def test_unknown_screen_relaunches_the_next_case(self):
+        self.failing.add("test_01")
+        self.dump = DUMP_HEAD          # どの画面の anchor も見えていない（アラート、アプリの外など）
+        self.run_device()
+        self.assertIn("stopApp", self.body("test_03.1"))
+        self.assertIn("test_01 のあと: どの画面の anchor も見えていない。test_03 は起動し直して始める",
+                      self.log())
+
+    def test_two_anchors_relaunch_the_next_case(self):
+        self.failing.add("test_01")
+        self.dump = FirstVisible.DUMP + dump_line(195, 120, "○", "detail", "詳細")
+        self.run_device()
+        self.assertIn("stopApp", self.body("test_03.1"))
+        self.assertIn("anchor が複数見えている（detail, list）", self.log())
+
+    def test_head_failing_after_recovery_is_run_again_after_relaunch(self):
+        self.failing.add("test_01")
+        self.fail_once.add("test_03.1")
+        stopped, done, lost = self.run_device()
+        self.assertEqual(lost, ["iphone test_01", "iphone test_02"])
+        self.assertEqual(done, 4)
+        self.assertEqual(self.runs().count("test_03.1"), 2)
+        self.assertNotIn("launchApp", self.body("test_03.1", 0))
+        self.assertIn("stopApp", self.body("test_03.1", 1))
+        self.assertIn("test_03 繋いだ頭で落ちた。起動し直してテストケース「B」を走らせ直す", self.log())
+        # 走らせ直して撮れたので、1回目に落ちた記録は残らない
+        self.assertNotIn("unexpected", self.sec("test_03")["devices"]["iphone"])
+
+    def test_failure_before_a_launch_case_does_not_read_the_screen(self):
+        self.failing.add("test_03")
+        self.run_device()
+        self.assertEqual(self.runs(), ["test_01", "test_02", "test_03.1", "test_03", "test_05", "test_06"])
+        # 次は起動し直すテストケースなので、居る画面は読まない
+        self.assertNotIn(("inspect", "test_03.where", "", ""), self.calls)
+
+    def test_failed_item_does_not_keep_the_old_shot_or_verdict(self):
+        d = self.out / "shots" / "iphone"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "test_04.png").write_text("前の回", encoding="utf-8")
+        for s in self.manifest["sections"]:
+            s["result"] = "OK"
+        self.failing.add("test_03")
+        self.run_device()
+        self.assertFalse((d / "test_04.png").exists())
+        self.assertEqual(self.sec("test_03")["result"], "PENDING")
+        self.assertEqual(self.sec("test_04")["result"], "PENDING")   # 巻き添えで撮れなかった項目も
+        self.assertEqual(self.sec("test_01")["result"], "PENDING")   # 撮った項目は判定し直す
+
+    def test_fresh_run_clears_log_stale_shots_and_old_flows(self):
+        d = self.out / "shots" / "iphone"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "test_99.png").write_text("前の回", encoding="utf-8")        # 今回のマニフェストに無い名前
+        (d / "test_99.txt").write_text("前の回", encoding="utf-8")
+        (self.flows / "iphone").mkdir(parents=True)
+        (self.flows / "iphone" / "test_15.yaml").write_text("old", encoding="utf-8")
+        log = self.out / "progress_iphone.log"
+        log.write_text("前の回の行\n", encoding="utf-8")
+        self.run_device()
+        self.assertFalse((d / "test_99.png").exists())
+        self.assertFalse((d / "test_99.txt").exists())
+        self.assertFalse((self.flows / "iphone" / "test_15.yaml").exists())
+        self.assertNotIn("前の回の行", log.read_text(encoding="utf-8"))
+
+
+class Recovery(unittest.TestCase):
+    """落ちた地点の画面と、組んだときの履歴から、次のテストケースをどこから組むか。"""
+
+    def test_screen_needs_exactly_one_anchor(self):
+        mp = screen_map.load_map(str(FIXTURE))
+        self.assertEqual(flows_of.screen_at(mp, ["list", "list.row.x"]), ("list", ["list"]))
+        self.assertEqual(flows_of.screen_at(mp, ["x"]), (None, []))
+        self.assertEqual(flows_of.screen_at(mp, ["list", "detail"]), (None, ["detail", "list"]))
+
+    def test_stack_is_taken_from_where_it_was_planned(self):
+        mp = screen_map.load_map(str(FIXTURE))
+        plan = {"app": "x", "repo": str(FIXTURE), "cases": [
+            {"title": "A", "items": [{"from": "detail", "title": "a", "expect": "x"}]}]}
+        case = flows_of.flow_cases(plan)[0]
+        build = flows_of.build_case(mp, case["items"], flows_of.Cursor.fresh(mp))
+        self.assertEqual(flows_of.stack_at(build, "test_01", "home"), ["home"])
+        detail = flows_of.stack_at(build, "test_01", "detail")
+        self.assertEqual(detail[-1], "detail")
+        self.assertEqual(detail[0], "home")
+        # 組んだ予定のどこにも無い画面は、その画面だけ（どこから来たか分からない）
+        self.assertEqual(flows_of.stack_at(build, "test_01", "settings"), ["settings"])
+
+    def test_cursor_round_trips_through_json(self):
+        mp = screen_map.load_map(str(FIXTURE))
+        c = flows_of.Cursor("list", ["home", "list"], flows_of.ScrollState(unknown=True, scrolled=["list"]),
+                            None, False, [("list", "text:list.search_field")], True, True)
+        back = flows_of.Cursor.from_json(json.loads(json.dumps(c.to_json())))
+        self.assertEqual(back.to_json(), c.to_json())
+        self.assertTrue(back.scroll.is_scrolled("detail"))
+        self.assertEqual(flows_of.Cursor.fresh(mp).restart, True)
+
+
+class RecoveryResets(CaseRunBase, unittest.TestCase):
+    """落ちたテストケースが後に残したかもしれないものは、次のテストケースの頭で reset を叩いてみる。"""
+
+    CASES = [
+        {"title": "T", "items": [{"from": "list", "do": [{"op": "text:list.search_field", "input": "猫"}],
+                                  "title": "t", "expect": "x"},
+                                 {"from": "list", "do": ["see:list.footer"], "title": "t2", "expect": "x"}]},
+        {"title": "N", "items": [{"from": "list", "title": "n", "expect": "x"}]},
+    ]
+
+    def setUp(self):
+        self.repo = Path(tempfile.mkdtemp()) / "app"
+        shutil.copytree(FIXTURE, self.repo)
+        LeavesReset.leaves(self)
+        CaseRunBase.setUp(self)
+
+    def tearDown(self):
+        CaseRunBase.tearDown(self)
+        shutil.rmtree(self.repo.parent)
+
+    list = property(lambda self: self.repo / "screen-map" / "screens" / "list.yaml")
+    SEARCH = LeavesReset.SEARCH
+
+    def test_reset_and_keyboard_at_the_next_head(self):
+        self.failing.add("test_02")
+        self.run_device()
+        body = self.body("test_03")
+        self.assertIn("list.clear_button", body)
+        self.assertIn("hideKeyboard", body)
+        self.assertNotIn("launchApp", body)
+
+    def test_reset_failing_relaunches(self):
+        self.failing.add("test_02")
+        self.fail_once.add("test_03")
+        stopped, done, lost = self.run_device()
+        self.assertEqual(done, 2)
+        self.assertIn("stopApp", self.body("test_03", 1))
+
+
+class VarNames(unittest.TestCase):
+    """変数名は、撮影する側が決める値から先に振る。経路の途中の値（見えている1件目）が先に
+    名前を取ると、マニフェストの inputs の名前と、走らせるときに組み直したフローの名前がずれる。"""
+
+    def test_caller_decided_values_get_the_plain_name(self):
+        from flowgen.maestro import assign_vars
+        from flowgen.steps import Enter
+        from flowgen.actions import Pick
+        on_the_way = Enter("recommend", "recommend.carousel.*", Pick(""))
+        chosen = Enter("recommend", "recommend.carousel.*", Pick("いちばん下の段"))
+        names = assign_vars([on_the_way, chosen])
+        self.assertEqual(names[id(chosen)], "RECOMMEND_CAROUSEL")
+        self.assertEqual(names[id(on_the_way)], "RECOMMEND_CAROUSEL_2")
+        # 経路の途中に何も無くても同じ名前
+        self.assertEqual(assign_vars([chosen])[id(chosen)], "RECOMMEND_CAROUSEL")
+
+
+class RetakeRuns(unittest.TestCase):
+    """#24: 撮り直す項目だけを、そのテストケースの頭からなぞって撮る。"""
+
+    def runs(self, only):
+        plan = {"app": "x", "repo": str(FIXTURE), "cases": CaseRunBase.CASES
+                + [{"title": "X", "explore": "理由", "items": [{"from": "list", "title": "x", "expect": "x"}]}]}
+        cases = flows_of.flow_cases(plan)
+        sections = [{"name": "test_07", "flow": None}]
+        return [[(it["name"], m) for it, m in its] for _, its in RF["retake_runs"](cases, sections, only)]
+
+    def test_head_item_runs_alone(self):
+        self.assertEqual(self.runs(["test_03"]), [[("test_03", "shot")]])
+
+    def test_item_in_a_case_replays_from_its_head(self):
+        self.assertEqual(self.runs(["test_04"]), [[("test_03", "replay"), ("test_04", "shot")]])
+
+    def test_case_runs_once_for_two_items(self):
+        self.assertEqual(self.runs(["test_02", "test_01", "test_04"]),
+                         [[("test_01", "shot"), ("test_02", "shot")],
+                          [("test_03", "replay"), ("test_04", "shot")]])
+
+    def test_explore_item_is_refused(self):
+        with self.assertRaises(SystemExit) as cm:
+            self.runs(["test_07"])
+        self.assertIn("sim-driver", str(cm.exception.code))
+
+
+class RetakeRun(CaseRunBase, unittest.TestCase):
+    """#24: run_flows.py --only が実際に何を走らせ、どこへ撮り、何を書き換えるか。"""
+
+    def setUp(self):
+        CaseRunBase.setUp(self)
+        for s in self.manifest["sections"]:
+            s.update(desc=f"{s['name']} の前の判定", result="OK")
+
+    def test_replays_case_head_and_shoots_only_target(self):
+        stopped, done, lost = self.run_device(["test_04"])
+        self.assertEqual((stopped, done, lost), (None, 1, []))
+        runs = [(c, n, d) for c, n, d, _ in self.calls]
+        # 手前の項目は作業用の置き場（replay の下の端末名）に撮り、ダンプは取らない
+        self.assertEqual(runs, [("run", "test_03.1", "iphone"), ("inspect", "test_03.pick1", ""),
+                                ("run", "test_03", "iphone"),
+                                ("run", "test_04", "iphone"), ("inspect", "test_04", "")])
+        # テストケースの頭で起動し直す（前のテストケースはなぞらない）
+        self.assertIn("stopApp", self.body("test_03.1"))
+        self.assertIn(str((self.tmp / ".work" / "replay" / "out" / "iphone").resolve()), self.body("test_03"))
+        self.assertNotIn(str((self.out / "shots").resolve()), self.body("test_03"))
+        # なぞった項目の判定はそのまま。撮った項目だけ PENDING
+        self.assertEqual(self.sec("test_03")["result"], "OK")
+        self.assertEqual(self.sec("test_04")["result"], "PENDING")
+        self.assertEqual(self.sec("test_01")["result"], "OK")
+        log = self.log()
+        self.assertIn("--- 撮り直し: test_04", log)
+        self.assertIn("test_03 なぞった", log)
+        self.assertIn("test_04 撮影済み", log)
+
+    def test_other_cases_are_not_touched(self):
+        self.run_device(["test_06"])
+        self.assertEqual(self.runs(), ["test_06"])
+        self.assertIn("stopApp", self.body("test_06"))
+
+    def test_failure_while_replaying_loses_target(self):
+        self.failing.add("test_03")
+        stopped, done, lost = self.run_device(["test_04"])
+        self.assertEqual(done, 0)
+        self.assertEqual(lost, ["iphone test_03（なぞる途中で落ちた）", "iphone test_04"])
+        # 撮れていないので、前の回の判定は捨てて PENDING。前の回の証跡と OK が残っていると
+        # レポートに出てしまう。PENDING なら build_report.py が止める
+        self.assertEqual(self.sec("test_04")["result"], "PENDING")
+        self.assertNotIn("test_04", self.runs())
+
+    def test_prepare_writes_and_keep_runs_the_edited_flow(self):
+        # 撮り直すフローを書くだけ（走らせない）。手で直してから、上書きせずにそのまま撮る
+        with contextlib.redirect_stdout(io.StringIO()) as o:
+            RF["run_device"](self.manifest, self.out / "manifest.json", self.flows, "iphone", "AAAA",
+                             None, ["test_04"], True, False)
+        self.assertEqual(self.runs(), [])
+        flow = self.flows / "iphone" / "test_04.yaml"
+        self.assertIn(str(flow), o.getvalue())
+        self.assertEqual(self.sec("test_04")["result"], "OK")      # 書くだけなので判定には触らない
+        flow.write_text(flow.read_text(encoding="utf-8") + "# 手で足した待ち\n", encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            RF["run_device"](self.manifest, self.out / "manifest.json", self.flows, "iphone", "AAAA",
+                             None, ["test_04"], False, True)
+        self.assertEqual(self.runs(), ["test_03.1", "test_03", "test_04"])
+        self.assertIn("# 手で足した待ち", self.body("test_04"))
+        self.assertIn("（手で直したフローで）", self.log())
+
+    def test_retake_clears_the_record_and_replay_failure_skips_target(self):
+        self.failing.add("test_03")
+        self.run_device()
+        self.assertEqual(self.sec("test_04")["devices"]["iphone"]["unexpected"]["kind"], "skipped")
+        self.failing.clear()
+        self.run_device(["test_04"])
+        self.assertNotIn("unexpected", self.sec("test_04")["devices"]["iphone"])
+        # なぞる項目（test_03）の記録は、撮り直しでは触らない
+        self.assertEqual(self.sec("test_03")["devices"]["iphone"]["unexpected"]["kind"], "failed")
+        self.failing.add("test_03")
+        self.run_device(["test_04"])
+        self.assertEqual(self.sec("test_04")["devices"]["iphone"]["unexpected"],
+                         {"kind": "skipped", "reason": "同じテストケースの test_03 が落ちた"})
+
+    def test_retake_appends_to_the_log(self):
+        log = self.out / "progress_iphone.log"
+        log.write_text("最初の回の行\n", encoding="utf-8")
+        self.run_device(only=["test_06"])
+        text = log.read_text(encoding="utf-8")
+        self.assertIn("最初の回の行", text)
+        self.assertIn("--- 撮り直し: test_06", text)
+
+
+class ResumeRun(CaseRunBase, unittest.TestCase):
+    """入力が未定で止まったら、そのテストケースを組んだ状態を返し、叩き直すと同じフローの続きから走る。"""
+
+    CASES = [
+        {"title": "A", "items": [{"from": "list", "title": "a1", "expect": "x"}]},
+        {"title": "B", "items": [{"from": "list", "title": "b1", "expect": "x"},
+                                 {"from": "list", "do": [{"op": "text:list.search_field", "runtime": True}],
+                                  "title": "b2", "expect": "x"}]},
+        {"title": "C", "items": [{"from": "list", "title": "c1", "expect": "x"}]},
+    ]
+
+    def test_stops_and_resumes_from_the_stopped_part(self):
+        stopped, done, lost = self.run_device()
+        self.assertEqual((stopped["from"], stopped["part"], done), ("test_03", 1, 2))
+        self.assertEqual(self.runs(), ["test_01", "test_02", "test_03.1"])
+        self.assertEqual(stopped["cursor"]["at"], "list")          # B を組んだ状態（A が終わった一覧）
+        first = (self.flows / "iphone" / "test_03.yaml").read_text(encoding="utf-8")
+        self.sec("test_03")["devices"]["iphone"]["inputs"]["LIST_SEARCH_FIELD"] = "牛乳(1L)"
+        self.calls.clear()
+        stopped, done, lost = self.run_device(resume=json.loads(json.dumps(stopped)))
+        self.assertEqual((stopped, done, lost), (None, 2, []))
+        # 止まった本から。手前の項目（test_02）と前の本はもう走っている
+        self.assertEqual(self.runs(), ["test_03", "test_04"])
+        self.assertIn("LIST_SEARCH_FIELD: '牛乳(1L)'", self.body("test_03"))
+        # 同じ状態から組み直すので、同じフロー
+        self.assertEqual((self.flows / "iphone" / "test_03.yaml").read_text(encoding="utf-8"), first)
+        self.assertIn("--- 再開: test_03 の 2本目から", self.log())
 
 
 class Migrate(unittest.TestCase):

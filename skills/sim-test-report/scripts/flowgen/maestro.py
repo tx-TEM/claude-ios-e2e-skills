@@ -60,7 +60,7 @@ class Return:
 
 
 def add_returns(steps):
-    """アプリの外に出る操作のすぐ後で撮るなら、撮ったあとに Return を挟む。
+    """アプリの外に出る操作のすぐ後で撮るなら、撮ったあとに Return を挟む。(ステップ列, 外に居る画面)。
 
     **外に出たこと自体を確かめる項目は、外に出たまま撮る。** 外に出る操作は確かめようが
     無いので、フローはすぐアプリに戻していた。それでは項目の `do` が外に出る操作で
@@ -70,6 +70,10 @@ def add_returns(steps):
 
     次の項目が起動し直す（Restart）なら挟まない。起動し直しで戻る。項目の途中で外に
     出るなら、今までどおりその場で戻す（FlowWriter.check）。
+
+    **テストケースの最後の撮影のあとに何も無ければ、外に居るまま終わる。** そのときは
+    戻す画面を2つ目に返す。次のテストケースを組むときに、その頭に Return を置く
+    （flow.py の `Cursor.out`）。
     """
     out = []
     for k, st in enumerate(steps):
@@ -78,16 +82,71 @@ def add_returns(steps):
         nxt = steps[k + 1] if k + 1 < len(steps) else None
         if isinstance(st, Shot) and goes_out(prev) and nxt is not None and not isinstance(nxt, Restart):
             out.append(Return(prev.screen, prev.item))
-    return out
+    prev = next((p for p in reversed(steps[:-1]) if not isinstance(p, Reveal) and not waits_text(p)), None)
+    left_out = prev.screen if steps and isinstance(steps[-1], Shot) and goes_out(prev) else None
+    return out, left_out
 
 
-def add_reveals(steps):
+class ScrollState:
+    """どの画面がスクロールされているかもしれないか、どの親が送られているかもしれないか。
+
+    add_reveals() が頭から追って更新する。**テストケースをまたいで持ち越す**（flow.py の
+    `Cursor`）ので、テストケースごとに組んでも、前のテストケースで下までスクロールした
+    画面では上も探す。
+
+    **`unknown` は、どこまでスクロールしたか分からない**（フローが途中で落ちたあと）。
+    そのときは、上端から始まると分かった画面（起動し直した、push / modal で開いた）以外を
+    全部「スクロールされているかもしれない」とみなす。上も探すぶん遅いが、届かずに落ちない。
+    """
+
+    def __init__(self, unknown=False, scrolled=(), swiped=(), fresh=()):
+        self.unknown = unknown
+        self.scrolled = set(scrolled)
+        self.swiped = set(tuple(x) for x in swiped)
+        self.fresh = set(fresh)         # unknown のときに、上端から始まると分かった画面
+
+    def copy(self):
+        return ScrollState(self.unknown, self.scrolled, self.swiped, self.fresh)
+
+    def is_scrolled(self, sid):
+        return sid in self.scrolled or (self.unknown and sid not in self.fresh)
+
+    def is_swiped(self, sid, wid):
+        return (sid, wid) in self.swiped or (self.unknown and sid not in self.fresh)
+
+    def mark(self, sid, swiped=()):
+        self.scrolled.add(sid)
+        self.swiped.update((sid, w) for w in swiped)
+
+    def forget(self, sid):
+        """上端から始まる（push / modal で開いた）。"""
+        self.scrolled.discard(sid)
+        self.swiped.difference_update({k for k in self.swiped if k[0] == sid})
+        self.fresh.add(sid)
+
+    def clear(self):
+        """起動し直した。どの画面も上端から。"""
+        self.__init__()
+
+    def to_json(self):
+        return {"unknown": self.unknown, "scrolled": sorted(self.scrolled),
+                "swiped": sorted(list(k) for k in self.swiped), "fresh": sorted(self.fresh)}
+
+    @classmethod
+    def from_json(cls, d):
+        d = d or {}
+        return cls(bool(d.get("unknown")), d.get("scrolled") or (), d.get("swiped") or (),
+                   d.get("fresh") or ())
+
+
+def add_reveals(steps, state=None):
     """要素を操作する Act の直前に Reveal を挟む。See は自分がスクロールなので挟まない。
 
     **スクロールされているかもしれない画面では、上も探す（`up`）。** 押す前・見る前の
     スクロールは下向きなので、前の項目で下までスクロールしたままの画面では、上にある
-    要素に届かない。どの画面がスクロールされているかは、ここで全項目のステップを
-    頭から追って決める（フローを割る前なので項目をまたいで追える）。
+    要素に届かない。どの画面がスクロールされているかは、ここでテストケースのステップを
+    頭から追って決める（フローを割る前なので項目をまたいで追える）。前のテストケースまでの
+    分は `state`（ScrollState）で受け取り、追った結果もそこに書き戻す。
 
     - その画面で押す・見る・`scroll` をしたら、スクロールされているかもしれない
     - 起動し直したときと、push / modal で開いた画面は上端から始まる
@@ -97,34 +156,26 @@ def add_reveals(steps):
     （`back`）。** 親は画面とその親の id（パターンならパターンのまま）で追う。どのカルーセルを
     送ったかは走らせるときに決まることがあるので、同じパターンの親は1つとして扱う。
     """
-    out, scrolled, swiped = [], set(), set()
-
-    def forget(sid):
-        scrolled.discard(sid)
-        swiped.difference_update({k for k in swiped if k[0] == sid})
-
+    out, state = [], state if state is not None else ScrollState()
     for st in steps:
         if isinstance(st, Restart):
-            scrolled.clear()
-            swiped.clear()
+            state.clear()
         elif isinstance(st, Await):
-            forget(st.to)
+            state.forget(st.to)
         elif isinstance(st, Enter):
-            out.append(Show(st, st.item, st.screen in scrolled))
-            scrolled.add(st.screen)
+            out.append(Show(st, st.item, state.is_scrolled(st.screen)))
+            state.mark(st.screen)
         elif isinstance(st, See):
-            st.up = st.screen in scrolled
-            st.back = any((st.screen, w.id) in swiped for w in st.within if w.scroll)
-            scrolled.add(st.screen)
-            swiped.update((st.screen, w.id) for w in st.within if w.scroll)
+            st.up = state.is_scrolled(st.screen)
+            st.back = any(state.is_swiped(st.screen, w.id) for w in st.within if w.scroll)
+            state.mark(st.screen, [w.id for w in st.within if w.scroll])
         elif isinstance(st, Act):
             if not isinstance(st.action, (Scroll, HideKeyboard)):
-                back = any((st.screen, w.id) in swiped for w in st.within if w.scroll)
-                out.append(Reveal(st, st.item, st.screen in scrolled, back))
-            scrolled.add(st.screen)
-            swiped.update((st.screen, w.id) for w in st.within if w.scroll)
+                back = any(state.is_swiped(st.screen, w.id) for w in st.within if w.scroll)
+                out.append(Reveal(st, st.item, state.is_scrolled(st.screen), back))
+            state.mark(st.screen, [w.id for w in st.within if w.scroll])
             if st.arrive and st.arrive.via in FRESH:
-                forget(st.to)
+                state.forget(st.to)
         out.append(st)
     return out
 
@@ -169,16 +220,30 @@ def assign_vars(steps):
     """実行時に決める値に変数名を振る。{id(Act): 変数名}。**同じ区間で同じ名前が2回要れば `_2` を
     付ける**（同じ一覧を2回通るなど）。ここで振れば、フローとマニフェストで名前がずれない。
 
+    **撮影する側が決める値（打つ文字、条件つきの選択、見たい行が含む語）から先に振る。**
+    フローは走らせながら組むので、`from` までの経路は前にどこで終わったかで変わる。経路の
+    途中の親（見えている1件目を選ぶもの）が先に名前を取ると、マニフェストの `inputs` に
+    書いた名前と、組み直したフローの名前がずれる。経路の途中の値はスクリプトが選ぶので、
+    名前がずれても困らない。
+
     変数名は Maestro のフローに書くときの都合なので、ステップには持たせず、ここで対応を持つ。
     """
     used, names = {}, {}
-    for st in steps:
-        if not needs_value(st):
-            continue
+    wanted = [st for st in steps if needs_value(st)]
+    for st in [st for st in wanted if decided_by_caller(st)] + [st for st in wanted if not decided_by_caller(st)]:
         base = var_name(target_of(st))
         used[base] = used.get(base, 0) + 1
         names[id(st)] = base if used[base] == 1 else "{}_{}".format(base, used[base])
     return names
+
+
+def decided_by_caller(st):
+    """撮影する側（LLM）が値を決めるか。見えている1件目を選ぶもの（スクリプトが選ぶ）は偽。"""
+    if isinstance(st, Enter):
+        return bool(st.pick.condition)
+    if picks_pattern(st):
+        return bool(st.action.pick.condition)
+    return True
 
 
 def runtime_uses(steps, names):
@@ -803,7 +868,7 @@ def check_of(mp, st):
 def shot_context(mp, seg_start, seg_steps):
     """そのフローが終わる画面と、最後に確かめたID。
 
-    flow.py の `write_flows()` が返す行に載せるためのもの。**呼ぶ側が経路を読み直して導出せずに済ませる。**
+    flow.py の `render_case()` が返す行に載せるためのもの。**呼ぶ側が経路を読み直して導出せずに済ませる。**
     確かめたIDが無い（`expect` を持たない操作で終わった）なら None で、
     その証跡は自動確認なし＝画像だけが根拠になる。
     """
@@ -826,9 +891,9 @@ def split_at_shots(mp, steps, start, launch_first=True):
     証跡1枚ごとに構造を残すには、撮る地点でフローを終わらせるしかない。
     2本目以降は前のフローの続きになるので、歩き直しは起きない。
 
-    返す4つ目は**そのフローが自分で起動するか。** 1本目と、起動し直すテストケースの
-    頭の項目がそう。**ここが鎖の切れ目**で、走らせる側は落ちたときにどこまで諦めるかを
-    これで決める（次に起動するフローからは、前が落ちていても走る）。
+    返す4つ目は**そのフローが自分で起動するか。** 起動し直すテストケースの頭の項目
+    （ステップの頭に Restart がある）と、`launch_first` のときの1本目がそう。走らせる側は、
+    その項目の頭でアプリを起動し直したことをマニフェストに残す（判定が証跡を読むため）。
     """
     out, cur, at = [], [], start or mp.start
     seg_start, launch = at, launch_first

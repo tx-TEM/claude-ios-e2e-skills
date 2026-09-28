@@ -42,13 +42,22 @@ class Route:
 
     flow.py も、項目の `do` で画面を移るときに `forward()` / `back()` を使う。
     居る画面と履歴は1つだけなので、ここに持たせる。
+
+    **テストケースごとに組むので、前のテストケースが終わった画面と履歴から始められる**
+    （`start` / `stack`）。`trail` は居た画面と、そのときの履歴の並び。フローが途中で
+    落ちたとき、落ちた地点の画面にそのとき積まれていた履歴を引くのに使う。
     """
 
-    def __init__(self, mp, start=None):
+    def __init__(self, mp, start=None, stack=None):
         self.mp = mp
         self.at = start or mp.start
-        self.stack = [self.at]
+        self.stack = list(stack) if stack else [self.at]
         self.notes = []
+        self.trail = []
+        self.mark()
+
+    def mark(self):
+        self.trail.append((self.at, tuple(self.stack)))
 
     def fail(self, kind, msg):
         raise Unroutable([(kind, msg)])
@@ -59,6 +68,7 @@ class Route:
         """進むステップ。dest に移る。"""
         self.stack.append(dest)
         self.at = dest
+        self.mark()
         return step
 
     def back(self, spec):
@@ -72,6 +82,7 @@ class Route:
         step = Act(self.at, self.action_of(spec), resolve_result(spec, spec.expects, back_to=dest))
         self.stack.pop()
         self.at = dest
+        self.mark()
         return step
 
     def action_of(self, spec):
@@ -85,6 +96,7 @@ class Route:
         """起動し直す。居る場所も歩いた履歴も捨てて起点に戻る。"""
         self.at = self.mp.start
         self.stack = [self.at]
+        self.mark()
         return Restart()
 
     # ---- 繋ぐ ----

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""test-case-builder の plan.json から、フローを書いて manifest.json を作る。
+"""test-case-builder の plan.json から、経路が組めるかを確かめて manifest.json を作る。
 
   manifest.py <plan.json> <出力先ディレクトリ> --device <端末>=<UDID> [--device …]
 
@@ -16,10 +16,14 @@
 `devices` に書く。run_flows.py と sim-driver はそこから UDID を読み、build_report.py は確認環境を
 そこから出す。撮るときに手で渡し直さない。
 
-1. plan の項目ごとに Maestro のフローを、スキル側の `.work/flows/<出力先の名前>/` に書く
-   （flowgen/flow.py の `write_flows()`）。経路が組めなければ理由を出して止まる
-   （manifest は書かない）。組めたら読める経路を出す
+1. テストケースごとに、**起動直後の画面から**経路が組めるかを確かめる（flowgen/flow.py の
+   `plan_rows()`）。組めなければ全部のテストケースの理由を出して止まる（manifest は
+   書かない）。組めたらテストケースごとに読める経路を出す
 2. 返ってきた項目ごとの行から manifest.json を組む。証跡1枚＝1セクション
+
+**フローはここでは書かない。** run_flows.py が撮るときに、前のテストケースが終わった画面から
+テストケースごとに組む。繋げなければ起動し直して起点から組むので、ここでは起点から組めることを
+確かめれば足りる。
 
 plan.json の形。**plan はテストケースの集合で、項目は必ずどれかのテストケースに属する。**
 **項目1つ＝ from から do を順に叩いて、1枚撮る。**
@@ -131,39 +135,29 @@ plan.json の形。**plan はテストケースの集合で、項目は必ずど
             `{id}` は「test_04（その項目の title）」に展開される。番号で
             書かない — 並べ替えや削除でずれる
 
-**フローはスキル側の `.work/flows/<出力先の名前>/` に書き、その場所をマニフェストの `flows` に
-記録する。** run_flows.py はそこから読む。アプリのリポジトリには何も作らない。
+**フローの置き場はスキル側の `.work/flows/<出力先の名前>/` に決め、マニフェストの `flows` に
+記録する。** アプリのリポジトリには何も作らない。フローを組むのに要るもの（`app` /
+`clear_state` / `repo`）もマニフェストに写す。run_flows.py は plan.json を読まない — レビューの
+あとに plan を直していると、合意したものと違うフローを走らせることになる。
 
-**1本で叩く。** フローとマニフェストを別々に作ると、plan を直したときに片方だけ
-作り直す余地ができ、どちらの項目がどの証跡か決まらなくなる。
-
-**写さない。** 証跡の名前・撮った画面・自動確認のID・フローのファイル名は経路を計算した
-結果から、`title` / `expect` / `from` は plan から、どちらも write_flows() が1行にして返す。
+**写さない。** 証跡の名前・撮った画面・自動確認のIDは経路を計算した結果から、
+`title` / `expect` / `from` は plan から、どちらもスクリプトが1行にする。
 
 **ヘッダの題と meta（ブランチ・確認環境・実施日）は持たない。** レポートを組むときに
 `build_report.py` へ直に渡す。確認環境は撮影する端末を決めるまで決まらない。
 
-**`launch` をそのまま持ってくる。** そのフローが自分でアプリを起動するかどうかで、
-**鎖の切れ目**を表す（1本目と、起動し直すテストケース — `launch` の付いたもの、
-画面マップの `leaves` に `reset` が無くて起動し直すもの — の頭の項目が `true`）。`run_flows.py` は
-落ちたときにどこまで諦めるかをこれで決め、レビューと判定は**そこでアプリが
-起動し直ることを知らないと証跡を読み違える**（前の項目の状態が続いているのか、
-まっさらなのか）。
-
-**`parts` は項目のフローを割ったもの。** 実行時に値を決める操作（打つ文字、パターンの
-要素のどれを押すか、パターンの親のどれの中でするか）があると、その手前で割れる。`decide` がその本の前に決める値で、
-`run_flows.py` は前の本を走らせてから値を決め、次の本を走らせる。
+**フローを組んだ結果（割ったフロー、押す行の選び方、値の入る先）はマニフェストに載せない。**
+run_flows.py が撮るときに組み、その場で使う。
 
 **`inputs` は撮影する側（LLM）が決める値。** plan で `runtime` を書いた打つ文字と、
 `pick`（条件つきで選ぶ）の行に付く。値が空のうちはその本を走らせられない（`run_flows.py`
 がそこで止まる）。着いた画面を見ないと決まらないものなので、埋めるのは撮影する側。
-**条件の無いパターンの要素は `inputs` に入らない。** `picks` に選び方だけがあり、
-`run_flows.py` が画面に見えている1件目を選んで `devices.<端末>.picked` に書く。
-子の要素なら `picks` の `within` に親があり、その親の枠の中から選ぶ。
-`picked` には、条件つきで選んだ行も含めて、押した行の値と、同じ ID の行のうち何番目か
-（`<変数>_INDEX`。Maestro の `index` に入る）が入る。同じ名前の行を区別するため。
-**埋める側は正規表現のエスケープをかけない。** 各値がセレクタ（正規表現）に入るか
-inputText に入るかは `input_use` に書いてあり、エスケープは run_flows.py がする。
+**条件の無いパターンの要素は `inputs` に入らない。** `run_flows.py` が画面に見えている1件目を
+選んで `devices.<端末>.picked` に書く。`picked` には、条件つきで選んだ行も含めて、押した行の
+値と、同じ ID の行のうち何番目か（`<変数>_INDEX`。Maestro の `index` に入る）が入る。
+同じ名前の行を区別するため。**埋める側は正規表現のエスケープをかけない。** 各値がセレクタ
+（正規表現）に入るか inputText に入るかは、フローを組むときに決まり、エスケープは
+run_flows.py がする。
 
 plan で `explore` の付いたテストケースは**経路が組めなかったもの**。その項目は `flow` を
 持たないので `run_flows.py` は飛ばし、sim-driver が探索で撮る。**plan の並びのまま、その場に
@@ -176,10 +170,21 @@ plan で `explore` の付いたテストケースは**経路が組めなかっ�
 起動し直す」や、レポートの見出しはここから出す。`after` はテストケースの後始末で、
 画面マップの `leaves` / `reset` から flowgen が決めたもの（`relaunch`: 次の頭で起動し直す、
 `resets`: 叩いて戻す操作、`leaves`: 残る状態の文）。何も要らなければ null（#83）。
+走らせるときに `reset` の画面まで繋げなければ、そこで起動し直す。
 
 なぜスクリプトなのか。一覧の中身（証跡の名前、画面、自動確認のID、フローの
-ファイル名）は flowgen が既に計算したもので、**手で写すとタイポの余地ができる。**
+ファイル名）は flowgen が計算したもので、**手で写すとタイポの余地ができる。**
 撮影の名前と manifest の `src` がずれても、走らせるまで誰も気づかない。
+
+**撮れなかったことは `devices.<端末>.unexpected` に run_flows.py が書く**（判定ではないので
+`result` には入れない。`result` は `PENDING` のまま）。フローで撮る予定だった項目だけに付く。
+
+  {"kind": "failed", "reason": "フローが失敗（2本目）"}   その項目が撮れなかった（フローが落ちた、
+        押す行や親が画面に無い、manifest.py の後で画面マップが変わって組めない）
+  {"kind": "skipped", "reason": "同じテストケースの test_10 が落ちた"}   前の項目が落ちたので走らせていない
+
+端末ごとに持つ（落ちるのは端末ごと）。run_flows.py がその項目を走らせ直すと消える。探索
+（sim-driver）で撮っても消えない — フローでは撮れなかった記録として残る。
 
 `desc` / `result` / `note` は手順2で埋める。`result` を `PENDING` で置くのは、
 build_report.py が result の無いセクションを拒むため（判定していない項目が
@@ -248,11 +253,11 @@ def main():
     cases = flows_of.read_cases(plan)
     flowed = any(not c["explore"] for c in cases)
 
-    # フローは端末によらず1組。撮影先は ${SHOTS} のままで、run_flows.py が端末ごとに埋める。
+    # フローは run_flows.py が走らせるときに組んで、端末ごとに <flows>/<端末>/ に書く。
     # **置き場はスキル側の .work に固定する。** 呼ぶ側のカレント（アプリのリポジトリ）に
     # 作ると、誰も片付けない。スキル側なら maestrod.py sweep が古いものを消す
     flows = FLOWS / out_dir.resolve().name
-    rows = {r["name"]: r for r in (flows_of.write_flows(plan, flows) if flowed else [])}
+    rows, afters = flows_of.plan_rows(plan) if flowed else ({}, {})
     if flowed:
         print()
 
@@ -265,16 +270,15 @@ def main():
             old = json.loads(out.read_text(encoding="utf-8"))
             kept = {sec.get("name"): sec for sec in old.get("sections", []) if sec.get("name")}
             top = {k: v for k, v in old.items()
-                   if k not in ("sections", "cases", "title", "meta", "resume")}
+                   if k not in ("sections", "cases", "title", "meta", "resume", "app", "clear_state")}
         except Exception:
             pass
 
     # plan の並びのまま。探索のテストケースもその場に置く（フローは持たない）
-    entries = [rows[r["name"]] if not c["explore"] else
-               {"name": r["name"], "case": c["title"],
-                "title": r["item"].get("title", ""), "from": r["item"].get("from"),
-                "do": r["item"].get("do") or [], "when": r["item"].get("when") or [],
-                "expect": r["expect"]}
+    entries = [dict(rows.get(r["name"]) or {}, name=r["name"], case=c["title"],
+                    title=r["item"].get("title", ""), expect=r["expect"],
+                    do=r["item"].get("do") or [], when=r["item"].get("when") or [])
+               | {"from": r["item"].get("from")}
                for c in cases for r in c["items"]]
 
     sections = []
@@ -290,20 +294,12 @@ def main():
             "screen": e.get("screen"),         # 撮った画面（経路の計算）。探索は撮るまで決まらない
             "expect": e.get("expect", ""),     # 証跡の中で何を確かめるか。plan が正
             "checked": e.get("checked"),       # None なら証跡だけが根拠
-            "launch": e.get("launch"),         # true なら、ここでアプリを起動し直す
             "when": e.get("when") or [],       # 項目の前提（plan）
-            "parts": e.get("parts") or [],     # 割ったフロー。decide はその本の前に決める値
-            "flow": e.get("flow"),             # 撮るフロー（parts の最後）。全端末で同じ
-            # パターンの要素の選び方。pick が空なら run_flows.py が見えている1件目を選ぶ
-            "picks": dict(e.get("picks") or {}),
-            # 見たい行が含む語（see の runtime）の、待つ行のパターン。run_flows.py が走らせる前に、
-            # 書かれた語を ID に含む行が今の画面にあるかを確かめる（#85）
-            "sees": dict(e.get("sees") or {}),
-            # 実行時に決める値の入る先（selector / text）。端末によらない。run_flows.py が
-            # これを見て、セレクタに入る値だけ正規表現としてエスケープする
-            "input_use": dict(e.get("input_use") or {}),
+            # 撮るフローのファイル名（<flows>/<端末>/ の下）。run_flows.py が走らせるときに書く。
+            # 探索で撮る項目は None
+            "flow": e.get("flow"),
             # 実行時に決める値は端末ごと（その端末の画面を見て決める）。picked は
-            # run_flows.py が見えている1件目を選んだ結果で、撮るたびに選び直す
+            # run_flows.py が見えている1件目を選んだ結果で、撮るたびに選び直す。
             "devices": {d: {"inputs": {k: ((prev.get("devices") or {}).get(d) or {})
                                            .get("inputs", {}).get(k, "")
                                        for k in (e.get("inputs") or {})},
@@ -320,9 +316,10 @@ def main():
     # テストケースそのもの。レビューの「ここで起動し直す」、sim-driver の起動、レポートの見出し
     # after はテストケースの後始末（画面マップの leaves / reset から flowgen が決めたもの。#83）
     case_list = [{"title": c["title"], "launch": c["launch"], "explore": c["explore"],
-                  "after": (rows.get(c["items"][-1]["name"]) or {}).get("after"),
+                  "after": afters.get(c["title"]),
                   "items": [r["name"] for r in c["items"]]} for c in cases]
-    out.write_text(json.dumps(dict(top, repo=plan["repo"], devices=info, flows=str(flows),
+    out.write_text(json.dumps(dict(top, app=plan.get("app"), clear_state=bool(plan.get("clear_state")),
+                                   repo=plan["repo"], devices=info, flows=str(flows),
                                    cases=case_list, sections=sections),
                               ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     carried = []
