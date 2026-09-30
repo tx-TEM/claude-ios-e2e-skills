@@ -3,7 +3,15 @@ appId: jp.example.App
 # detail: tap detail.share_button — Safari で作品のページを開く
 - tapOn:
     id: '^detail\.share_button$'
-# アプリの外（safari）に出る。確かめずに、外に居るまま撮る
+# アプリの外（safari）に出る。ページの読み込みが終わるまで待って、外に居るまま撮る
+- extendedWaitUntil:
+    visible:
+      id: '^TabDocument\?.*IsPageLoaded=true.*'
+    timeout: 10000
+- extendedWaitUntil:
+    visible:
+      id: '^ReloadButton$'
+    timeout: 10000
 - waitForAnimationToEnd:
     timeout: 3000
 - takeScreenshot: '/shots/test_07'

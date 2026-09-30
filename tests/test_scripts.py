@@ -37,6 +37,10 @@ sys.path.insert(0, str(MAP_SCRIPTS))
 from screenmap import check as map_check  # noqa: E402
 from screenmap import map as screen_map  # noqa: E402
 from flowgen import flow as flows_of  # noqa: E402
+from flowgen.actions import Tap  # noqa: E402
+from flowgen.maestro import FlowWriter, check_of  # noqa: E402
+from flowgen.results import External  # noqa: E402
+from flowgen.steps import Act  # noqa: E402
 import diffscope  # noqa: E402
 import manifest_items as MI  # noqa: E402
 
@@ -1209,11 +1213,23 @@ class Flows(unittest.TestCase):
         first, second = flows["test_01.yaml"], item_flow(flows, "test_02")
         ext = first[first.index("# アプリの外（safari）に出る"):]
         self.assertNotIn("launchApp", ext)
-        self.assertIn("waitForAnimationToEnd", ext)
-        self.assertIsNone(rows[0]["checked"])
+        # Safari のページの読み込みが終わるまで待ってから撮る（IsPageLoaded だけでは早いので更新ボタンも）
+        self.assertLess(ext.index("id: '^TabDocument\\?.*IsPageLoaded=true.*'"), ext.index("id: '^ReloadButton$'"))
+        self.assertLess(ext.index("ReloadButton"), ext.index("takeScreenshot"))
+        self.assertEqual(rows[0]["checked"], "ReloadButton")
         head = second[:second.index("follow_button")]
         self.assertIn("# 続き: アプリの外から", head)
         self.assertLess(head.index("- launchApp:\n    stopApp: false"), head.index("id: '^detail$'"))
+
+    def test_ending_outside_elsewhere_is_not_checked(self):
+        # 読み込みの終わりが分からない外のアプリ（Safari 以外）は、動きが止まるのだけ待つ
+        self.assertEqual(External("safari").loaded[-1][0], "ReloadButton")
+        self.assertEqual(External("app_store").loaded, ())
+        st = Act("detail", Tap("detail.share_button"), [External("app_store")], stay=True)
+        self.assertIsNone(check_of(None, st))
+        w = FlowWriter(None, [st], "jp.example.App", False, None, 10000, None, None, None)
+        w.check(st, st.result[0], stay=True)
+        self.assertEqual([c for c in w.out if isinstance(c, dict)], [{"waitForAnimationToEnd": {"timeout": 3000}}])
 
     def test_ending_outside_before_restart(self):
         # 次の項目が起動し直すなら、戻す操作は挟まない

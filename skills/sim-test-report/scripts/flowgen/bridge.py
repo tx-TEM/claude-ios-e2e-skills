@@ -295,6 +295,8 @@ def emit_path(mp, steps, notes, start=None):
                 rights.append("✓ {} が選択状態".format(r.id))
             elif isinstance(r, Hidden):
                 rights.append("✓ {} が消えた".format(r.id))
+            elif isinstance(r, External) and stays_out(steps, n) and r.loaded:
+                rights.append("✓ アプリの外（{}）でページの読み込みが終わった。外に居るまま撮る".format(r.name))
             elif isinstance(r, External) and stays_out(steps, n):
                 rights.append("— アプリの外（{}）に出る。確かめずに、外に居るまま撮る".format(r.name))
             elif isinstance(r, External):

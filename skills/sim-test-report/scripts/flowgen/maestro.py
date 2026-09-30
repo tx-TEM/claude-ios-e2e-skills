@@ -633,6 +633,11 @@ class FlowWriter:
         elif isinstance(r, Hidden):
             self.out.append(wait_gone(*result_sel(st, r, self.values), timeout=self.timeout,
                                       extra=self.result_scope(st, r) or None))
+        elif isinstance(r, External) and stay and r.loaded:
+            # 外に出たまま撮る。外のアプリが読み込みの終わりを出していれば、それを待つ
+            self.out.append(Comment("アプリの外（{}）に出る。ページの読み込みが終わるまで待って、外に居るまま撮る".format(r.name)))
+            self.out.extend(wait_for("id", sel, self.timeout) for _, sel in r.loaded)
+            self.out.append(settle())
         elif isinstance(r, External) and stay:
             # 外に出たまま撮る。外のアプリに anchor は無いので、動きが止まるのだけ待つ
             self.out.append(Comment("アプリの外（{}）に出る。確かめずに、外に居るまま撮る".format(r.name)))
@@ -658,7 +663,8 @@ def check_of(mp, st):
         if isinstance(r, (Visible, Value, Selected, Hidden)):
             checked = r.id
         elif isinstance(r, External):
-            checked = None
+            # 外に居るまま撮るなら、読み込みの終わりを待っている（FlowWriter.check）
+            checked = r.loaded[-1][0] if st.stay and r.loaded else None
     return checked
 
 
