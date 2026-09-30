@@ -17,7 +17,7 @@ iOSアプリの動作確認を、テストケースのレビューからシミ�
 | `test-case-builder` | Agent | コードの差分から確認項目を立て、画面マップがあれば実行できるフローまで組んで返す。レビューを受けるのも実施も判定もしない。`sim-test-report` から呼ばれる |
 | `sim-driver` | Agent | シミュレーターを操作して証跡スクリーンショットを撮る。判定はせず観測した事実だけ返す。`sim-test-report` から呼ばれる |
 | `evidence-judge` | Agent | 証跡を読んでOK/NGを判定し、定義ファイルに書き込む。撮影もレポート生成もしない。`sim-test-report` から呼ばれる |
-| `retaker` | Agent | 判定で撮り直しになった項目だけを、原因を見立てて直し、`run_flows.py --only` で撮り直す。判定はしない。`sim-test-report` から呼ばれる |
+| `retaker` | Agent | 判定で撮り直し（`RETAKE`）になった項目の原因を見立て、plan で直して `run_flows.py` で撮り直すか、画面マップに足す行を返す。判定はしない。`sim-test-report` から呼ばれる |
 
 ## セットアップ
 
@@ -116,7 +116,7 @@ python3 ~/.claude/skills/sim-test-report/scripts/run_flows.py \
   <出力先>/manifest.json
 ```
 
-LLM が値を決める操作で止まったら、値を書いて同じコマンドを叩けば続きを走る（手順2）。詳しくは `run_flows.py` 冒頭の docstring を参照。
+LLM が値を決める操作で止まったら、値を書いて同じコマンドを叩けば続きを走る（手順2）。判定で撮り直し（`RETAKE`）が付いた項目があれば、同じコマンドでそれだけを撮り直す。詳しくは `run_flows.py` 冒頭の docstring を参照。
 
 ### 4. 判定を書き込む（LLM / `evidence-judge`）
 
