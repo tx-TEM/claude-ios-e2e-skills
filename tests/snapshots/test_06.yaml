@@ -7,6 +7,7 @@ env:
     visible:
       id: '^detail$'
     timeout: 10000
+# detail: BackButton が画面にあることは run_flows.py が確かめてある
 # detail: tap BackButton — 前の画面に戻る → list
 - scrollUntilVisible:
     element:

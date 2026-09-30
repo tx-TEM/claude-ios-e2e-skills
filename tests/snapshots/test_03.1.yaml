@@ -1,0 +1,9 @@
+appId: jp.example.App
+---
+# 続き: list から
+- extendedWaitUntil:
+    visible:
+      id: '^list$'
+    timeout: 10000
+# list: hideKeyboard — 打ったあとに開いたキーボードを閉じる
+- hideKeyboard
