@@ -884,6 +884,9 @@ class Leftovers(unittest.TestCase):
         key = ns["run_key"]
         self.assertEqual(key("/x/sim-test-report-20260928-a/shots/iphone"), "sim-test-report-20260928-a/iphone")
         self.assertEqual(key("/x/sim-test-report-20260928-a/shots"), "sim-test-report-20260928-a")
+        # なぞる項目と、探すための読み・送りは作業用の置き場から。実行と端末で分け、証跡のダンプとは下を分ける
+        self.assertEqual(key("/s/.work/replay/sim-test-report-20260928-a/iphone"),
+                         "sim-test-report-20260928-a/iphone/replay")
         self.assertTrue(key(None).startswith("_probe/"))
 
 
@@ -1082,6 +1085,12 @@ class ReportShape(unittest.TestCase):
         out = self.problems({"sections": [{"name": "test_01", "title": "a", "result": "OK"}]})
         self.assertEqual(len(out), 1)
         self.assertIn("古いマニフェスト", out[0])
+
+def reads_screen(args):
+    """run_flows.py が画面を読む inspect か（撮った証跡の隣にダンプを置く inspect ではなく）。
+    読むときは作業用の置き場（`.work/replay/<出力先の名前>/<端末>`。テストでは `<tmp>/replay`）を渡す。"""
+    return len(args) == 3 or "replay" in Path(args[3]).parts
+
 
 def dump_line(cx, cy, on, rid, text="", state="", height=40):
     """elements.py の出力の1行（タブ区切り）。上端は中心から高さの半分を引く。"""
@@ -1493,8 +1502,8 @@ class ItemRunBase:
             if args[0] == "run":
                 self.calls.append(("run", args[3], args[2]))
                 return 0
-            if args[0] == "inspect" and len(args) == 3:
-                self.calls.append(("inspect", args[2], ""))
+            if args[0] == "inspect" and reads_screen(args):
+                self.calls.append(("inspect", args[2], args[3] if len(args) > 3 else ""))
                 state = self.tmp / ".work" / "state"
                 state.mkdir(parents=True, exist_ok=True)
                 dump = self.dumps.pop(0) if len(self.dumps) > 1 else self.dumps[0]
@@ -1580,6 +1589,10 @@ class SeekRun(ItemRunBase, unittest.TestCase):
         self.assertTrue(record.startswith("appId: jp.example.App\n---\n"))
         self.assertEqual(record.count("---"), 1)
         self.assertIn("# run_flows.py がダンプで探す: list.footer\n- scroll\n- scroll\n", record)
+        # 画面を読むときは作業用の置き場を渡す。maestrod.py がそこから実行ごと・端末ごとの置き場を決める
+        reads = [where for c, n, where in self.calls if c == "inspect"]
+        self.assertTrue(reads)
+        self.assertEqual(set(reads), {str(self.tmp / "replay")})
         self.assertLess(record.index("- scroll\n"), record.index("takeScreenshot"))
 
     def test_gives_up_at_both_edges(self):
@@ -2151,7 +2164,7 @@ class CaseRunBase:
                 return 1 if name in self.failing else 0
             if cmd == "inspect":
                 self.calls.append(("inspect", args[2], "", ""))
-                if len(args) == 3:
+                if reads_screen(args):
                     state = self.tmp / ".work" / "state"
                     state.mkdir(parents=True, exist_ok=True)
                     (state / "last_dump_AAAA.txt").write_text(self.dump, encoding="utf-8")

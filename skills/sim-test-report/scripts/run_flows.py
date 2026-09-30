@@ -310,9 +310,14 @@ def first_visible(dump, pattern, exclude=()):
     return found[0] if found else None
 
 
-def read_screen(udid, name):
-    """画面を読んで、(elements.py の出力, 生のダンプ) を返す。読めなければ (None, None)。"""
-    if sh(["inspect", udid, name]) != 0:
+def read_screen(udid, name, where):
+    """画面を読んで、(elements.py の出力, 生のダンプ) を返す。読めなければ (None, None)。
+
+    `where` は作業用の置き場（DeviceRun.scratch）。maestrod.py はそこからダンプの置き場を
+    実行ごと・端末ごとに決める（run_key()）。渡さないと日付ごとの置き場に入り、同じ日の
+    別の実行と上書きし合う。証跡の置き場（shots）は渡さない — 同名の .txt が証跡の隣に並ぶ。
+    """
+    if sh(["inspect", udid, name, str(where)]) != 0:
         return None, None
     state = HERE.parent / ".work" / "state"                 # maestrod.py が置く
     last, raw = state / f"last_dump_{udid}.txt", state / f"last_raw_{udid}.json"
@@ -321,9 +326,9 @@ def read_screen(udid, name):
     return last.read_text(encoding="utf-8"), (raw.read_text(encoding="utf-8") if raw.exists() else "")
 
 
-def read_dump(udid, name):
+def read_dump(udid, name, where):
     """画面を読んで、elements.py の出力を返す。読めなければ None。"""
-    return read_screen(udid, name)[0]
+    return read_screen(udid, name, where)[0]
 
 
 # ---------- 探すもの ----------
@@ -456,7 +461,7 @@ class Seeker:
         self.dump = self.raw = self.box = None
 
     def read(self):
-        self.dump, self.raw = read_screen(self.dv.udid, f"{self.name}.seek{self.k}")
+        self.dump, self.raw = read_screen(self.dv.udid, f"{self.name}.seek{self.k}", self.dv.scratch)
         return self.dump is not None
 
     def run(self, body, what):
@@ -837,7 +842,7 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, retake=N
         """落ちたあと、次のテストケースをどこから組むか（Cursor）。落ちた地点の画面を読んで決める。"""
         if retake or case["next"] is None or case["next"]["restart"]:
             return flows_of.Cursor.fresh(mp)          # 次が無いか、次はどのみち起動し直す
-        dump = read_dump(udid, f"{name}.where")
+        dump = read_dump(udid, f"{name}.where", scratch)
         screen, hits = flows_of.screen_at(mp, shown_ids(dump or ""))
         nxt = case["next"]["name"]
         if screen is None:
