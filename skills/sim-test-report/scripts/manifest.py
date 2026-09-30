@@ -195,6 +195,11 @@ sim-driver は同じテストケースの中で起動し直さない。**項目�
 
 端末ごとに持つ（落ちるのは端末ごと）。run_flows.py がその項目を走らせ直すと消える。探索
 （sim-driver）で撮っても消えない — フローでは撮れなかった記録として残る。
+**判定がまだ（`PENDING`）で `unexpected` のある項目は、run_flows.py を叩くと撮り直す**（判定に
+回す前に、retaker が直してから撮り直すため）。判定が付いたあとは拾わない。それでも撮れず、このまま出すと
+決めて残った `unexpected` は、evidence-judge が `SKIP`（撮れなかった）にする。
+**マニフェストを作り直しても引き継ぐ**（retaker が plan を直して叩き直したあとも、撮れなかった
+項目だけを撮り直すため）。
 
 `desc` / `result` / `note` は手順2で埋める。`result` を `PENDING` で置くのは、
 build_report.py が result の無い項目を拒むため（判定していない項目が
@@ -292,6 +297,9 @@ def main():
         """plan の項目1つを、マニフェストの項目にする。"""
         e, it, name = rows.get(r["name"]) or {}, r["item"], r["name"]
         prev = kept.get(name, {})
+
+        def old_dev(d):
+            return (prev.get("devices") or {}).get(d) or {}
         return {
             "name": name,                      # 証跡・ダンプ・フローのファイル名。引き継ぎの鍵
             "title": it.get("title", ""),      # 確認項目。plan が正
@@ -306,10 +314,11 @@ def main():
             "flow": e.get("flow"),
             # 実行時に決める値は端末ごと（その端末の画面を見て決める）。picked は
             # run_flows.py が見えている1件目を選んだ結果で、撮るたびに選び直す。
-            "devices": {d: {"inputs": {k: ((prev.get("devices") or {}).get(d) or {})
-                                           .get("inputs", {}).get(k, "")
-                                       for k in (e.get("inputs") or {})},
-                            "picked": {}}
+            "devices": {d: dict({"inputs": {k: old_dev(d).get("inputs", {}).get(k, "")
+                                            for k in (e.get("inputs") or {})},
+                                 "picked": {}},
+                                # 撮れなかった記録。作り直しても残し、run_flows.py が撮り直す印にする
+                                **({"unexpected": old_dev(d)["unexpected"]} if old_dev(d).get("unexpected") else {}))
                         for d in devices},
             # 証跡は端末ごとに1枚。ダンプは同名の .txt
             "images": [{"src": f"shots/{d}/{name}.png", "label": LABELS.get(d, d)}

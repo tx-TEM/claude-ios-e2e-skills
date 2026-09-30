@@ -481,6 +481,24 @@ class Manifest(unittest.TestCase):
         shutil.rmtree(Path(m["flows"]), ignore_errors=True)
         shutil.rmtree(work)
 
+    def test_unexpected_is_kept_when_rebuilt(self):
+        # retaker が plan を直して作り直しても、撮れなかった項目だけを撮り直せるように残す
+        work = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, work)
+        plan, out = work / "plan.json", work / "out"
+        plan.write_text(json.dumps({"app": "x", "repo": str(FIXTURE), "cases": cases_of([
+            {"from": "list", "title": "a", "expect": "a"}])}), encoding="utf-8")
+        run_manifest([plan, out, "--device", "iphone=AAAA"])
+        m = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+        self.addCleanup(shutil.rmtree, Path(m["flows"]), True)
+        lost = {"kind": "failed", "reason": "フローが失敗"}
+        MI.find(m, "test_01")[1]["devices"]["iphone"]["unexpected"] = lost
+        (out / "manifest.json").write_text(json.dumps(m, ensure_ascii=False), encoding="utf-8")
+        run_manifest([plan, out, "--device", "iphone=AAAA"])
+        m = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(MI.find(m, "test_01")[1]["devices"]["iphone"],
+                         {"inputs": {}, "picked": {}, "unexpected": lost})
+
 
 class Cases(unittest.TestCase):
     """plan はテストケースの集合。起動し直すのはテストケースの境目だけ。"""
@@ -1089,6 +1107,71 @@ class ReportShape(unittest.TestCase):
         out = self.problems({"sections": [{"name": "test_01", "title": "a", "result": "OK"}]})
         self.assertEqual(len(out), 1)
         self.assertIn("古いマニフェスト", out[0])
+
+    def test_skip_needs_a_reason(self):
+        # 撮れなかった項目は、理由（desc）が無いと読む側に何も残らない
+        out = self.problems(cases_manifest([
+            {"name": "test_01", "title": "a", "desc": " ", "result": "SKIP"},
+            {"name": "test_02", "title": "b", "desc": "フローが落ちた", "result": "SKIP"}]))
+        self.assertEqual(len(out), 1)
+        self.assertIn("test_01 は SKIP なのに desc が空", out[0])
+
+
+def tiny_png(path):
+    """1x1 の PNG を書く。"""
+    import struct
+    import zlib
+
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
+                     + chunk(b"IDAT", zlib.compress(b"\x00\xff\xff\xff")) + chunk(b"IEND", b""))
+
+
+class ReportSkip(unittest.TestCase):
+    """撮れなかった項目（SKIP）も、マニフェストから外さずにカードとして出す。"""
+
+    def build(self, items):
+        ns = runpy.run_path(str(SCRIPTS / "build_report.py"), run_name="build_report")
+        work = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, work)
+        tiny_png(work / "shots" / "iphone" / "test_01.png")
+        tiny_png(work / "shots" / "iphone" / "test_02.png")
+        manifest = work / "manifest.json"
+        manifest.write_text(json.dumps(cases_manifest(items)), encoding="utf-8")
+        return ns["build"](manifest, 750, "題", []).read_text(encoding="utf-8")
+
+    @staticmethod
+    def images(name):
+        return [{"src": "shots/{}/{}.png".format(d, name), "label": d} for d in ("iphone", "ipad")]
+
+    def test_skip_is_counted_apart(self):
+        doc = self.build([
+            {"name": "test_01", "title": "a", "desc": "x", "result": "OK", "image": "shots/iphone/test_01.png"},
+            {"name": "test_03", "title": "c", "desc": "フローが落ちた", "result": "SKIP",
+             "images": self.images("test_03")}])
+        self.assertIn('<span class="ok">OK 1</span><span class="ng">NG 0</span>'
+                      '<span class="skip">撮れなかった 1</span><span class="all">全 2 項目</span>', doc)
+        self.assertIn('<section class="card skip">', doc)
+        self.assertIn("— 撮れなかった</span>", doc)
+        self.assertIn("<span>撮れなかった理由</span><p>フローが落ちた</p>", doc)
+        # 1枚も撮れていなければ、証跡の枠ごと出さない
+        card = doc[doc.index('<section class="card skip">'):]
+        self.assertNotIn('class="shots', card[:card.index("</section>")])
+
+    def test_skip_shows_the_devices_that_were_shot(self):
+        # iPhone は撮れて iPad は撮れなかった。iPhone の画像だけ出す
+        doc = self.build([{"name": "test_02", "title": "b", "desc": "iPad はフローが落ちた",
+                           "result": "SKIP", "images": self.images("test_02")}])
+        self.assertEqual(doc.count("<figure>"), 1)
+        self.assertIn("<figcaption>iphone</figcaption>", doc)
+
+    def test_no_skip_no_pill(self):
+        doc = self.build([{"name": "test_01", "title": "a", "desc": "x", "result": "NG",
+                           "image": "shots/iphone/test_01.png"}])
+        self.assertNotIn('class="skip"', doc)
+        self.assertIn('<span class="all">全 1 項目</span>', doc)
 
 def reads_screen(args):
     """run_flows.py が画面を読む inspect か（撮った証跡の隣にダンプを置く inspect ではなく）。
@@ -2406,6 +2489,18 @@ class RetakeRuns(unittest.TestCase):
             {"name": "test_02", "flow": "test_02.yaml", "result": "RETAKE"}]},
             {"title": "X", "explore": "理由", "items": [{"name": "test_03", "flow": None, "result": "RETAKE"}]}]}
         self.assertEqual(RF["to_retake"](manifest), (["test_02"], ["test_03"]))
+
+    def test_items_not_shot_are_retaken_before_judging(self):
+        # 撮れなかった項目は、判定に回す前に撮り直す。判定が付いたもの（探索で撮って OK、
+        # このまま出すと決めて SKIP）は、記録が残っていても拾わない
+        lost = {"iphone": {"unexpected": {"kind": "failed", "reason": "x"}}, "ipad": {}}
+        manifest = {"cases": [{"title": "A", "items": [
+            {"name": "test_01", "flow": "test_01.yaml", "result": "PENDING", "devices": {"iphone": {}}},
+            {"name": "test_02", "flow": "test_02.yaml", "result": "PENDING", "devices": lost},
+            {"name": "test_03", "flow": "test_03.yaml", "result": "OK", "devices": lost},
+            {"name": "test_04", "flow": "test_04.yaml", "result": "SKIP", "devices": lost},
+            {"name": "test_05", "flow": "test_05.yaml", "result": "RETAKE", "devices": {}}]}]}
+        self.assertEqual(RF["to_retake"](manifest), (["test_02", "test_05"], []))
 
 
 class RetakeRun(CaseRunBase, unittest.TestCase):

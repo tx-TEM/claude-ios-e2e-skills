@@ -51,6 +51,18 @@
         "OK/NG は自分で決めていない（決めるのは呼び出し元と evidence-judge）",
         "run_flows.py を叩いていない（直すものが無い項目を撮り直しても同じ証跡になる）"
       ]
+    },
+    {
+      "id": "not-shot",
+      "prompt": "撮り直す項目: test_03（マニフェストで RETAKE は無い。判定はまだで、unexpected が付いているのはこれだけ）\n\nマニフェストの test_03:\n  title: 作品名で絞り込むと、結果の行が並ぶ\n  expect: 検索欄の語を作品名に含む行だけが並ぶ\n  case: キーワードで一覧を絞り込める（test_02 から始まるテストケースの中）\n  do: [{\"op\": \"text:browse.search_field\", \"input\": \"猫\"}, \"see:browse.book_row.*\"]\n  result: PENDING\n  devices.iphone.unexpected: {\"kind\": \"failed\", \"reason\": \"browse.book_row.* が画面に無い（上下の端まで探した）\"}\n\n進捗ログ progress_iphone.log（抜粋）:\n  test_03 browse.book_row.* を探す: 下の端まで送った / 上の端まで送った / 10秒読み直した\n  test_03 撮影できず browse.book_row.* が画面に無い（上下の端まで探した）\n\n落ちた地点の画面 shots/iphone/test_03.2.txt:\n  画面: 【不明】ナビゲーションバーが無い\n  tap\t画面内\t上端\tid\tテキスト\t状態\n  (195,120)\t○\t100\tbrowse.search_field\t猫\t\n  (195,400)\t○\t380\t\t読み込み中…\t\n\n記録 test_03.yaml（抜粋）: text:browse.search_field に「猫」を打ったあと、何も待たずに see:browse.book_row.* をダンプで探している。\n\n画面マップの browse.yaml:\n  - id: browse.search_field\n    actions:\n      - text:\n        summary: 入力が止まると絞り込む\n        expect: {value: self}\n  （絞り込み中に「読み込み中…」が出ることはマップに書かれていない。以前の回では、絞り込みの結果が出るまで3〜15秒かかった）",
+      "assertions": [
+        "judge の desc が無い（判定の前）ことを踏まえ、unexpected の reason・進捗ログ・落ちた地点の画面・記録から原因を見立てている",
+        "原因を「撮るのが早い／待ちが足りない」（絞り込みの結果が出る前に探して、10秒の読み直しでも出なかった。画面は読み込み中）と見立てている。マップのずれやアプリの不具合とは決めつけていない",
+        "直す先として、絞り込みの結果を待つ手を返している（例: 操作の expect に結果の行を足すマップの行、または plan の do を直す案）。マップに足す行なら自分では書かず、呼び出し元に返している",
+        "マップに足す行が要るなら run_flows.py を叩いていない。plan だけで直せたなら、run_flows.py <manifest>（名前を渡さずに）で撮り直している",
+        "result を書き換えていない（RETAKE を付けて撮り直す、などをしていない）",
+        "OK/NG の判定をしていない"
+      ]
     }
   ]
 }
