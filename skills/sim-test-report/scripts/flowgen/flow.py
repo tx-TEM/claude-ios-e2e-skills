@@ -718,7 +718,7 @@ def plan_rows(plan, timeout=10000):
 def plan_of(manifest):
     """マニフェストから、フローを組むための plan を組み直す。run_flows.py が使う。
 
-    項目の `from` / `do` / `when` はセクションに、テストケースの並びと `launch` / `explore` は
+    テストケースの並びと `launch` / `explore`、その下の項目の `from` / `do` / `when` は
     `cases` に、アプリ（`app` / `clear_state` / `repo`）はマニフェストの頭にある。plan.json は
     読まない — マニフェストを作ったあとに plan を直していると、レビューしたものと違う
     フローを走らせることになる。
@@ -726,12 +726,13 @@ def plan_of(manifest):
     for key in ("app", "repo", "cases"):
         if not manifest.get(key):
             sys.exit("マニフェストに {} が無い（古いマニフェスト）。manifest.py で作り直す".format(key))
-    secs = {s["name"]: s for s in manifest["sections"]}
+    if "sections" in manifest:
+        sys.exit("古いマニフェスト（sections が平らに並んでいる）。manifest.py で作り直す")
     cases = []
     for c in manifest["cases"]:
         case = {"title": c["title"],
-                "items": [{"from": secs[n]["from"], "do": secs[n].get("do") or [],
-                           "when": secs[n].get("when") or []} for n in c["items"]]}
+                "items": [{"from": it["from"], "do": it.get("do") or [],
+                           "when": it.get("when") or []} for it in c["items"]]}
         if c.get("launch"):
             case["launch"] = True
         if c.get("explore"):

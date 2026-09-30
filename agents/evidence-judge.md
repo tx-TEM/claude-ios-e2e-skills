@@ -24,33 +24,51 @@ tools: Read, Bash
 
 マニフェストに確認項目・期待・証跡・ダンプ・自動確認のIDが全部入っているので、**それ以外の文脈は要らない。**
 
+マニフェストは**テストケースの入れ子**。`cases` の要素がテストケースで、項目はその `items` に並ぶ。
+
 ```json
 {
-  "name": "test_02",
-  "case": "キーワードで一覧を絞り込める",
-  "title": "キーワードを打つと入力が止まってから絞り込みが走る",
-  "expect": "入力欄に出ている語を、一覧に残っている行がすべて作品名に含む",
-  "checked": "browse.search_field",
-  "flow": "test_02.yaml",
-  "when": [],
-  "devices": {
-    "iphone": { "inputs": { "BROWSE_SEARCH_FIELD": "春" }, "picked": {} },
-    "ipad":   { "inputs": { "BROWSE_SEARCH_FIELD": "春" }, "picked": {} }
-  },
-  "images": [
-    { "src": "shots/iphone/test_02.png", "label": "iPhone" },
-    { "src": "shots/ipad/test_02.png", "label": "iPad" }
-  ],
-  "desc": "",
-  "result": "PENDING"
+  "cases": [
+    {
+      "title": "キーワードで一覧を絞り込める",
+      "items": [
+        {
+          "name": "test_02",
+          "title": "キーワードを打つと入力が止まってから絞り込みが走る",
+          "expect": "入力欄に出ている語を、一覧に残っている行がすべて作品名に含む",
+          "checked": "browse.search_field",
+          "flow": "test_02.yaml",
+          "when": [],
+          "devices": {
+            "iphone": { "inputs": { "BROWSE_SEARCH_FIELD": "春" }, "picked": {} },
+            "ipad":   { "inputs": { "BROWSE_SEARCH_FIELD": "春" }, "picked": {} }
+          },
+          "images": [
+            { "src": "shots/iphone/test_02.png", "label": "iPhone" },
+            { "src": "shots/ipad/test_02.png", "label": "iPad" }
+          ],
+          "desc": "",
+          "result": "PENDING"
+        }
+      ]
+    }
+  ]
 }
 ```
+
+**項目を名前で引くときは `manifest_items.py` を叩く。** 属するテストケース（`case`。同じテストケースのほかの項目の名前は `siblings`）と一緒に返る。名前を渡さなければ全項目を順に1行ずつ出す。
+
+```bash
+python3 ~/.claude/skills/sim-test-report/scripts/manifest_items.py <出力先>/manifest.json test_02
+```
+
+`desc` / `result` / `note` は、マニフェストのその項目（`cases[].items[]` の中）に書く。
 
 証跡のパスは**マニフェストのある場所からの相対**。**ダンプは証跡と同名の `.txt`**（`shots/iphone/test_02.txt`）。
 
 **`when` はその項目の前提**（「ログイン中」）。結果が前提で分かれる項目は、その前提のときの結果として読む。
 
-**`case` はその項目が属するテストケースの題。** 同じ `case` の項目は1つの機能を順に確かめる流れで、後ろの項目は前の項目の結果を当てにしている。期待に前の項目が出てくる（「test_04（一覧の行をタップすると詳細に移る）で開いたもの」）なら、**その項目の証跡・ダンプ・`picked` も読んで突き合わせ、この項目の `result` の根拠にする。** 項目をまたぐ期待は、手順4（項目をまたぐ食い違い）ではなく、この項目の判定の中身。前の項目が撮れていない・`NG` で、突き合わせられないなら `RETAKE` にし、`desc` にその旨を書く
+**項目はテストケースの下に並ぶ。** 同じテストケースの項目は1つの機能を順に確かめる流れで、後ろの項目は前の項目の結果を当てにしている。期待に前の項目が出てくる（「test_04（一覧の行をタップすると詳細に移る）で開いたもの」）なら、**その項目の証跡・ダンプ・`picked` も読んで突き合わせ、この項目の `result` の根拠にする。** 項目をまたぐ期待は、手順4（項目をまたぐ食い違い）ではなく、この項目の判定の中身。前の項目が撮れていない・`NG` で、突き合わせられないなら `RETAKE` にし、`desc` にその旨を書く
 
 **一覧の行のうちどれを押したかは、端末ごとの値にある。** 押す行を撮るときに決めた項目は、変数名 → 押した行のアクセシビリティ ID で入っている（`"BROWSE_BOOK_ROW": "browse.book_row.銀河鉄道の夜"`）。ダンプの id の欄とそのまま突き合わせられる。
 
