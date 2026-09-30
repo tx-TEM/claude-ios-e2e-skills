@@ -1,25 +1,6 @@
 appId: jp.example.App
-env:
-  SHOTS: ''
 ---
-# 続き: detail から
-- extendedWaitUntil:
-    visible:
-      id: '^detail$'
-    timeout: 10000
-# detail: detail.review_button が画面にあることは run_flows.py が確かめてある
 # detail: tap detail.review_button — レビューを書く画面を開く → login_alert
-- scrollUntilVisible:
-    element:
-      id: '^detail\.review_button$'
-    direction: DOWN
-    timeout: 60000
-    optional: true
-- scrollUntilVisible:
-    element:
-      id: '^detail\.review_button$'
-    direction: UP
-    timeout: 60000
 - tapOn:
     id: '^detail\.review_button$'
 - extendedWaitUntil:
@@ -28,4 +9,4 @@ env:
     timeout: 10000
 - waitForAnimationToEnd:
     timeout: 3000
-- takeScreenshot: '${SHOTS}/test_08'
+- takeScreenshot: '/shots/test_08'

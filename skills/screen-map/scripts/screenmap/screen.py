@@ -166,7 +166,7 @@ class ActionSpec:
         self.op = next((k for k in (OPS if element is not None else GESTURES) if k in self.raw), None)
         self.target = element.get("id") if element is not None else self.raw.get(self.op)
         self.summary = self.raw.get("summary")
-        # 後に残る状態（入力欄の語、絞り込み、セグメントの選択）と、それを既定に戻す操作（#83）。
+        # 後に残る状態（入力欄の語、絞り込み、セグメントの選択）と、それを既定に戻す操作。
         # この操作を使ったテストケースの後に、flowgen が reset を叩くか、無ければ起動し直す
         self.leaves = self.raw.get("leaves")
         self.reset = self.raw.get("reset")

@@ -8,8 +8,8 @@
 
 証跡は `<出力先>/shots/<端末>/<名前>.png` に撮る。名前は項目の並び順から振る
 （`test_01`, `test_02`, …。テストケースをまたいで通しで、explore のテストケースもその場の番号）。
-**同じ項目を複数の端末で撮れる**（`--device iphone=<UDID> --device ipad=<UDID>`）。フローは端末によらず1組で、撮影先だけを
-`${SHOTS}` のまま書き、run_flows.py が端末に合わせて埋める。どの端末で撮るか、どこに出すかは
+**同じ項目を複数の端末で撮れる**（`--device iphone=<UDID> --device ipad=<UDID>`）。手順は端末によらず1組で、
+run_flows.py が撮るときに端末ごとの撮影先を書き込む。どの端末で撮るか、どこに出すかは
 撮る側の設定で、テストケース（plan）は持たない。
 
 **どのシミュレーターで撮るかもここで決める。** UDID から機種名と OS を引いて、マニフェストの
@@ -99,7 +99,8 @@ plan.json の形。**plan はテストケースの集合で、項目は必ずど
             最後の操作のあとの1枚。画面に着くためだけの移動は書かない（from で足りる）。
             遷移する操作も書いてよく、行き先はマップの `expect` で追う。
             `see:<id>` は「その要素を見る」（見えるまでスクロールして確かめる）。
-            **撮る前に何かが出るのを待つのも see。** 見えるまで最大60秒待つ。
+            **撮る前に何かが出るのを待つのも see。** run_flows.py がダンプを読みながら
+            上下の端まで送って探し、無ければ少し読み直してから諦める。
             パターンの要素には、その語を含む行を待つ語を添えられる
               {"op": "see:<パターン>", "input": 語}     その語を含む行（絞り込みの結果など）
               {"op": "see:<パターン>", "runtime": true} 含む語を撮るときに決める
@@ -113,9 +114,9 @@ plan.json の形。**plan はテストケースの集合で、項目は必ずど
               {"op": 操作id, "pick": 条件}  止めて、ダンプと条件から選ばせる
             具体的な1つを決め打つなら ID まで書く（`tap:browse.book_row.吾輩は猫である`）。
             text は打つ文字を {"op": 操作id, …} で添える
-              "runtime": true  **値を実行時に決める。** フローには値を
-                   焼き込まず、`env` の未定のまま残す。着いた画面を
-                   見ないと決まらないときに。焼き込むと、データが
+              "runtime": true  **値を実行時に決める。** plan には書かず、撮るときに
+                   マニフェストの inputs に書く。着いた画面を見ないと
+                   決まらないときに。plan に焼き込むと、データが
                    変わっても古い値で黙って走る
               "input": 値      データに依らない値（一致しない語など）
             from までの経路の途中でパターンの要素を押すときも、見えている1件目。
@@ -136,8 +137,8 @@ plan.json の形。**plan はテストケースの集合で、項目は必ずど
             `{id}` は「test_04（その項目の title）」に展開される。番号で
             書かない — 並べ替えや削除でずれる
 
-**フローの置き場はスキル側の `.work/flows/<出力先の名前>/` に決め、マニフェストの `flows` に
-記録する。** アプリのリポジトリには何も作らない。フローを組むのに要るもの（`app` /
+**記録（run_flows.py が流したもの）の置き場はスキル側の `.work/flows/<出力先の名前>/` に決め、
+マニフェストの `flows` に書く。** アプリのリポジトリには何も作らない。フローを組むのに要るもの（`app` /
 `clear_state` / `repo`）もマニフェストに写す。run_flows.py は plan.json を読まない — レビューの
 あとに plan を直していると、合意したものと違うフローを走らせることになる。
 
@@ -147,17 +148,18 @@ plan.json の形。**plan はテストケースの集合で、項目は必ずど
 **ヘッダの題と meta（ブランチ・確認環境・実施日）は持たない。** レポートを組むときに
 `build_report.py` へ直に渡す。確認環境は撮影する端末を決めるまで決まらない。
 
-**フローを組んだ結果（割ったフロー、押す行の選び方、値の入る先）はマニフェストに載せない。**
+**手順を組んだ結果（1手ずつの分け方、押す行の選び方）はマニフェストに載せない。**
 run_flows.py が撮るときに組み、その場で使う。
 
-**`inputs` は撮影する側（LLM）が決める値。** plan で `runtime` を書いた打つ文字と、
-`pick`（条件つきで選ぶ）の行に付く。値が空のうちはその本を走らせられない（`run_flows.py`
-がそこで止まる）。着いた画面を見ないと決まらないものなので、埋めるのは撮影する側。
+**`inputs` は撮影する側（LLM）が決める値。** 鍵は plan の `do` に書いた操作の文字列
+（`"text:list.search_field"`、`"see:list.row.*"`。同じ項目で同じ操作が2回あれば2つ目から `#2`、
+子の要素の親を選ぶなら `"<操作> in <親のパターン>"`）。plan で `runtime` を書いた打つ文字と
+見る行が含む語、`pick`（条件つきで選ぶ）の行と親に付く。値が空のうちはその手を流せない
+（`run_flows.py` がそこで止まる）。着いた画面を見ないと決まらないものなので、埋めるのは撮影する側。
 **条件の無いパターンの要素は `inputs` に入らない。** `run_flows.py` が画面に見えている1件目を
-選んで `devices.<端末>.picked` に書く。`picked` には、条件つきで選んだ行も含めて、押した行の
-値と、同じ ID の行のうち何番目か（`<変数>_INDEX`。Maestro の `index` に入る）が入る。
-同じ名前の行を区別するため。**埋める側は正規表現のエスケープをかけない。** 各値がセレクタ
-（正規表現）に入るか inputText に入るかは、フローを組むときに決まり、エスケープは
+選んで `devices.<端末>.picked` に書く（経路の途中で押す行は `"経路 tap:<パターン>"`）。`picked` には、
+条件つきで選んだ行も含めて、押した行の値が入る。**埋める側は正規表現のエスケープをかけない。**
+各値がセレクタ（正規表現）に入るか inputText に入るかは手順で決まり、エスケープは
 run_flows.py がする。
 
 plan で `explore` の付いたテストケースは**経路が組めなかったもの**。その項目は `flow` を
@@ -175,7 +177,7 @@ sim-driver は同じテストケースの中で起動し直さない。**項目�
 テストケースの `launch` / `explore` は、レビューの「ここでアプリを起動し直す」や sim-driver の
 起動に、題はレポートの見出しに使う。`after` はテストケースの後始末で、
 画面マップの `leaves` / `reset` から flowgen が決めたもの（`relaunch`: 次の頭で起動し直す、
-`resets`: 叩いて戻す操作、`leaves`: 残る状態の文）。何も要らなければ null（#83）。
+`resets`: 叩いて戻す操作、`leaves`: 残る状態の文）。何も要らなければ null。
 走らせるときに `reset` の画面まで繋げなければ、そこで起動し直す。
 
 なぜスクリプトなのか。一覧の中身（証跡の名前、画面、自動確認のID、フローの
@@ -185,8 +187,8 @@ sim-driver は同じテストケースの中で起動し直さない。**項目�
 **撮れなかったことは `devices.<端末>.unexpected` に run_flows.py が書く**（判定ではないので
 `result` には入れない。`result` は `PENDING` のまま）。フローで撮る予定だった項目だけに付く。
 
-  {"kind": "failed", "reason": "フローが失敗（2本目）"}   その項目が撮れなかった（フローが落ちた、
-        押す行や親が画面に無い、manifest.py の後で画面マップが変わって組めない）
+  {"kind": "failed", "reason": "list.footer が画面に無い（上下の端まで探した）"}   その項目が撮れなかった
+        （do の要素が端まで探しても無い、フローが落ちた、manifest.py の後で画面マップが変わって組めない）
   {"kind": "skipped", "reason": "同じテストケースの test_10 が落ちた"}   前の項目が落ちたので走らせていない
 
 端末ごとに持つ（落ちるのは端末ごと）。run_flows.py がその項目を走らせ直すと消える。探索
@@ -204,10 +206,11 @@ build_report.py が result の無い項目を拒むため（判定していな�
 並べれば時系列になり、スキル側の `.work/flows/` とダンプの置き場も同じ名前になる。
 形が違えば警告を出す（止めはしない）。
 
-**実行時に決めた値（`inputs`）も、同じ変数名のものは引き継ぐ。** 撮り直し
-（`run_flows.py --only`）は手前の項目をなぞるので、前に撮ったときの値が要る。
+**実行時に決めた値（`inputs`）も、同じ鍵のものは引き継ぐ。** 撮り直し
+（`RETAKE` の項目）は手前の項目をなぞるので、前に撮ったときの値が要る。
 消すと、手前の項目の判断を撮り直しのたびにやり直すことになる。plan を直して
-変数が変わった（別の入力欄になった）ものは空に戻す。引き継いだものは出力に出す
+鍵が変わった（別の入力欄になった）ものは空に戻し、引き継がなかった値として出力に出す
+（鍵の形が古いマニフェスト — `LIST_ROW` のような変数名 — の値もこれ）。引き継いだものも出力に出す
 — データが変わっていれば古い値で走るので、見て直せるように。
 """
 import json
@@ -296,7 +299,7 @@ def main():
             "screen": e.get("screen"),         # 撮った画面（経路の計算）。探索は撮るまで決まらない
             "expect": r["expect"],             # 証跡の中で何を確かめるか。plan が正
             "checked": e.get("checked"),       # None なら証跡だけが根拠
-            # 撮るフローのファイル名（<flows>/<端末>/ の下）。run_flows.py が走らせるときに書く。
+            # 流したものの記録のファイル名（<flows>/<端末>/ の下）。run_flows.py が撮るときに書く。
             # 探索で撮る項目は None
             "flow": e.get("flow"),
             # 実行時に決める値は端末ごと（その端末の画面を見て決める）。picked は
@@ -315,7 +318,7 @@ def main():
         }
 
     # plan の並びのまま、項目はテストケースの下に置く。探索のテストケースもその場に置く（フローは持たない）。
-    # after はテストケースの後始末（画面マップの leaves / reset から flowgen が決めたもの。#83）
+    # after はテストケースの後始末（画面マップの leaves / reset から flowgen が決めたもの）
     case_list = [{"title": c["title"], "launch": c["launch"], "explore": c["explore"],
                   "after": afters.get(c["title"]),
                   "items": [item_of(r) for r in c["items"]]} for c in cases]
@@ -331,6 +334,15 @@ def main():
             if kept_inputs:
                 carried.append("{} {}: {}".format(
                     it["name"], d, ", ".join(f"{k}={v}" for k, v in kept_inputs.items())))
+    # 鍵が変わって引き継がなかった値（plan を直した、鍵の形が古い）
+    dropped = []
+    for name, prev in kept.items():
+        now = next((it for it in items if it["name"] == name), None)
+        for d, pdev in (prev.get("devices") or {}).items():
+            have = (now or {}).get("devices", {}).get(d, {}).get("inputs", {}) if now else {}
+            lost = {k: v for k, v in (pdev.get("inputs") or {}).items() if v and k not in have}
+            if lost:
+                dropped.append("{} {}: {}".format(name, d, ", ".join(f"{k}={v}" for k, v in lost.items())))
     blank = sum(1 for s in items if not s["flow"])
     empty = [s["name"] for s in items if not s["title"] or not s["expect"]]
     print(out)
@@ -345,6 +357,10 @@ def main():
     if carried:
         print("  前のマニフェストから引き継いだ実行時の値（データが変わっていれば直す）:")
         for c in carried:
+            print("    " + c)
+    if dropped:
+        print("  引き継がなかった実行時の値（鍵が変わった。要るなら新しい鍵で inputs に書き直す）:")
+        for c in dropped:
             print("    " + c)
     nochk = sum(1 for s in items if s["flow"] and not s["checked"])
     if nochk:

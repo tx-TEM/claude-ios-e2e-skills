@@ -5,7 +5,7 @@ PyYAML は Xcode 同梱の python3.9 に入っていない。入れさせると�
 なので、その範囲に限った最小のパーサを持つ。**読めない行は例外にする。**
 黙って None を返すと、経路が組めないのかマップが間違っているのか分からなくなる。
 
-  from mini_yaml import load_yaml
+  from screenmap.mini_yaml import load_yaml
   load_yaml(Path("screen-map/screens/browse.yaml"))  # dict / list
 """
 import re

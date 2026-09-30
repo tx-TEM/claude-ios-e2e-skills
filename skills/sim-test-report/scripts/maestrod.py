@@ -33,10 +33,10 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 WORK = HERE.parent / ".work"
 # 用途ごとに分ける。混ぜると、残すもの（判断の記録）と捨ててよいもの（生データ、
-# 使い捨てのフロー）と、いま生きている状態（直近のダンプ）が見分けられない。
+# 流したものの記録）と、いま生きている状態（直近のダンプ）が見分けられない。
 DUMPS = WORK / "dumps"        # <実行>/<名前>.json（生） / <名前>.txt（抽出後）
-FLOWS = WORK / "flows"        # <実行>/<端末>/ 以下に run_flows.py が書く使い捨てのフロー
-STATE = WORK / "state"        # 直近のダンプと画面。tap が読む
+FLOWS = WORK / "flows"        # <実行>/<端末>/ 以下に run_flows.py が書く、流したものの記録
+STATE = WORK / "state"        # 直近のダンプと画面。tap と run_flows.py が読む
 # ソケットはデバイスごとに分けるが、**同時に生かすのは1本だけ**。
 #
 # 1つのMCPサーバーが握れるドライバは1台ぶんで、別のデバイスを要求すると
@@ -287,6 +287,9 @@ def run_key(save_to):
     """ダンプの置き場（`.work/dumps/` の下）。実行ごとに分けて、上書きされないようにする。
 
     - `<出力先>/shots/<端末>` → `<出力先の名前>/<端末>`
+    - `.work/replay/<出力先の名前>/<端末>`（run_flows.py がなぞる項目を撮る先と、`do` の要素を
+      探すために画面を読む・送るときの置き場） → `<出力先の名前>/<端末>/replay`。撮った証跡の
+      ダンプと名前がぶつからないように下を分ける
     - `<出力先>/shots` → `<出力先の名前>`
     - 出力先が無い（探索の下見など） → `_probe/<日付>`
     """
@@ -294,6 +297,8 @@ def run_key(save_to):
         d = Path(save_to).expanduser().resolve()
         if d.parent.name == "shots":
             return "{}/{}".format(d.parent.parent.name or "misc", d.name)
+        if d.parent.parent.name == "replay":
+            return "{}/{}/replay".format(d.parent.name, d.name)
         return (d.parent.name if d.name == "shots" else d.name) or "misc"
     return "_probe/" + time.strftime("%Y-%m-%d")
 
@@ -425,7 +430,7 @@ def cmd_sweep(days):
                     freed += sum(f.stat().st_size for f in sub.rglob("*") if f.is_file())
                     shutil.rmtree(sub)
                     n += 1
-    # dumps は生だけ消す。flows は使い捨てなので全部消す。
+    # dumps は生だけ消す。flows（流したものの記録）は判定と撮り直しが済めば要らないので全部消す。
     # どちらも実行ごとのディレクトリに入っているので、空になれば下で畳まれる
     targets = [(DUMPS, (".json",)), (FLOWS, None)]
     for d, suffixes in targets:

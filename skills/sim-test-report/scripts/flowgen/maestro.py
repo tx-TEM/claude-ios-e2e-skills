@@ -1,7 +1,10 @@
-"""ステップを Maestro のフロー（yaml）にする。セレクタ、待ち、フローの切り方、実行時に決める値の名前。
+"""ステップを Maestro のフロー（yaml）にする。セレクタ、待ち、フローの切り方。
 
 どのステップを積むかは flow.py（項目の do）と bridge.py（項目の間の経路）が決める。
 ここはそれを Maestro のコマンドに書くだけ。
+
+**実行時に決める値は、書くときに直接埋める**（`values`。鍵はステップの `key`、steps.py の KEYS）。
+フローは run_flows.py が流す直前に1本ずつ書くので、`env` に未定のまま置く必要が無い。
 """
 import os
 import re
@@ -11,38 +14,21 @@ from typing import Optional
 from screenmap.screen import BACKWARD, is_pattern, pattern_prefix
 from .actions import HideKeyboard, Input, InputLater, Scroll, Tap
 from .results import Arrive, External, Hidden, Selected, Value, Visible
-from .steps import Act, Await, Check, Enter, Restart, See, Shot, goes_out, stays_out, waits_text
+from .steps import Act, Await, Enter, Restart, See, Shot, goes_out, stays_out, waits_text
 
 from .flowyaml import Comment, Raw, render
-
-SHOTS_VAR = "SHOTS"   # 撮影先のディレクトリ。run_flows.py が端末ごとに埋める
 
 
 @dataclass
 class Reveal:
-    """`act` の要素が全部見えるまでスクロールする。要素を操作する Act の直前に必ず挟む（add_reveals）。
+    """`act` の要素が全部見えるまでスクロールする。経路の、要素を操作する Act の直前に挟む（add_reveals）。
 
-    **独立したステップにしておくと、フローを割るときに何もしなくてよい。** 値を決める操作の
-    手前で割ると、そのスクロールは前の本の最後に残る。run_flows.py は前の本を走らせてから
-    画面を読んで値を決めるので、そのとき対象が見えている。
+    **1手ずつ流すステップ（`key` を持つもの）には挟まない。** そちらは run_flows.py がダンプを
+    読んで探し、見えてから流す（add_reveals が飛ばす）。
     """
     act: Act
     item: Optional[str] = None
     up: bool = False          # 下で見つからなければ上も探すか（add_reveals が決める）
-    back: bool = False        # 親を送って見つからなければ戻る向きも探すか（add_reveals が決める）
-    to = None
-
-
-@dataclass
-class Show:
-    """パターンの親（`enter.target`）のどれかが見えるまでスクロールする。Enter の直前に挟む（add_reveals）。
-
-    Enter はフローを割る地点なので、これは前の本の最後に残る。run_flows.py はそこで画面を
-    読んで、見えている親から1つ選ぶ。
-    """
-    enter: Enter
-    item: Optional[str] = None
-    up: bool = False
     to = None
 
 
@@ -64,7 +50,7 @@ def add_returns(steps):
 
     **外に出たこと自体を確かめる項目は、外に出たまま撮る。** 外に出る操作は確かめようが
     無いので、フローはすぐアプリに戻していた。それでは項目の `do` が外に出る操作で
-    終わると、証跡にアプリに戻った画面が写る（#58）。撮るまでは外に居て、戻すのは
+    終わると、証跡にアプリに戻った画面が写る。撮るまでは外に居て、戻すのは
     次のフローの頭に回す。フローは撮る地点で切れるので、Return は次のフローの
     1つ目になる。
 
@@ -88,7 +74,7 @@ def add_returns(steps):
 
 
 class ScrollState:
-    """どの画面がスクロールされているかもしれないか、どの親が送られているかもしれないか。
+    """どの画面がスクロールされているかもしれないか。
 
     add_reveals() が頭から追って更新する。**テストケースをまたいで持ち越す**（flow.py の
     `Cursor`）ので、テストケースごとに組んでも、前のテストケースで下までスクロールした
@@ -99,29 +85,23 @@ class ScrollState:
     全部「スクロールされているかもしれない」とみなす。上も探すぶん遅いが、届かずに落ちない。
     """
 
-    def __init__(self, unknown=False, scrolled=(), swiped=(), fresh=()):
+    def __init__(self, unknown=False, scrolled=(), fresh=()):
         self.unknown = unknown
         self.scrolled = set(scrolled)
-        self.swiped = set(tuple(x) for x in swiped)
         self.fresh = set(fresh)         # unknown のときに、上端から始まると分かった画面
 
     def copy(self):
-        return ScrollState(self.unknown, self.scrolled, self.swiped, self.fresh)
+        return ScrollState(self.unknown, self.scrolled, self.fresh)
 
     def is_scrolled(self, sid):
         return sid in self.scrolled or (self.unknown and sid not in self.fresh)
 
-    def is_swiped(self, sid, wid):
-        return (sid, wid) in self.swiped or (self.unknown and sid not in self.fresh)
-
-    def mark(self, sid, swiped=()):
+    def mark(self, sid):
         self.scrolled.add(sid)
-        self.swiped.update((sid, w) for w in swiped)
 
     def forget(self, sid):
         """上端から始まる（push / modal で開いた）。"""
         self.scrolled.discard(sid)
-        self.swiped.difference_update({k for k in self.swiped if k[0] == sid})
         self.fresh.add(sid)
 
     def clear(self):
@@ -129,32 +109,26 @@ class ScrollState:
         self.__init__()
 
     def to_json(self):
-        return {"unknown": self.unknown, "scrolled": sorted(self.scrolled),
-                "swiped": sorted(list(k) for k in self.swiped), "fresh": sorted(self.fresh)}
+        return {"unknown": self.unknown, "scrolled": sorted(self.scrolled), "fresh": sorted(self.fresh)}
 
     @classmethod
     def from_json(cls, d):
         d = d or {}
-        return cls(bool(d.get("unknown")), d.get("scrolled") or (), d.get("swiped") or (),
-                   d.get("fresh") or ())
+        return cls(bool(d.get("unknown")), d.get("scrolled") or (), d.get("fresh") or ())
 
 
 def add_reveals(steps, state=None):
-    """要素を操作する Act の直前に Reveal を挟む。See は自分がスクロールなので挟まない。
+    """経路の、要素を操作する Act の直前に Reveal を挟む。1手ずつ流すステップ（`key` を持つ）には
+    挟まない（run_flows.py がダンプで探す）。
 
-    **スクロールされているかもしれない画面では、上も探す（`up`）。** 押す前・見る前の
-    スクロールは下向きなので、前の項目で下までスクロールしたままの画面では、上にある
-    要素に届かない。どの画面がスクロールされているかは、ここでテストケースのステップを
-    頭から追って決める（フローを割る前なので項目をまたいで追える）。前のテストケースまでの
-    分は `state`（ScrollState）で受け取り、追った結果もそこに書き戻す。
+    **スクロールされているかもしれない画面では、上も探す（`up`）。** 押す前のスクロールは
+    下向きなので、前の項目で下までスクロールしたままの画面では、上にある要素に届かない。
+    どの画面がスクロールされているかは、ここでテストケースのステップを頭から追って決める。
+    前のテストケースまでの分は `state`（ScrollState）で受け取り、追った結果もそこに書き戻す。
 
     - その画面で押す・見る・`scroll` をしたら、スクロールされているかもしれない
     - 起動し直したときと、push / modal で開いた画面は上端から始まる
     - 戻る（back / dismiss）で戻った画面とタブの先は、前の位置のまま
-
-    **親（`scroll` のある子の親）も同じ考え方で、送られているかもしれない親は戻る向きも探す
-    （`back`）。** 親は画面とその親の id（パターンならパターンのまま）で追う。どのカルーセルを
-    送ったかは走らせるときに決まることがあるので、同じパターンの親は1つとして扱う。
     """
     out, state = [], state if state is not None else ScrollState()
     for st in steps:
@@ -162,34 +136,16 @@ def add_reveals(steps, state=None):
             state.clear()
         elif isinstance(st, Await):
             state.forget(st.to)
-        elif isinstance(st, Check):
-            st.up = state.is_scrolled(st.screen)
-        elif isinstance(st, Enter):
-            out.append(Show(st, st.item, state.is_scrolled(st.screen)))
+        elif isinstance(st, (Enter, See)):
             state.mark(st.screen)
-        elif isinstance(st, See):
-            st.up = state.is_scrolled(st.screen)
-            st.back = any(state.is_swiped(st.screen, w.id) for w in st.within if w.scroll)
-            state.mark(st.screen, [w.id for w in st.within if w.scroll])
         elif isinstance(st, Act):
-            if not isinstance(st.action, (Scroll, HideKeyboard)):
-                back = any(state.is_swiped(st.screen, w.id) for w in st.within if w.scroll)
-                out.append(Reveal(st, st.item, state.is_scrolled(st.screen), back))
-            state.mark(st.screen, [w.id for w in st.within if w.scroll])
+            if st.key is None and not isinstance(st.action, (Scroll, HideKeyboard)):
+                out.append(Reveal(st, st.item, state.is_scrolled(st.screen)))
+            state.mark(st.screen)
             if st.arrive and st.arrive.via in FRESH:
                 state.forget(st.to)
         out.append(st)
     return out
-
-
-def var_name(target):
-    """操作のidから env の変数名を作る。`browse.search_field` → `BROWSE_SEARCH_FIELD`。
-    末尾のパターン記号（`browse.book_row.*`）は落とす。
-
-    **呼ぶ側に名前を決めさせない。** idから決まるので、フローと索引と
-    マニフェストで同じ名前になり、突き合わせに手が要らない。
-    """
-    return re.sub(r"[^A-Za-z0-9]", "_", target.rstrip(".*")).upper()
 
 
 def needs_value(st):
@@ -198,45 +154,9 @@ def needs_value(st):
     return isinstance(st, (Act, See, Enter)) and st.needs_value()
 
 
-def target_of(st):
-    """値を決めるステップの対象の id（変数名の元）。"""
-    return st.action.target if isinstance(st, Act) else st.target
-
-
-def var_of(st, names=None):
-    """その Act の値を入れる env の変数名。assign_vars() が振った名前（無ければ要素の id から作る）。"""
-    return (names or {}).get(id(st)) or var_name(target_of(st))
-
-
-def index_var(var):
-    """パターンの要素のうち何番目を押すか（Maestro の `index`）の変数名。"""
-    return var + "_INDEX"
-
-
 def picks_pattern(st):
     """パターンの要素のどれを押すかを実行時に決めるステップか（打つ文字ではなく）。"""
     return isinstance(st, Act) and isinstance(st.action, Tap) and st.action.pick is not None
-
-
-def assign_vars(steps):
-    """実行時に決める値に変数名を振る。{id(Act): 変数名}。**同じ区間で同じ名前が2回要れば `_2` を
-    付ける**（同じ一覧を2回通るなど）。ここで振れば、フローとマニフェストで名前がずれない。
-
-    **撮影する側が決める値（打つ文字、条件つきの選択、見たい行が含む語）から先に振る。**
-    フローは走らせながら組むので、`from` までの経路は前にどこで終わったかで変わる。経路の
-    途中の親（見えている1件目を選ぶもの）が先に名前を取ると、マニフェストの `inputs` に
-    書いた名前と、組み直したフローの名前がずれる。経路の途中の値はスクリプトが選ぶので、
-    名前がずれても困らない。
-
-    変数名は Maestro のフローに書くときの都合なので、ステップには持たせず、ここで対応を持つ。
-    """
-    used, names = {}, {}
-    wanted = [st for st in steps if needs_value(st)]
-    for st in [st for st in wanted if decided_by_caller(st)] + [st for st in wanted if not decided_by_caller(st)]:
-        base = var_name(target_of(st))
-        used[base] = used.get(base, 0) + 1
-        names[id(st)] = base if used[base] == 1 else "{}_{}".format(base, used[base])
-    return names
 
 
 def decided_by_caller(st):
@@ -245,78 +165,16 @@ def decided_by_caller(st):
         return bool(st.pick.condition)
     if picks_pattern(st):
         return bool(st.action.pick.condition)
-    return True
+    return needs_value(st)
 
 
-def runtime_uses(steps, names):
-    """実行時に決める値の、変数名 → 入る先。`selector`（tapOn の id。正規表現）か
-    `text`（inputText。文字そのまま）。
+def caller_keys(steps):
+    """撮影する側（LLM）が決める値の鍵の並び。マニフェストの `inputs` に空で置く。
 
-    **走らせる側がこれを見てエスケープを分ける。** セレクタは正規表現なので、
-    `牛乳(1L)` や `C++入門` をそのまま入れると別物として解釈され、狙った行に
-    当たらない（`a.b` なら `aXb` にも当たる）。逆に inputText をエスケープすると
-    `\\` ごと打たれる。どちらに入るかはフローを書くここでしか分からない。
+    打つ文字（`runtime`）、見る行が含む語（`see` の `runtime`）、条件つきで選ぶ行と親（`pick`）。
+    条件の無いパターンの要素は run_flows.py が見えている1件目を選ぶので入れない。
     """
-    uses = {}
-    for st in steps:
-        if needs_value(st):
-            text = isinstance(st, Act) and isinstance(st.action, InputLater)
-            uses[var_of(st, names)] = "text" if text else "selector"
-        if picks_pattern(st):
-            uses[index_var(var_of(st, names))] = "index"   # 数字そのもの。エスケープしない
-    return uses
-
-
-def runtime_picks(mp, steps, names):
-    """パターンの要素を押すとき・パターンの親を選ぶときの選び方。
-    変数名 → {"pattern": ID, "pick": 条件, "exclude": [ID], "within": 親}。
-
-    条件が空なら、走らせる側（run_flows.py）が**画面に見えている1件目**を機械的に選ぶ。
-    条件があれば止めて、ダンプと条件から選ばせる。
-
-    `exclude` は、同じ画面で別の要素として定義されている、パターンの前方一致に当たる ID。
-    **行の中の要素（`item_list.cell.title`）は行のパターン（`item_list.cell.*`）にも当たる。**
-    外さないと、見えている1件目として行ではなくタイトルを選ぶ。
-
-    `within` は、子の要素なら、選ぶ範囲の親（いちばん内側）。`{"var": 変数名}`（走らせるときに
-    決めた親）か `{"id": ID}`。run_flows.py はその親の枠の中にある行から選ぶ。
-    """
-    out = {}
-    for st in steps:
-        if isinstance(st, Enter):
-            target, cond, within = st.target, st.pick.condition, st.outer
-        elif picks_pattern(st):
-            target, cond, within = st.action.target, st.action.pick.condition, st.within
-        else:
-            continue
-        prefix = pattern_prefix(target)
-        others = sorted(str(el.get("id")) for el in mp.screens[st.screen].elements
-                        if el.get("id") != target and str(el.get("id") or "").startswith(prefix))
-        pk = {"pattern": target, "pick": cond, "exclude": others}
-        if within:
-            w = within[-1]
-            pk["within"] = {"var": var_of(w.enter, names)} if w.enter else {"id": w.value}
-        out[var_of(st, names)] = pk
-    return out
-
-
-def runtime_sees(mp, steps, names):
-    """見たい行が含む語（`see` の `runtime`）の、変数名 → {"pattern": ID, "exclude": [ID]}。
-
-    **走らせる側（run_flows.py）が、書かれた語を走らせる前に確かめるのに使う**（#85）。
-    フローは `^<接頭辞>.*<語>.*` の ID を探すので、語が今の画面の行の ID に入っていなければ
-    必ず落ちる（作者で絞り込んだのに、ID が作品名の行を作者名で待つ、など）。
-    `exclude` は `runtime_picks()` と同じ（行の中の要素を行と数えない）。
-    """
-    out = {}
-    for st in steps:
-        if not (isinstance(st, See) and st.later):
-            continue
-        prefix = pattern_prefix(st.target)
-        others = sorted(str(el.get("id")) for el in mp.screens[st.screen].elements
-                        if el.get("id") != st.target and str(el.get("id") or "").startswith(prefix))
-        out[var_of(st, names)] = {"pattern": st.target, "exclude": others}
-    return out
+    return [st.key for st in steps if getattr(st, "key", None) and decided_by_caller(st)]
 
 
 def sel_id(value):
@@ -336,24 +194,28 @@ def sel_text(value):
     return ".*" + re.escape(value) + ".*"
 
 
-def element_sel(target, by_label=False, var=None):
-    """要素のセレクタ。(キー, 値)。パターンの要素は、実行時の変数で1つに絞る。"""
+def exact(value):
+    """具体的な ID（ダンプの id の欄を写したもの）のセレクタ。正規表現としてエスケープする。"""
+    return "^" + re.escape(value) + "$"
+
+
+def element_sel(target, by_label=False, value=None):
+    """要素のセレクタ。(キー, 値)。パターンの要素は、実行時に決めた ID で1つに絞る。"""
     if by_label:
         return "text", sel_text(target)
-    if is_pattern(target) and var:
-        # 値はアクセシビリティ ID そのもの（`list.row.牛乳`）。ダンプの id の欄を写せば済む
-        return "id", "^${" + var + "}$"
+    if is_pattern(target) and value:
+        return "id", exact(value)
     return "id", sel_id(target)
 
 
-def parent_sel(w, names=None):
-    """親1つの id のセレクタの値。走らせるときに決める親は変数で。"""
+def parent_sel(w, values=None):
+    """親1つの id のセレクタの値。走らせるときに決めた親は、その ID で。"""
     if w.enter is not None:
-        return "^${" + var_of(w.enter, names) + "}$"
+        return exact((values or {})[w.enter.key])
     return sel_id(w.value)
 
 
-def within_sel(within, names=None):
+def within_sel(within, values=None):
     """親の並び（外から順）を、いちばん内側の親のセレクタ（外側は childOf で入れ子）にする。無ければ None。
 
     **親は具体的な ID で指す。** Maestro の `childOf` に正規表現で複数の親に当たる値を渡すと、
@@ -361,38 +223,39 @@ def within_sel(within, names=None):
     """
     sel = None
     for w in within:
-        d = {"id": parent_sel(w, names)}
+        d = {"id": parent_sel(w, values)}
         if sel is not None:
             d["childOf"] = sel
         sel = d
     return sel
 
 
-def scope(within, names=None):
+def scope(within, values=None):
     """子の要素のセレクタに足すもの（`childOf`）。親が無ければ空。"""
-    sel = within_sel(within, names)
+    sel = within_sel(within, values)
     return {"childOf": sel} if sel else {}
 
 
-def step_sel(st, names=None):
+def step_sel(st, values=None):
     """ステップが指す要素のセレクタ（See は見る要素、Act は操作の要素）。"""
+    values = values or {}
     if isinstance(st, See):
         if st.contains is not None or st.later:
-            # その語を含む行。語は正規表現としてエスケープする（later は run_flows.py がする）
-            word = re.escape(st.contains) if st.contains is not None else "${" + var_of(st, names) + "}"
-            return "id", "^" + re.escape(pattern_prefix(st.target)) + ".*" + word + ".*"
+            # その語を含む行。語は正規表現としてエスケープする
+            word = st.contains if st.contains is not None else values[st.key]
+            return "id", "^" + re.escape(pattern_prefix(st.target)) + ".*" + re.escape(word) + ".*"
         return element_sel(st.target, st.by_label)
     a = st.action
-    var = var_of(st, names) if needs_value(st) and is_pattern(a.target) else None
-    return element_sel(a.target, a.by_label, var)
+    value = values.get(st.key) if needs_value(st) and is_pattern(a.target) else None
+    return element_sel(a.target, a.by_label, value)
 
 
-SCROLL_TIMEOUT = 60000   # scrollUntilVisible の上限。理由は reveal()
+SCROLL_TIMEOUT = 60000   # 経路の scrollUntilVisible の上限。理由は reveal()
 SETTLE_TIMEOUT = 3000    # 着いたあとの落ち着き待ちの上限
 
 
-def reveal(key, value, center=False, up=False, extra=None):
-    """要素が全部見えるまでスクロールする。**マップに載っている要素を操作・確認する前に必ず入れる。**
+def reveal(key, value, up=False):
+    """要素が全部見えるまでスクロールする。**経路で要素を押す前に必ず入れる。**
 
     画面外の要素は、フローからは見つからずに落ちる。さらに悪いことに、ツリーには
     あるが画面外にある要素は、Maestro がその位置を叩いて**別の要素を押す**
@@ -402,28 +265,17 @@ def reveal(key, value, center=False, up=False, extra=None):
     スクロールを繰り返す。スクロール1回は実測5〜8秒（maestrod.py の実測）で、
     60秒でも8〜12回ぶんにしかならない。
 
-    **見る要素（`see`）は `center` で下端から離す。** 付けないと、要素が画面の下端に
-    入ったところでスクロールが止まり、その下が証跡に写らない。押すだけなら下端でも
-    困らないので、操作の前には付けない。
-
-    `centerElement` は中央までは寄せない。下向きでは、要素の中心が画面の上から7割の線
-    より上に来たら止まる（Maestro の `UiElement.isElementNearScreenCenter`。余白は
-    画面の高さの1/5）。初めからその線より上に見えていれば、スクロールしない。
-
-    **上向きには `centerElement` を付けない**（#82）。上向きの `centerElement` は、画面の
-    上のほうに見えている要素を「中央に無い」とみなし、下へ寄せようとして指を下に動かす。
-    一覧がもう一番上だと動かず、画面が変わらなくなるまで空打ちして（実測5回・約8秒）、
-    アプリによっては「引っ張って更新」で一覧を読み込み直す。寄せる理由は下端から離す
-    ことなので、上から入ってくる要素には要らない。
+    **`centerElement` は付けない。** 押すだけなら下端でも困らない（見る要素を下端から離すのは
+    項目の `see` の1手で、FlowWriter.step が書く）。
 
     **`up` なら、下向きを `optional` にして、そのあとに上向きも探す。** 要素が見えているか
-    下にあれば下向きで止まり、上向きは見えている要素なのですぐ抜ける（上向きに
-    `centerElement` を付けないので、寄せ直しのスクロールも起きない）。上にあれば下向きは
+    下にあれば下向きで止まり、上向きは見えている要素なのですぐ抜ける。上にあれば下向きは
     時間切れ（落ちない）になり、上向きで見つかる。scrollUntilVisible はスクロールの端を
     検知しない（Orchestra.scrollUntilVisible）ので、この時間切れは上限いっぱいかかる。
     上限を縮めると、長く下までスクロールしたあとで上に戻りきれないので縮めない。
-    **項目の `do` の最初の要素は、ここに来る前に run_flows.py がダンプで探してある**（Check、
-    #107）。無ければそこで諦めるので、確かめたい要素が無いときにこの上限を払うことは無い。
+    **項目の `do` の要素はここを通らない**。run_flows.py がダンプを読みながら送り、見えて
+    いる ID が変わらなくなったら端として諦める。確かめたい要素が無いときにこの上限を払わない。
+    経路の要素はマップに載っていて基本的に必ずあるので、ここで困らない。
 
     **下を先にする。** 画面は上端から始まるので、`up` の付かない画面と同じく、下にある
     要素はこれまでどおりの速さで見つかる。待ちが増えるのは上にある要素（`up` が無いと
@@ -433,49 +285,13 @@ def reveal(key, value, center=False, up=False, extra=None):
     visible と判定されることがあり、条件に使えない。
     """
     def scroll(direction, optional=False):
-        body = {"element": dict({key: value}, **(extra or {})), "direction": Raw(direction)}
-        if center and direction == "DOWN":
-            body["centerElement"] = True
-        body["timeout"] = SCROLL_TIMEOUT
+        body = {"element": {key: value}, "direction": Raw(direction), "timeout": SCROLL_TIMEOUT}
         if optional:
             body["optional"] = True
         return {"scrollUntilVisible": body}
     if up:
         return [scroll("DOWN", optional=True), scroll("UP")]
     return [scroll("DOWN")]
-
-
-SWIPE_TIMES = 20   # 親を送る回数の上限。理由は reveal_within()
-
-
-def reveal_within(key, value, within, names=None, center=False, up=False, back=False):
-    """子の要素が見えるまで、親を縦に寄せてから親を送る。
-
-    1. **いちばん外の親を縦に寄せる**（`centerElement`）。画面の下端にかかったカルーセルの
-       上からスワイプすると、タブバーを叩く
-    2. **`scroll` のある親を、中の目標が見えるまでその親の上から送る**（`swipe: from: 親`）。
-       画面の中央からのスワイプ（`scrollUntilVisible`）では、中央にある別のスクロールが動く。
-       その親だけが動くこと、1回でカード1枚ぶん（約2秒）進むことは実測で確かめた
-    3. 止めるのは `while: notVisible`。SwiftUI の `ScrollView` は `LazyHStack` でも `HStack`
-       でも画面付近の要素しかツリーに出さないので（実測）、画面外の要素を「見えている」と
-       読んで早く抜けることは無い。UIKit は実測していない
-
-    **`repeat` は上限（SWIPE_TIMES）に達しても落ちない。** 見つからなければ、そのあとの
-    操作・待ちで落ちる。`back` なら、送ったあと戻る向きにも探す（縦の `up` と同じ考え方）。
-    """
-    out = reveal("id", parent_sel(within[0], names), center=True, up=up)
-    for k, w in enumerate(within):
-        if not w.scroll:
-            continue
-        me = within_sel(within[:k + 1], names)
-        if k + 1 < len(within):
-            target = {"id": parent_sel(within[k + 1], names), "childOf": me}
-        else:
-            target = dict({key: value}, childOf=me)
-        for direction in ("LEFT", "RIGHT") if back else ("LEFT",):
-            out.append({"repeat": {"times": SWIPE_TIMES, "while": {"notVisible": target},
-                                   "commands": [{"swipe": {"from": me, "direction": Raw(direction)}}]}})
-    return out
 
 
 def wait_for(selector, value, timeout, extra=None):
@@ -491,17 +307,6 @@ def wait_for(selector, value, timeout, extra=None):
 
 def wait_gone(selector, value, timeout, extra=None):
     return {"extendedWaitUntil": {"notVisible": dict({selector: value}, **(extra or {})), "timeout": timeout}}
-
-
-def parents_of(st):
-    """ステップが使う親（Within）の並び。Show は選ぶ親の外側の親。"""
-    if isinstance(st, Reveal):
-        return st.act.within
-    if isinstance(st, Show):
-        return st.enter.outer
-    if isinstance(st, Enter):
-        return st.outer
-    return getattr(st, "within", None) or []
 
 
 def auto_checks(mp, sid, keep=None, via=None, came=None):
@@ -564,10 +369,10 @@ def anchor_of(mp, sid, notes):
     return a
 
 
-def result_sel(st, r, names=None):
+def result_sel(st, r, values=None):
     """結果が指す要素のセレクタ。操作した要素そのもの（own）なら、操作したのと同じもの（パターンなら操作した1つ）。"""
     if r.own:
-        return step_sel(st, names)
+        return step_sel(st, values)
     return "id", sel_id(r.id)
 
 
@@ -591,15 +396,19 @@ def step_comment(st):
 
 
 def emit_flow(mp, steps, app, clear_state, notes=None, timeout=10000,
-              start=None, launch=True, names=None):
+              start=None, launch=True, values=None, indexes=None, shots=None, head=True):
     """ステップ列から Maestro のフローを1本書く。(フローの中身, 補足) を返す。
 
     `launch=False` はアプリを起動し直さない。続きのフローを出すため。
-    `names` は assign_vars() が振った変数名（実行時に決める値の入れ先）。
+    `values` / `indexes` は実行時に決めた値と、同じ ID の行のうち何番目か（鍵はステップの `key`）。
+    `shots` は撮影先のディレクトリ（端末と、撮るかなぞるかで変わる）。
+    `head=False` は、居る画面の anchor を頭で待たない（1手ずつ流すフロー。run_flows.py が
+    ダンプで見てから流すので要らず、アプリの外に居るまま撮るときは待てない）。
 
     **補足はこのフローのステップに関係するものだけ。**
     """
-    return FlowWriter(mp, steps, app, clear_state, notes, timeout, names).write(start or mp.start, launch)
+    return FlowWriter(mp, steps, app, clear_state, notes, timeout, values, indexes, shots).write(
+        start or mp.start, launch, head)
 
 
 class FlowWriter:
@@ -609,42 +418,27 @@ class FlowWriter:
     flowyaml.render() が最後に1回だけする。
     """
 
-    def __init__(self, mp, steps, app, clear_state, notes, timeout, names=None):
+    def __init__(self, mp, steps, app, clear_state, notes, timeout, values=None, indexes=None, shots=None):
         self.mp, self.steps, self.app = mp, steps, app
-        self.names = names or {}
+        self.values, self.indexes = values or {}, indexes or {}
+        self.shots = shots or "."
         self.clear_state, self.timeout = clear_state, timeout
         self.notes = list(notes or [])
         self.out, self.at = [], None
 
-    def write(self, start, launch):
+    def write(self, start, launch, head=True):
         self.at = start
         if launch:
             self.relaunch(start, 0)
         elif self.steps and isinstance(self.steps[0], Return):
             self.out.append(Comment("続き: アプリの外から"))   # anchor は戻してから待つ
-        else:
+        elif head:
             self.out.append(Comment("続き: " + start + " から"))
             self.wait_anchor(start)
         for i, st in enumerate(self.steps):
             self.step(i, st)
         notes = list(dict.fromkeys(self.notes))   # 同じ画面の anchor 無しなどが重ならないように
-        return render(self.app, self.env(), self.out, notes), notes
-
-    def env(self):
-        """env に置く変数名。**実行時に決める値は env に未定のまま置く。** 値を焼き込むと、
-        データが変わったときに黙って古い値で走る。未定のままなら、埋まっていないことが
-        走らせる前に分かる。撮影先も端末で変わるので焼き込まない。"""
-        used = [SHOTS_VAR] if any(isinstance(st, Shot) for st in self.steps) else []
-        for st in self.steps:
-            # 親を走らせるときに決めたなら、その値は前の本で決まっていても、この本でも使う
-            for w in parents_of(st):
-                if w.enter is not None:
-                    used.append(var_of(w.enter, self.names))
-            if needs_value(st):
-                used.append(var_of(st, self.names))
-            if picks_pattern(st):
-                used.append(index_var(var_of(st, self.names)))
-        return list(dict.fromkeys(used))
+        return render(self.app, self.out, notes), notes
 
     # ---- 着く ----
 
@@ -698,11 +492,7 @@ class FlowWriter:
             self.wait_anchor(st.to)
             self.at = st.to
         elif isinstance(st, Shot):
-            self.out.append({"takeScreenshot": "${" + SHOTS_VAR + "}/" + st.name})
-        elif isinstance(st, Check):
-            # 何も叩かない。この本を走らせる前に、run_flows.py がダンプで探してある
-            self.out.append(Comment("{}: {} が画面にあることは run_flows.py が確かめてある".format(
-                st.screen, st.target)))
+            self.out.append({"takeScreenshot": "{}/{}".format(self.shots, st.name)})
         elif isinstance(st, Return):
             self.out.append(Comment("アプリの外から {} に戻す".format(st.screen)))
             self.out.append({"launchApp": {"stopApp": False}})
@@ -710,61 +500,59 @@ class FlowWriter:
             self.at = st.screen
         elif isinstance(st, Reveal):
             self.reveal(i, st)
-        elif isinstance(st, Show):
-            e = st.enter
-            self.out.append(Comment("{}: 次で選ぶ {} が見えるまでスクロールして止める（ここでどれの中でするかを決める）"
-                                    .format(e.screen, e.target)))
-            self.out.extend(reveal("id", sel_id(e.target), up=st.up, extra=scope(e.outer, self.names)))
         elif isinstance(st, Enter):
-            self.out.append(Comment("{}: {} の中でする（${{{}}}。{}）".format(
-                st.screen, st.target, var_of(st, self.names), st.pick.condition or "見えている1件目")))
+            # 何も叩かない。どの親の中でするかは run_flows.py がダンプを読んで決めた
+            self.out.append(Comment("{}: {} の中でする（{}。{}）".format(
+                st.screen, st.target, self.values.get(st.key, "未定"),
+                st.pick.condition or "見えている1件目")))
         elif isinstance(st, See) and st.text:
             # マップに無い文言（アプリの外など）。スクロールせずに出るまで待つ
             self.out.append(Comment("{}: 「{}」が出るまで待つ".format(st.screen, st.target)))
-            self.out.append(wait_for(*step_sel(st, self.names), timeout=self.timeout))
+            self.out.append(wait_for(*step_sel(st, self.values), timeout=self.timeout))
         elif isinstance(st, See):
             name = st.name
             what = st.target
             if st.contains is not None:
                 what += "（「{}」を含む行）".format(st.contains)
             elif st.later:
-                what += "（${{{}}} を含む行）".format(var_of(st, self.names))
+                what += "（「{}」を含む行）".format(self.values.get(st.key, "未定"))
             if st.within:
-                what += " in " + " > ".join(w.label() for w in st.within)
+                what += " in " + " > ".join(self.parent_label(w) for w in st.within)
             self.out.append(Comment("{}: see {}{}".format(st.screen, what,
                                                             " — " + name if name else "")))
+            key, val = step_sel(st, self.values)
             if st.within:
-                key, val = step_sel(st, self.names)
-                self.out.extend(reveal_within(key, val, st.within, self.names, center=True,
-                                              up=st.up, back=st.back))
-                # 親を送る繰り返しは、見つからなくても落ちない。ここで落とす
-                self.out.append(wait_for(key, val, self.timeout, extra=scope(st.within, self.names)))
+                # 親の中まで run_flows.py が送って見つけてある。見えていることだけ確かめる
+                self.out.append(wait_for(key, val, self.timeout, extra=scope(st.within, self.values)))
             else:
-                self.out.extend(reveal(*step_sel(st, self.names), center=True, up=st.up))
+                # run_flows.py が画面の中に見つけてある。下端から離すだけ（下端にかかって
+                # いれば少し送る。見えているのですぐ抜ける — 時間は着いたあとの待ちと同じ上限）。
+                # 付けないと、要素が下端に入ったところで止まり、その下が証跡に写らない。
+                # centerElement は中央までは寄せず、要素の中心が画面の上から7割の線より上に来たら
+                # 止まる（Maestro の UiElement.isElementNearScreenCenter）。上向きには付けない —
+                # 上のほうに見えている要素を下へ寄せようとして空打ちし（実測5回・約8秒）、
+                # アプリによっては「引っ張って更新」で一覧を読み込み直す
+                self.out.append({"scrollUntilVisible": {
+                    "element": {key: val}, "direction": Raw("DOWN"), "centerElement": True,
+                    "timeout": self.timeout}})
         else:
             self.action(i, st)
 
-    def reveal(self, i, st):
-        """押す前のスクロール。操作の説明（コメント）もここで先に書く。
+    def parent_label(self, w):
+        if w.enter is not None and w.enter.key in self.values:
+            return self.values[w.enter.key]
+        return w.label()
 
-        この本がここで終わるなら、次の本の頭で値を決めて押す。そう書いて止める。
-        """
+    def reveal(self, i, st):
+        """押す前のスクロール（経路だけ）。操作の説明（コメント）もここで先に書く。"""
         act = st.act
-        if i + 1 < len(self.steps) and self.steps[i + 1] is act:
-            self.out.append(step_comment(act))
-        else:
-            what = "打つ文字" if isinstance(act.action, InputLater) else "押すもの"
-            self.out.append(Comment("次で使う {} が見えるまでスクロールして止める（ここで{}を決める）"
-                                    .format(act.action.target, what)))
+        self.out.append(step_comment(act))
         key, val = element_sel(act.action.target, act.action.by_label)
-        if act.within:
-            self.out.extend(reveal_within(key, val, act.within, self.names, up=st.up, back=st.back))
-        else:
-            self.out.extend(reveal(key, val, up=st.up))
+        self.out.extend(reveal(key, val, up=st.up))
 
     def action(self, i, st):
         a = st.action
-        # 直前の Reveal が説明を書いていなければ（割った本の頭）、ここで書く
+        # 直前の Reveal が説明を書いていなければ（1手のフロー、scroll など）、ここで書く
         prev = self.steps[i - 1] if i > 0 else None
         if not (isinstance(prev, Reveal) and prev.act is st):
             self.out.append(step_comment(st))
@@ -780,8 +568,9 @@ class FlowWriter:
         if st.arrive:
             self.arrive(st.to, i + 1, st.arrive.via, st.screen)
             self.at = st.to
-        # すぐ後で撮るなら（間に文言を待つだけなら）、外に出たまま撮る（add_returns）
-        stay = stays_out(self.steps, i, skip=(Reveal,))
+        # すぐ後で撮るなら（間に文言を待つだけなら）、外に出たまま撮る（add_returns）。1手ずつ書くと
+        # 撮影は別の本にあるので、組んだときに項目の並び全体で決めたもの（st.stay）を使う
+        stay = st.stay if st.stay is not None else stays_out(self.steps, i, skip=(Reveal,))
         for r in st.result:
             if not isinstance(r, Arrive):
                 self.check(st, r, stay)
@@ -789,23 +578,23 @@ class FlowWriter:
             self.notes.append("「{}」の結果を確かめる expect がマップに無い".format(a.label()))
 
     def tap(self, st):
-        key, val = step_sel(st, self.names)
-        target = dict({key: val}, **scope(st.within, self.names))
-        if picks_pattern(st):
+        key, val = step_sel(st, self.values)
+        target = dict({key: val}, **scope(st.within, self.values))
+        if picks_pattern(st) and st.key in self.indexes:
             # 同じ名前の行が複数あると ID も同じになる。どれを押すかを index で1つに絞る。
             # Maestro の index は、当たった要素を画面上の位置順（上端の y、次に x）に並べた
             # 番号で、画面外の要素も数える（Filters.index / INDEX_COMPARATOR）。index を
             # 付けないとツリー順の先頭（押せるもの優先）になり、画面に見えているとは限らない。
             # ドキュメントには書かれていない挙動なので、Maestro を上げたら確かめ直す
-            target["index"] = Raw("${" + index_var(var_of(st, self.names)) + "}")
+            target["index"] = int(self.indexes[st.key])
         self.out.append({"tapOn": target})
 
     def type_text(self, st):
-        key, val = step_sel(st, self.names)
-        self.out.append({"tapOn": dict({key: val}, **scope(st.within, self.names))})
+        key, val = step_sel(st, self.values)
+        self.out.append({"tapOn": dict({key: val}, **scope(st.within, self.values))})
         self.out.append("eraseText")         # 前の項目の文字が残ったまま打たない
         if isinstance(st.action, InputLater):
-            self.out.append({"inputText": Raw("${" + var_of(st, self.names) + "}")})
+            self.out.append({"inputText": self.values[st.key]})   # 打つ文字そのもの。エスケープしない
         else:
             self.out.append({"inputText": st.action.text})
 
@@ -825,24 +614,24 @@ class FlowWriter:
         要素、別の画面の要素）は絞らない。
         """
         if r.own:
-            return scope(st.within, self.names)
+            return scope(st.within, self.values)
         scr = self.mp.screens.get(st.screen)
         el, _ = scr.element(r.id) if scr else (None, None)
         ps = [str(p.get("id")) for p in scr.parents(el)] if el is not None else []
         if ps and ps == [w.id for w in st.within[:len(ps)]]:
-            return scope(st.within[:len(ps)], self.names)
+            return scope(st.within[:len(ps)], self.values)
         return {}
 
     def check(self, st, r, stay=False):
         """着く以外の結果を1つ確かめる。`stay` なら、外に出る操作のあとアプリに戻さない。"""
         if isinstance(r, (Visible, Value)):
-            self.out.append(wait_for(*result_sel(st, r, self.names), timeout=self.timeout,
+            self.out.append(wait_for(*result_sel(st, r, self.values), timeout=self.timeout,
                                      extra=self.result_scope(st, r) or None))
         elif isinstance(r, Selected):
-            self.out.append(wait_for(*result_sel(st, r, self.names), timeout=self.timeout,
+            self.out.append(wait_for(*result_sel(st, r, self.values), timeout=self.timeout,
                                      extra=dict(self.result_scope(st, r), selected=True)))
         elif isinstance(r, Hidden):
-            self.out.append(wait_gone(*result_sel(st, r, self.names), timeout=self.timeout,
+            self.out.append(wait_gone(*result_sel(st, r, self.values), timeout=self.timeout,
                                       extra=self.result_scope(st, r) or None))
         elif isinstance(r, External) and stay:
             # 外に出たまま撮る。外のアプリに anchor は無いので、動きが止まるのだけ待つ
@@ -874,7 +663,7 @@ def check_of(mp, st):
 
 
 def shot_context(mp, seg_start, seg_steps):
-    """そのフローが終わる画面と、最後に確かめたID。
+    """その項目が終わる画面と、最後に確かめたID。
 
     flow.py の `render_case()` が返す行に載せるためのもの。**呼ぶ側が経路を読み直して導出せずに済ませる。**
     確かめたIDが無い（`expect` を持たない操作で終わった）なら None で、
@@ -882,7 +671,7 @@ def shot_context(mp, seg_start, seg_steps):
     """
     at, checked = seg_start, mp.anchor(seg_start)
     for st in seg_steps:
-        if isinstance(st, (Shot, Reveal, Show, Return, Enter, Check)):
+        if isinstance(st, (Shot, Reveal, Return, Enter)):
             continue
         if isinstance(st, Restart):
             at = mp.start
@@ -893,14 +682,15 @@ def shot_context(mp, seg_start, seg_steps):
 
 
 def split_at_shots(mp, steps, start, launch_first=True):
-    """撮影ごとにステップを切り、(そのフローの起点, ステップ列, 撮る名前, 起動するか) で返す。
+    """項目（撮影）ごとにステップを切り、(その項目の起点, ステップ列, 撮る名前, 起動し直すか) で返す。
 
-    **1本＝1枚＝1ダンプにするため。** ダンプはフローの途中では取れないので、
-    証跡1枚ごとに構造を残すには、撮る地点でフローを終わらせるしかない。
-    2本目以降は前のフローの続きになるので、歩き直しは起きない。
+    **1項目＝1枚＝1ダンプにするため。** ダンプはフローの途中では取れないので、撮る地点で
+    項目を区切り、その項目の Unit を流し終えてから読む（flow.py の units_of、run_flows.py）。
+    2つ目以降の項目は前の項目の続きになるので、歩き直しは起きない。
 
-    返す4つ目は**そのフローが自分で起動するか。** 起動し直すテストケースの頭の項目
-    （ステップの頭に Restart がある）と、`launch_first` のときの1本目がそう。走らせる側は、
+    返す4つ目は**その項目の頭でアプリを起動し直すか。** 起動し直すテストケースの頭の項目
+    （ステップの頭に Restart がある）と、`launch_first` のときの1つ目がそう。units_of はそれを
+    項目の最初の経路のフローに付ける。走らせる側は、
     その項目の頭でアプリを起動し直したことをマニフェストに残す（判定が証跡を読むため）。
     """
     out, cur, at = [], [], start or mp.start
@@ -920,27 +710,3 @@ def split_at_shots(mp, steps, start, launch_first=True):
     if cur:
         out.append((seg_start, cur, None, launch))
     return out
-
-
-def split_parts(seg_start, seg_steps, launch=False):
-    """実行時に値を決めるステップと、Check の手前で切る。[(起点, ステップ列), ...]。
-
-    **値を決めるには、目的の画面に着いていて、選ぶ対象が見えている必要がある。**
-    手前までを1本にして先に走らせ、止まったところで画面を見て決める。
-    切る箇所ごとに1本増える（途中の一覧で1件選び、着いた先でまた選ぶ、など）。
-    操作の直前には Reveal（対象までのスクロール）があるので、それが前の本の最後に残る。
-
-    **Check（#107）は、`from` までの経路を前の本にして切る。** 経路が無ければ（前の項目から
-    同じ画面で続ける）切らずに、その本の頭で確かめる。ただし起動し直す本（`launch`）の頭では
-    切る — 起動する前の画面を確かめても意味が無い。
-    """
-    parts, cur, at, start = [], [], seg_start, seg_start
-    for st in seg_steps:
-        if needs_value(st) or (isinstance(st, Check) and (cur or (launch and not parts))):
-            parts.append((start, cur))
-            cur, start = [], at
-        cur.append(st)
-        if st.to:
-            at = st.to
-    parts.append((start, cur))
-    return parts

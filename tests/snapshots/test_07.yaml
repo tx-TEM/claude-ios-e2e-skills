@@ -1,41 +1,9 @@
 appId: jp.example.App
-env:
-  SHOTS: ''
 ---
-# 続き: detail から
-- extendedWaitUntil:
-    visible:
-      id: '^detail$'
-    timeout: 10000
-# detail: detail.favorite_button が画面にあることは run_flows.py が確かめてある
-# detail: tap detail.favorite_button — 作品をお気に入りに登録する（アカウントに保存される）
-- scrollUntilVisible:
-    element:
-      id: '^detail\.favorite_button$'
-    direction: DOWN
-    timeout: 60000
-- tapOn:
-    id: '^detail\.favorite_button$'
-- extendedWaitUntil:
-    visible:
-      id: '^detail\.favorite_button$'
-      selected: true
-    timeout: 10000
 # detail: tap detail.share_button — Safari で作品のページを開く
-- scrollUntilVisible:
-    element:
-      id: '^detail\.share_button$'
-    direction: DOWN
-    timeout: 60000
-    optional: true
-- scrollUntilVisible:
-    element:
-      id: '^detail\.share_button$'
-    direction: UP
-    timeout: 60000
 - tapOn:
     id: '^detail\.share_button$'
 # アプリの外（safari）に出る。確かめずに、外に居るまま撮る
 - waitForAnimationToEnd:
     timeout: 3000
-- takeScreenshot: '${SHOTS}/test_07'
+- takeScreenshot: '/shots/test_07'

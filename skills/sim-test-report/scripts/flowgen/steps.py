@@ -1,4 +1,18 @@
-"""フローの1コマ（ステップ）の型。する操作の型は actions.py、起きることの型は results.py。"""
+"""フローの1コマ（ステップ）の型。する操作の型は actions.py、起きることの型は results.py。
+
+KEYS: **項目の `do` のステップは `key` を持つ**（flow.py の build_case() が振る）。鍵は plan の `do` に
+書いた操作の文字列そのもの（`text:list.search_field`、`see:list.row.*`）で、同じ項目で同じ操作が
+2回あれば2つ目から `#2` を付ける。子の要素の親を決める Enter は `<操作> in <親のパターン>`。
+経路の途中で値を決めるステップ（パターンの要素を押す）と子の要素は `経路 <操作>`、その親を決める
+Enter は `経路 in <親のパターン>`（render_case() から route_keys() が振る）。
+
+鍵は2つに使う。
+
+- **run_flows.py が1手ずつ流す単位**（`key` を持つステップ）。`do` の要素は、ダンプで探して
+  から1手ぶんのフローを流す
+- **実行時の値の置き場**（マニフェストの `devices.<端末>.inputs` / `picked` の鍵）。フローの
+  変数名を作らないので、plan を読めば何の値か分かる
+"""
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -25,6 +39,7 @@ class Enter:
     pick: Pick = field(default_factory=Pick)
     outer: list = field(default_factory=list)   # この親の外側の親（Within の並び）
     item: Optional[str] = None
+    key: Optional[str] = None         # 決めた親の鍵（inputs / picked の鍵。KEYS の説明）
     to = None
 
     def needs_value(self):
@@ -99,6 +114,8 @@ class Act:
     result: List[Result] = field(default_factory=list)   # action をすると起きること
     item: Optional[str] = None
     within: List[Within] = field(default_factory=list)   # 子の要素なら、その親（外から順）
+    key: Optional[str] = None         # 項目の do の操作なら、その鍵（KEYS の説明）
+    stay: Optional[bool] = None       # アプリの外に出るなら、外に居るまま撮るか（flow.py の render_case() が決める）
 
     @property
     def arrive(self):
@@ -131,12 +148,11 @@ class See:
     name: Optional[str] = None        # 画面での見え方（フローのコメントになる）
     by_label: bool = False
     item: Optional[str] = None
-    up: bool = False                  # 下で見つからなければ上も探すか（maestro.add_reveals が決める）
     text: bool = False                # マップに無い文言を待つ（see:text:<文言>）
     contains: Optional[str] = None    # この語を含む行を待つ（input）
     later: bool = False               # 含む語を撮るときに決める（runtime）
     within: List[Within] = field(default_factory=list)   # 子の要素なら、その親（外から順）
-    back: bool = False                # 親を送って見つからなければ戻る向きも探すか（maestro.add_reveals が決める）
+    key: Optional[str] = None         # 項目の do の操作なら、その鍵（KEYS の説明）
     to = None
 
     def needs_value(self):
@@ -156,26 +172,6 @@ class Shot:
     """撮る。`name` は証跡の名前（項目の名前）。"""
     name: str
     item: Optional[str] = None
-    to = None
-
-
-@dataclass
-class Check:
-    """`from` に着いたところで、`do` の最初の要素が画面にあるかを run_flows.py が確かめる（#107）。
-
-    **フローはここで割る。** 前の本が `from` まで運び、run_flows.py がダンプを読んで `target` を
-    探してから次の本（`do` の操作と撮影）を走らせる。着いた画面が意図した状態になって
-    いない（ログインしていない、データが無い）と、確かめたい要素がそもそも無い。フローの
-    `scrollUntilVisible` はスクロールの端を検知しないので、無い要素では上限の60秒をまるごと
-    払う。ダンプなら、送る前後で見えている ID が変わらないことで端が分かる。
-
-    `target` は要素の id（パターンなら `*` で終わる）。子の要素なら、いちばん外の親。
-    横に送る親の中までは探さない（それはフローの `reveal_within()` がする）。
-    """
-    screen: str
-    target: str
-    item: Optional[str] = None
-    up: bool = False                  # 下の端で見つからなければ上も探すか（maestro.add_reveals が決める）
     to = None
 
 

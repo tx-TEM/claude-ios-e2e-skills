@@ -1,49 +1,10 @@
 appId: jp.example.App
-env:
-  SHOTS: ''
 ---
-# 続き: list から
-- extendedWaitUntil:
-    visible:
-      id: '^list$'
-    timeout: 10000
-# list: list.search_field が画面にあることは run_flows.py が確かめてある
-# list: text list.search_field — 入力が止まると絞り込む
-- scrollUntilVisible:
-    element:
-      id: '^list\.search_field$'
-    direction: DOWN
-    timeout: 60000
-    optional: true
-- scrollUntilVisible:
-    element:
-      id: '^list\.search_field$'
-    direction: UP
-    timeout: 60000
-- tapOn:
-    id: '^list\.search_field$'
-- eraseText
-- inputText: '猫'
-- extendedWaitUntil:
-    visible:
-      id: '^list\.search_field$'
-    timeout: 10000
 # list: tap Search — 絞り込みを確定し、キーボードを閉じる
-- scrollUntilVisible:
-    element:
-      id: '^Search$'
-    direction: DOWN
-    timeout: 60000
-    optional: true
-- scrollUntilVisible:
-    element:
-      id: '^Search$'
-    direction: UP
-    timeout: 60000
 - tapOn:
     id: '^Search$'
 - extendedWaitUntil:
     visible:
       id: '^list\.search_field$'
     timeout: 10000
-- takeScreenshot: '${SHOTS}/test_03'
+- takeScreenshot: '/shots/test_03'

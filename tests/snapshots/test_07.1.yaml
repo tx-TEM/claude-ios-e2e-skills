@@ -1,19 +1,17 @@
 appId: jp.example.App
 ---
-# 続き: list から
+# list: tap list.row.* [見えている1件目] — 作品の詳細を開く → detail
+- tapOn:
+    id: '^list\.row\.選んだ$'
+    index: 0
 - extendedWaitUntil:
     visible:
-      id: '^list$'
+      id: '^detail$'
     timeout: 10000
-# 次で使う list.row.* が見えるまでスクロールして止める（ここで押すものを決める）
-- scrollUntilVisible:
-    element:
-      id: '^list\.row\..*'
-    direction: DOWN
-    timeout: 60000
-    optional: true
-- scrollUntilVisible:
-    element:
-      id: '^list\.row\..*'
-    direction: UP
-    timeout: 60000
+# detail: 読み込み完了（全部）
+- extendedWaitUntil:
+    visible:
+      id: '^detail\.title$'
+    timeout: 10000
+- waitForAnimationToEnd:
+    timeout: 3000
