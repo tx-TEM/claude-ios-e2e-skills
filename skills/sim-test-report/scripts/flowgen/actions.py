@@ -102,7 +102,7 @@ def resolve_action(spec: ActionSpec, target: Optional[str] = None, how: Optional
                             "{{\"op\": …, \"runtime\": true}} で書く）。"
                             "マップは値を持たない。何を打つかはテストケースが決める".format(target))
         if pattern:
-            # どれに打つかと何を打つかの2つを実行時に決めることになる。変数が1つしか持てない
+            # どれに打つかと何を打つかの2つを実行時に決めることになる。値は鍵（ステップ）ごとに1つしか持てない
             problems.append("text {} はパターンの要素なので、どの欄に打つかを ID まで書く"
                             "（text:{}<表示中の名前>）".format(target, pattern_prefix(target)))
         if how.get("runtime"):

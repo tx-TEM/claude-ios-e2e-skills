@@ -33,10 +33,10 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 WORK = HERE.parent / ".work"
 # 用途ごとに分ける。混ぜると、残すもの（判断の記録）と捨ててよいもの（生データ、
-# 使い捨てのフロー）と、いま生きている状態（直近のダンプ）が見分けられない。
+# 流したものの記録）と、いま生きている状態（直近のダンプ）が見分けられない。
 DUMPS = WORK / "dumps"        # <実行>/<名前>.json（生） / <名前>.txt（抽出後）
 FLOWS = WORK / "flows"        # <実行>/<端末>/ 以下に run_flows.py が書く、流したものの記録
-STATE = WORK / "state"        # 直近のダンプと画面。tap が読む
+STATE = WORK / "state"        # 直近のダンプと画面。tap と run_flows.py が読む
 # ソケットはデバイスごとに分けるが、**同時に生かすのは1本だけ**。
 #
 # 1つのMCPサーバーが握れるドライバは1台ぶんで、別のデバイスを要求すると
@@ -425,7 +425,7 @@ def cmd_sweep(days):
                     freed += sum(f.stat().st_size for f in sub.rglob("*") if f.is_file())
                     shutil.rmtree(sub)
                     n += 1
-    # dumps は生だけ消す。flows は使い捨てなので全部消す。
+    # dumps は生だけ消す。flows（流したものの記録）は判定と撮り直しが済めば要らないので全部消す。
     # どちらも実行ごとのディレクトリに入っているので、空になれば下で畳まれる
     targets = [(DUMPS, (".json",)), (FLOWS, None)]
     for d, suffixes in targets:

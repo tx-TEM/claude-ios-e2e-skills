@@ -42,7 +42,7 @@ class Hidden:
 
 @dataclass
 class External:
-    """アプリの外（Safari、App Store など）に出る。確かめずにアプリに戻す。"""
+    """アプリの外（Safari、App Store など）に出る。確かめない。すぐ後で撮るなら外に居るまま撮り、そうでなければアプリに戻す（maestro.py の FlowWriter.check）。"""
     name: str
 
 

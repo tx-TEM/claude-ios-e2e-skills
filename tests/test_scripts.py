@@ -4,12 +4,13 @@ sim-test-report（manifest.py / run_flows.py と flowgen/ / device/）。
   python3 -m unittest discover tests            テストを走らせる
   UPDATE_SNAPSHOTS=1 python3 -m unittest ...    スナップショットを書き直す
 
-**フローはスナップショットで比べる。** flow.py の `build_steps()` と maestro.py の `emit_flow()` は
-ほぼ純関数で、fixture のマップと plan から書かれるフローの中身がそのまま
-挙動になる。書き直したら、差分を読んでから入れる。
+**フローはスナップショットで比べる。** flow.py の `build_case()` / `render_case()` / `render_unit()`
+（中で maestro.py の `emit_flow()`）はほぼ純関数で、fixture のマップと plan から書かれるフローの
+中身がそのまま挙動になる（実行時に決める値はテスト用の決まった値で埋める）。書き直したら、差分を読んでから入れる。
 
 シミュレーターも Maestro も要らない。manifest.py が UDID から機種を引く
-`device.simulators.lookup()` だけ差し替える（`run_manifest()`）。
+`device.simulators.lookup()`（`run_manifest()`）と、run_flows.py が maestrod.py を叩く `sh()`
+（`ItemRunBase` / `CaseRunBase`）を差し替える。
 """
 import contextlib
 import io
@@ -70,7 +71,7 @@ def cases_of(items):
 
 
 def fake_values(unit):
-    """テストの便宜。1手を書くときに埋める値（run_flows.py がダンプを読んで決めるもの）。
+    """テストの便宜。1手を書くときに埋める値（run_flows.py が決めるもの。ダンプから選ぶ行と、inputs から取る打つ文字・語）。
     パターンの要素は `<接頭辞>選んだ`、打つ文字は `打った`、含む語は `語`。"""
     from flowgen.actions import InputLater
     from flowgen.steps import Act, Enter, See
@@ -873,7 +874,7 @@ class DiffScope(unittest.TestCase):
 
 
 class Leftovers(unittest.TestCase):
-    """前の回の残り（フロー、ダンプの置き場、証跡、進捗ログ）が今回のものに紛れない。"""
+    """ダンプの置き場は実行ごと・端末ごとに分け、前の回のダンプが今回のものに紛れない。"""
 
     def test_run_key_splits_runs_and_devices(self):
         # maestrod.py も読み込むと main() が走るので、関数だけ取り出す
@@ -1337,7 +1338,7 @@ class FirstVisible(unittest.TestCase):
         self.assertEqual(RF["first_visible"](dump, "list.row.*", ["list.row.t*"]), "list.row.こころ")
 
     def test_locate_counts_offscreen_rows_for_index(self):
-        # Maestro の index は画面外も含めた位置順。吾輩は猫である は1件しか無いので 0
+        # Maestro の index は画面外も含めた、同じ ID の行の位置順。画面外の 吾輩は猫である は別の ID なので数えず、C++入門 は1件なので 0
         self.assertEqual(RF["locate"](self.DUMP, "list.row.*"), ("list.row.C++入門", 0, 1))
         dump = (dump_line(195, -40, "×", "list.row.牛乳", "")
                 + dump_line(195, 300, "○", "list.row.牛乳", "")
@@ -2008,7 +2009,7 @@ class NestingCheck(Check):
 
 
 class Nesting(unittest.TestCase):
-    """子の要素は、親を縦に寄せ、親の上から送り、childOf で親の中を指す。"""
+    """子の要素は childOf で親の中を指す。親を縦に寄せて横に送るのは run_flows.py で、フローには書かない。"""
 
     def hands(self, row):
         return [u.step.key for u in row["units"] if u.kind == "hand"]
@@ -2464,6 +2465,7 @@ class MainRetake(CaseRunBase, unittest.TestCase):
                     code = e.code
         finally:
             sys.argv = argv
+        self.printed = out.getvalue()
         self.manifest = json.loads(self.path.read_text(encoding="utf-8"))
         return code
 
@@ -2488,6 +2490,9 @@ class MainRetake(CaseRunBase, unittest.TestCase):
         self.sec("test_03")["result"] = "RETAKE"
         self.sec("test_03")["devices"]["iphone"]["inputs"]["text:list.search_field"] = ""
         self.assertEqual(self.main(), 1)
+        # 止まった手からは続けないので、そう案内する
+        self.assertIn("撮り直す項目のテストケースの頭からなぞり直す", self.printed)
+        self.assertNotIn("続きから走る", self.printed)
         self.assertEqual(self.manifest["resume"]["retake"], ["test_03"])
         self.assertEqual(self.sec("test_03")["result"], "PENDING")
         self.calls.clear()

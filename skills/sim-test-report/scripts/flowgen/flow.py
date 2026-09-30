@@ -16,7 +16,8 @@ plan はテストケース（`cases`）の集合で、項目は必ずどれか�
                    └ 項目の do: do_step()
 
 **1項目は「経路のフロー」と「`do` の1手ずつ」に分かれる**（Unit）。経路（`from` まで）は
-今までどおり1本のフローで、要素は `scrollUntilVisible` で探す。`do` の要素は run_flows.py が
+1本のフローで、要素は `scrollUntilVisible` で探す。ただし経路の途中の、値を決めるステップ
+（パターンの要素を押す）と子の要素（と親を決める Enter）は、`do` と同じく1手にする（route_keys）。`do` の要素は run_flows.py が
 ダンプを読みながら探し、スクロールの端に着いたら諦め、見つかれば1手ぶんのフロー（操作と
 着いた確認）を流す。フローの `scrollUntilVisible` は端を検知しないので、無い要素では
 上限の60秒を払ってしまう。フローは流す直前に `render_unit()` で書き、値はそこで埋める。
@@ -187,7 +188,7 @@ def read_cases(plan):
 
 
 def read_items(plan):
-    """フローを組む項目を確かめて、[{name, from, do: [(操作id, 値の決め方)], restart, when}] にする。
+    """フローを組む項目を確かめて、[{name, from, do: [(操作id, 値の決め方)], restart, case, case_last, when}] にする。
 
     `explore` の付いたテストケースは入れない（経路が組めず、フローを持たない）。
 
@@ -431,7 +432,7 @@ def clean_up(mp, route, steps, left, typed, nxt):
             steps += route.to(sid)
             sts, _ = do_step(mp, route, op, {}, ())
             if any(needs_value(st) for st in sts):
-                # 戻す操作に走らせるときに決める値が要る（パターンの要素など）。後始末ではフローを割らない
+                # 戻す操作に走らせるときに決める値が要る（パターンの要素など）。後始末では値を決めない。起動し直しに倒す
                 raise Unroutable([("call", "reset に値が要る")])
             steps += sts
         if typed:
@@ -604,9 +605,10 @@ class Unit:
     """run_flows.py が1回で流すもの。
 
     - `flow`: 経路。前の項目が終わった画面から `from` まで（起動し直し、後始末、アプリの外から
-      戻す、も入る）。そのまま1本で流す。項目の頭にしか無い
-    - `hand`: `do` の1手（`steps[0]`。鍵を持つステップ）。run_flows.py がダンプを読んで対象を
-      探し、値を決めてから流す。項目の最後の1手には撮影（Shot）が付く
+      戻す、も入る）。そのまま1本で流す。経路の途中に1手が挟まれば、その前後で分かれる
+    - `hand`: 鍵を持つステップ1つ（`steps[0]`）。`do` の1手と、経路の途中で値を決めるステップ・
+      子の要素（route_keys）。run_flows.py がダンプを読んで対象を探し、値を決めてから流す。
+      項目の最後の1手には撮影（Shot）が付く
 
     `start` は流し始める画面、`launch` はこの1本でアプリを起動し直すか。
     """
@@ -643,8 +645,8 @@ def route_keys(steps):
 
 
 def units_of(seg_start, seg_steps, launch):
-    """1項目のステップ列を Unit の並びにする。経路は1本、`do` のステップは1手ずつ。撮影は
-    最後の1手に付ける（`do` が無ければ経路の本に）。"""
+    """1項目のステップ列を Unit の並びにする。鍵の無いステップは続くかぎり1本、鍵を持つステップ
+    （`do` と、経路の route_keys）は1手ずつ。撮影は最後が1手ならそれに付ける（そうでなければ経路の本に）。"""
     units, cur, at, start = [], [], seg_start, seg_start
     for st in seg_steps:
         if getattr(st, "key", None) is not None:
@@ -731,7 +733,7 @@ def plan_rows(plan, timeout=10000):
     ケースどうしは依存しないので、1つ組めなくても他は確かめられる）。組めたら
     テストケースごとの読める経路を標準出力に出す。
 
-    返す行は `render_case()` の行（フローの中身は除く）。撮る画面と自動確認のIDは
+    返す行は `render_case()` の行（`units` は除く）。撮る画面と自動確認のIDは
     `from` と `do` で決まり、どこから繋いだかによらない。後始末（`after`）は、その
     テストケースを最後まで走らせたあとの `leaves` / `reset` から決める。走らせるときに
     `reset` の画面まで繋げなければ、そこで起動し直す。

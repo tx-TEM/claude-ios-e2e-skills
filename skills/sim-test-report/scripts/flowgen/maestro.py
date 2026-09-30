@@ -21,10 +21,10 @@ from .flowyaml import Comment, Raw, render
 
 @dataclass
 class Reveal:
-    """`act` の要素が全部見えるまでスクロールする。経路の Act の直前に必ず挟む（add_reveals）。
+    """`act` の要素が全部見えるまでスクロールする。経路の、要素を操作する Act の直前に挟む（add_reveals）。
 
     **1手ずつ流すステップ（`key` を持つもの）には挟まない。** そちらは run_flows.py がダンプを
-    読んで探し、見えてから流す（render_case() が落とす）。
+    読んで探し、見えてから流す（add_reveals が飛ばす）。
     """
     act: Act
     item: Optional[str] = None
@@ -74,7 +74,7 @@ def add_returns(steps):
 
 
 class ScrollState:
-    """どの画面がスクロールされているかもしれないか、どの親が送られているかもしれないか。
+    """どの画面がスクロールされているかもしれないか。
 
     add_reveals() が頭から追って更新する。**テストケースをまたいで持ち越す**（flow.py の
     `Cursor`）ので、テストケースごとに組んでも、前のテストケースで下までスクロールした
@@ -85,29 +85,23 @@ class ScrollState:
     全部「スクロールされているかもしれない」とみなす。上も探すぶん遅いが、届かずに落ちない。
     """
 
-    def __init__(self, unknown=False, scrolled=(), swiped=(), fresh=()):
+    def __init__(self, unknown=False, scrolled=(), fresh=()):
         self.unknown = unknown
         self.scrolled = set(scrolled)
-        self.swiped = set(tuple(x) for x in swiped)
         self.fresh = set(fresh)         # unknown のときに、上端から始まると分かった画面
 
     def copy(self):
-        return ScrollState(self.unknown, self.scrolled, self.swiped, self.fresh)
+        return ScrollState(self.unknown, self.scrolled, self.fresh)
 
     def is_scrolled(self, sid):
         return sid in self.scrolled or (self.unknown and sid not in self.fresh)
 
-    def is_swiped(self, sid, wid):
-        return (sid, wid) in self.swiped or (self.unknown and sid not in self.fresh)
-
-    def mark(self, sid, swiped=()):
+    def mark(self, sid):
         self.scrolled.add(sid)
-        self.swiped.update((sid, w) for w in swiped)
 
     def forget(self, sid):
         """上端から始まる（push / modal で開いた）。"""
         self.scrolled.discard(sid)
-        self.swiped.difference_update({k for k in self.swiped if k[0] == sid})
         self.fresh.add(sid)
 
     def clear(self):
@@ -115,14 +109,12 @@ class ScrollState:
         self.__init__()
 
     def to_json(self):
-        return {"unknown": self.unknown, "scrolled": sorted(self.scrolled),
-                "swiped": sorted(list(k) for k in self.swiped), "fresh": sorted(self.fresh)}
+        return {"unknown": self.unknown, "scrolled": sorted(self.scrolled), "fresh": sorted(self.fresh)}
 
     @classmethod
     def from_json(cls, d):
         d = d or {}
-        return cls(bool(d.get("unknown")), d.get("scrolled") or (), d.get("swiped") or (),
-                   d.get("fresh") or ())
+        return cls(bool(d.get("unknown")), d.get("scrolled") or (), d.get("fresh") or ())
 
 
 def add_reveals(steps, state=None):
@@ -262,7 +254,7 @@ SCROLL_TIMEOUT = 60000   # 経路の scrollUntilVisible の上限。理由は re
 SETTLE_TIMEOUT = 3000    # 着いたあとの落ち着き待ちの上限
 
 
-def reveal(key, value, center=False, up=False, extra=None):
+def reveal(key, value, up=False):
     """要素が全部見えるまでスクロールする。**経路で要素を押す前に必ず入れる。**
 
     画面外の要素は、フローからは見つからずに落ちる。さらに悪いことに、ツリーには
@@ -273,23 +265,11 @@ def reveal(key, value, center=False, up=False, extra=None):
     スクロールを繰り返す。スクロール1回は実測5〜8秒（maestrod.py の実測）で、
     60秒でも8〜12回ぶんにしかならない。
 
-    **見る要素（`see`）は `center` で下端から離す。** 付けないと、要素が画面の下端に
-    入ったところでスクロールが止まり、その下が証跡に写らない。押すだけなら下端でも
-    困らないので、操作の前には付けない。
-
-    `centerElement` は中央までは寄せない。下向きでは、要素の中心が画面の上から7割の線
-    より上に来たら止まる（Maestro の `UiElement.isElementNearScreenCenter`。余白は
-    画面の高さの1/5）。初めからその線より上に見えていれば、スクロールしない。
-
-    **上向きには `centerElement` を付けない**。上向きの `centerElement` は、画面の
-    上のほうに見えている要素を「中央に無い」とみなし、下へ寄せようとして指を下に動かす。
-    一覧がもう一番上だと動かず、画面が変わらなくなるまで空打ちして（実測5回・約8秒）、
-    アプリによっては「引っ張って更新」で一覧を読み込み直す。寄せる理由は下端から離す
-    ことなので、上から入ってくる要素には要らない。
+    **`centerElement` は付けない。** 押すだけなら下端でも困らない（見る要素を下端から離すのは
+    項目の `see` の1手で、FlowWriter.step が書く）。
 
     **`up` なら、下向きを `optional` にして、そのあとに上向きも探す。** 要素が見えているか
-    下にあれば下向きで止まり、上向きは見えている要素なのですぐ抜ける（上向きに
-    `centerElement` を付けないので、寄せ直しのスクロールも起きない）。上にあれば下向きは
+    下にあれば下向きで止まり、上向きは見えている要素なのですぐ抜ける。上にあれば下向きは
     時間切れ（落ちない）になり、上向きで見つかる。scrollUntilVisible はスクロールの端を
     検知しない（Orchestra.scrollUntilVisible）ので、この時間切れは上限いっぱいかかる。
     上限を縮めると、長く下までスクロールしたあとで上に戻りきれないので縮めない。
@@ -305,10 +285,7 @@ def reveal(key, value, center=False, up=False, extra=None):
     visible と判定されることがあり、条件に使えない。
     """
     def scroll(direction, optional=False):
-        body = {"element": dict({key: value}, **(extra or {})), "direction": Raw(direction)}
-        if center and direction == "DOWN":
-            body["centerElement"] = True
-        body["timeout"] = SCROLL_TIMEOUT
+        body = {"element": {key: value}, "direction": Raw(direction), "timeout": SCROLL_TIMEOUT}
         if optional:
             body["optional"] = True
         return {"scrollUntilVisible": body}
@@ -549,7 +526,12 @@ class FlowWriter:
                 self.out.append(wait_for(key, val, self.timeout, extra=scope(st.within, self.values)))
             else:
                 # run_flows.py が画面の中に見つけてある。下端から離すだけ（下端にかかって
-                # いれば少し送る。見えているのですぐ抜ける — 時間は着いたあとの待ちと同じ上限）
+                # いれば少し送る。見えているのですぐ抜ける — 時間は着いたあとの待ちと同じ上限）。
+                # 付けないと、要素が下端に入ったところで止まり、その下が証跡に写らない。
+                # centerElement は中央までは寄せず、要素の中心が画面の上から7割の線より上に来たら
+                # 止まる（Maestro の UiElement.isElementNearScreenCenter）。上向きには付けない —
+                # 上のほうに見えている要素を下へ寄せようとして空打ちし（実測5回・約8秒）、
+                # アプリによっては「引っ張って更新」で一覧を読み込み直す
                 self.out.append({"scrollUntilVisible": {
                     "element": {key: val}, "direction": Raw("DOWN"), "centerElement": True,
                     "timeout": self.timeout}})
@@ -570,7 +552,7 @@ class FlowWriter:
 
     def action(self, i, st):
         a = st.action
-        # 直前の Reveal が説明を書いていなければ（割った本の頭）、ここで書く
+        # 直前の Reveal が説明を書いていなければ（1手のフロー、scroll など）、ここで書く
         prev = self.steps[i - 1] if i > 0 else None
         if not (isinstance(prev, Reveal) and prev.act is st):
             self.out.append(step_comment(st))
@@ -681,7 +663,7 @@ def check_of(mp, st):
 
 
 def shot_context(mp, seg_start, seg_steps):
-    """そのフローが終わる画面と、最後に確かめたID。
+    """その項目が終わる画面と、最後に確かめたID。
 
     flow.py の `render_case()` が返す行に載せるためのもの。**呼ぶ側が経路を読み直して導出せずに済ませる。**
     確かめたIDが無い（`expect` を持たない操作で終わった）なら None で、
@@ -700,14 +682,15 @@ def shot_context(mp, seg_start, seg_steps):
 
 
 def split_at_shots(mp, steps, start, launch_first=True):
-    """撮影ごとにステップを切り、(そのフローの起点, ステップ列, 撮る名前, 起動するか) で返す。
+    """項目（撮影）ごとにステップを切り、(その項目の起点, ステップ列, 撮る名前, 起動し直すか) で返す。
 
-    **1本＝1枚＝1ダンプにするため。** ダンプはフローの途中では取れないので、
-    証跡1枚ごとに構造を残すには、撮る地点でフローを終わらせるしかない。
-    2本目以降は前のフローの続きになるので、歩き直しは起きない。
+    **1項目＝1枚＝1ダンプにするため。** ダンプはフローの途中では取れないので、撮る地点で
+    項目を区切り、その項目の Unit を流し終えてから読む（flow.py の units_of、run_flows.py）。
+    2つ目以降の項目は前の項目の続きになるので、歩き直しは起きない。
 
-    返す4つ目は**そのフローが自分で起動するか。** 起動し直すテストケースの頭の項目
-    （ステップの頭に Restart がある）と、`launch_first` のときの1本目がそう。走らせる側は、
+    返す4つ目は**その項目の頭でアプリを起動し直すか。** 起動し直すテストケースの頭の項目
+    （ステップの頭に Restart がある）と、`launch_first` のときの1つ目がそう。units_of はそれを
+    項目の最初の経路のフローに付ける。走らせる側は、
     その項目の頭でアプリを起動し直したことをマニフェストに残す（判定が証跡を読むため）。
     """
     out, cur, at = [], [], start or mp.start

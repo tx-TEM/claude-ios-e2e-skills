@@ -15,11 +15,13 @@
 **フローはテストケースごとに、走らせる直前に組む**（flowgen/flow.py）。前のテストケースが
 終わった状態から組む。組むのに要るものはマニフェストから読み、plan.json は読まない。
 
-**1項目は「経路のフロー」と「`do` の1手ずつ」に分けて流す**。
+**1項目は「経路のフロー」と「1手ずつ」に分けて流す**。
 
-  - **経路**（前の画面から `from` まで）は1本のフローのまま。要素は `scrollUntilVisible` で探す。
-    マップに載っていて基本的に必ずある要素なので、それで困らない
-  - **`do` の要素は、ここがダンプを読みながら探す**（`Seeker.hunt()`）。見つからなければ1回送って
+  - **経路**（前の画面から `from` まで）は1本のフロー。要素は `scrollUntilVisible` で探す。
+    マップに載っていて基本的に必ずある要素なので、それで困らない。ただし経路の途中で
+    パターンの要素を押す手（`経路 tap:…`）と、子の要素・その親を決める手（`経路 in …`）は
+    `do` と同じく1手ずつ流す
+  - **`do` の要素（と上の経路の1手）は、ここがダンプを読みながら探す**（`Seeker.hunt()`）。見つからなければ1回送って
     読み直し、画面の中に見えている ID が送る前と同じなら端とする。下の端 → 上の端まで探して
     無ければ、送らずに少し読み直してから、その項目は撮れなかったことにして次へ進む。
     フローの `scrollUntilVisible` はスクロールの端を検知しないので、無い要素では上限の60秒
@@ -47,7 +49,7 @@
 判定を `PENDING` に戻す（撮れずに終わっても、前の回の画像と OK がレポートに残らない）。
 再開と撮り直しのときは進捗ログに区切りの行を足して続ける。
 
-**未定で止まったら、叩き直すと続きから走る。** 撮り終えた端末は飛ばし、止まった端末の
+**未定で止まったら、叩き直すと続きから走る**（撮り直しは除く。下の「撮り直し」）。撮り終えた端末は飛ばし、止まった端末の
 止まった項目の止まった手から走る。状態はマニフェストの `resume` に書き、走り切ったら消す。`resume` には
 止まったテストケースを組んだ状態（`cursor`）も入れ、叩き直したときに同じ手順を組み直す。
 
@@ -152,7 +154,8 @@ MAESTROD = HERE / "maestrod.py"
 
 
 def sh(args, quiet=True):
-    """出力は捨てる。ダンプを読むのは判定する側で、ここではない。
+    """出力は捨てる。画面を読むときは `read_screen()` が maestrod.py の置いたダンプをファイルから
+    読むので、ここの標準出力は使わない。
 
     `quiet=False` でも、**落ちたときだけ**出す。通ったフローの `OK {...}` は
     1本ごとに出ると読むものが増えるだけで、判断には使わない。
@@ -606,8 +609,14 @@ class Hand:
         print(f"{self.name} {why}", file=sys.stderr)
         return ("failed", why)
 
+    def again(self):
+        """止まったあと叩き直すとどうなるか。撮り直しは止まった手からは続けず、テストケースの頭からなぞり直す。"""
+        if self.dv.retake:
+            return "同じコマンドをもう一度叩けば、撮り直す項目のテストケースの頭からなぞり直す。"
+        return "同じコマンドをもう一度叩けば続きから走る。"
+
     def stop(self, log, message):
-        """止まる。**止まった時点でアプリはその画面に居る。** 値を埋めて叩き直せば続きから走る。"""
+        """止まる。**止まった時点でアプリはその画面に居る。** 値を埋めて叩き直す（again()）。"""
         self.dv.logline(f"{self.name} 撮影せず {log}")
         print(f"\n{self.dv.device} {self.name} {message}")
         return ("stopped", self.k)
@@ -623,8 +632,7 @@ class Hand:
                  if picks else "")
         return self.stop(f"入力が未定（{key}）",
                          f"入力が未定（{key}）。\nいまこの画面に居る。見て{value_hint(self.st)}決め、"
-                         f"devices.{self.dv.device}.inputs の \"{key}\" に書き、同じコマンドをもう一度叩けば"
-                         f"続きから走る。{extra}")
+                         f"devices.{self.dv.device}.inputs の \"{key}\" に書き、{self.again()}{extra}")
 
     def play(self):
         st, key, mp = self.st, self.st.key, self.dv.mp
@@ -635,7 +643,7 @@ class Hand:
             prefix = pattern_prefix(st.target)
             return self.stop(f"{key} の「{given}」は行の ID をまるごと書いている",
                              f"{key}: 「{given}」は行の ID をまるごと書いている。行の ID の一部（{prefix} を"
-                             f"除いた語）を書く。devices.{self.dv.device}.inputs を直し、同じコマンドをもう一度叩けば続きから走る。")
+                             f"除いた語）を書く。devices.{self.dv.device}.inputs を直し、{self.again()}")
         picks = isinstance(st, Enter) or (isinstance(st, Act) and isinstance(st.action, Tap)
                                           and st.action.pick is not None)
         if caller and given and picks:
@@ -643,7 +651,7 @@ class Hand:
             prefix = pattern_prefix(pattern)
             if not given.startswith(prefix):
                 # 書いた ID がこの操作のパターンに当たらない（別の画面の ID、接頭辞の書き間違い）。
-                # 押すと別物を押すか落ちる。まだ画面は動いていないので、直して叩き直せば続きから走る
+                # 押すと別物を押すか落ちる。まだ画面は動いていないので、直して叩き直す
                 return self.stop(f"{key} の {given} が {pattern} に当たらない",
                                  f"{key} の値 {given} が {pattern} に当たらない。ダンプの id の欄"
                                  f"（{prefix}…）をそのまま devices.{self.dv.device}.inputs に書き、"
@@ -668,8 +676,7 @@ class Hand:
                         sys.exit(f"{self.dv.device} {self.name} の {key}: {problem}。撮り直しは手前の項目を"
                                  f"なぞるので、devices.{self.dv.device}.inputs を直してから叩き直す")
                     return self.stop(f"{key} の「{given}」を含む行が無い",
-                                     f"{key}: {problem}。devices.{self.dv.device}.inputs を直し、"
-                                     "同じコマンドをもう一度叩けば続きから走る。")
+                                     f"{key}: {problem}。devices.{self.dv.device}.inputs を直し、{self.again()}")
             return self.fail(why)
         if caller and not given:
             return self.missing(key)
@@ -756,8 +763,9 @@ def forget(shots, sec):
 class DeviceRun:
     """1台ぶんを撮るときの置き場。run_item() に渡す。"""
 
-    def __init__(self, device, udid, shots, scratch, fdir, log, app=None, mp=None, clear=False):
+    def __init__(self, device, udid, shots, scratch, fdir, log, app=None, mp=None, clear=False, retake=False):
         self.device, self.udid, self.app, self.mp, self.clear = device, udid, app, mp, clear
+        self.retake = retake                          # 撮り直し中か（止まったときの案内が変わる）
         self.shots, self.scratch, self.fdir, self.log = shots, scratch, fdir, log
 
     def logline(self, text):
@@ -799,7 +807,7 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, retake=N
             sys.exit(f"再開先 {resume_name} が見つからない。ある名前: {', '.join(names)}")
         runs = runs[at:]
 
-    dv = DeviceRun(device, udid, shots, scratch, fdir, log, plan["app"], mp, plan["clear_state"])
+    dv = DeviceRun(device, udid, shots, scratch, fdir, log, plan["app"], mp, plan["clear_state"], bool(retake))
     logline = dv.logline
 
     if retake:
