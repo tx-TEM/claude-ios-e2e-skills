@@ -19,7 +19,8 @@
 1. テストケースごとに、**起動直後の画面から**経路が組めるかを確かめる（flowgen/flow.py の
    `plan_rows()`）。組めなければ全部のテストケースの理由を出して止まる（manifest は
    書かない）。組めたらテストケースごとに読める経路を出す
-2. 返ってきた項目ごとの行から manifest.json を組む。証跡1枚＝1セクション
+2. 返ってきた項目ごとの行から manifest.json を組む。**plan と同じテストケースの入れ子**
+   （`cases` → `items`）で、項目1つ＝証跡1枚。項目の中身はテストケースの下に置く
 
 **フローはここでは書かない。** run_flows.py が撮るときに、前のテストケースが終わった画面から
 テストケースごとに組む。繋げなければ起動し直して起点から組むので、ここでは起点から組めることを
@@ -72,7 +73,7 @@ plan.json の形。**plan はテストケースの集合で、項目は必ずど
 
 テストケース（cases の要素）:
   title     何の機能を確かめるまとまりか（必須。plan の中で重ねない）。
-            マニフェストのセクションの `case` と、レポートの見出しになる
+            マニフェストのテストケースの題と、レポートの見出しになる
   items     項目の並び（必須）。**テストケースの中の項目は前の項目に依存して
             よく、テストケースどうしは依存しない。** まとめるのは、後ろの
             項目の期待が前の項目の結果を指すときと、後ろの項目の結果が
@@ -85,7 +86,7 @@ plan.json の形。**plan はテストケースの集合で、項目は必ずど
   書かない。** 画面マップの操作の `leaves`（残る状態）と `reset`（既定に戻す
   操作）から、テストケースの後にスクリプトが reset を叩くか、起動し直す
   explore   経路が組めなかった理由（「画面 history がマップに無い」）。
-            付いたテストケースはフローを持たず、その場にセクションとして
+            付いたテストケースはフローを持たず、その場に項目として
             並ぶ（sim-driver が探索で撮る）。1項目でも組めなければ付ける
 
 項目（items の要素）:
@@ -163,11 +164,16 @@ plan で `explore` の付いたテストケースは**経路が組めなかっ�
 持たないので `run_flows.py` は飛ばし、sim-driver が探索で撮る。**plan の並びのまま、その場に
 並ぶ** — 証跡の番号とレビューの並びを、探索に回したかどうかで動かさない。
 
-**セクションの `case` は、その項目が属するテストケースの題。** 同じ `case` の項目は、後ろの
-項目が前の項目の結果を当てにしている。判定は期待に出てくる前の項目の証跡も読み、sim-driver は
-同じテストケースの中で起動し直さない。テストケースそのもの（`launch` /
-`explore`、どの項目を含むか）はマニフェストの `cases` に並ぶ。レビューの「ここでアプリを
-起動し直す」や、レポートの見出しはここから出す。`after` はテストケースの後始末で、
+**マニフェストの形は plan と同じテストケースの入れ子。** `cases` の要素がテストケースで、
+その `items` に項目の中身（`name` / `title` / `from` / `do` / `when` / `screen` /
+`expect` / `checked` / `flow` / `devices` / `images` と判定の欄）が並ぶ。同じテストケースの
+項目は、後ろの項目が前の項目の結果を当てにしている。判定は期待に出てくる前の項目の証跡も読み、
+sim-driver は同じテストケースの中で起動し直さない。**項目に属するテストケースの題を持たせない**
+— 親がテストケースなので、題の文字列で紐づけ直さない。名前で1項目を引く、全項目を順に
+並べるときは `manifest_items.py`（`walk()` / `find()`）を通す。
+
+テストケースの `launch` / `explore` は、レビューの「ここでアプリを起動し直す」や sim-driver の
+起動に、題はレポートの見出しに使う。`after` はテストケースの後始末で、
 画面マップの `leaves` / `reset` から flowgen が決めたもの（`relaunch`: 次の頭で起動し直す、
 `resets`: 叩いて戻す操作、`leaves`: 残る状態の文）。何も要らなければ null（#83）。
 走らせるときに `reset` の画面まで繋げなければ、そこで起動し直す。
@@ -187,7 +193,7 @@ plan で `explore` の付いたテストケースは**経路が組めなかっ�
 （sim-driver）で撮っても消えない — フローでは撮れなかった記録として残る。
 
 `desc` / `result` / `note` は手順2で埋める。`result` を `PENDING` で置くのは、
-build_report.py が result の無いセクションを拒むため（判定していない項目が
+build_report.py が result の無い項目を拒むため（判定していない項目が
 黙って OK で出ないように）。
 
 **同じ場所に既にマニフェストがあれば、判定の欄（`desc` / `note` / `result`）を
@@ -209,6 +215,7 @@ import re
 import sys
 from pathlib import Path
 
+import manifest_items
 from device import simulators
 from flowgen import flow as flows_of   # plan からフローを作る
 
@@ -268,33 +275,27 @@ def main():
     if out.exists():
         try:
             old = json.loads(out.read_text(encoding="utf-8"))
-            kept = {sec.get("name"): sec for sec in old.get("sections", []) if sec.get("name")}
+            # 古い形（項目が名前だけ）のものは引き継がない
+            kept = {it.get("name"): it for _, it in manifest_items.walk(old)
+                    if isinstance(it, dict) and it.get("name")}
             top = {k: v for k, v in old.items()
                    if k not in ("sections", "cases", "title", "meta", "resume", "app", "clear_state")}
         except Exception:
             pass
 
-    # plan の並びのまま。探索のテストケースもその場に置く（フローは持たない）
-    entries = [dict(rows.get(r["name"]) or {}, name=r["name"], case=c["title"],
-                    title=r["item"].get("title", ""), expect=r["expect"],
-                    do=r["item"].get("do") or [], when=r["item"].get("when") or [])
-               | {"from": r["item"].get("from")}
-               for c in cases for r in c["items"]]
-
-    sections = []
-    for e in entries:
-        name = e["name"]
+    def item_of(r):
+        """plan の項目1つを、マニフェストの項目にする。"""
+        e, it, name = rows.get(r["name"]) or {}, r["item"], r["name"]
         prev = kept.get(name, {})
-        sections.append({
+        return {
             "name": name,                      # 証跡・ダンプ・フローのファイル名。引き継ぎの鍵
-            "title": e.get("title", ""),       # 確認項目。plan が正
-            "from": e.get("from"),             # 操作を始める画面（plan）
-            "case": e.get("case"),             # 属するテストケースの題（plan）。cases を引く鍵
-            "do": e.get("do", []),             # 確かめる操作（plan）。レビューで読み上げる
+            "title": it.get("title", ""),      # 確認項目。plan が正
+            "from": it.get("from"),            # 操作を始める画面（plan）
+            "do": it.get("do") or [],          # 確かめる操作（plan）。レビューで読み上げる
+            "when": it.get("when") or [],      # 項目の前提（plan）
             "screen": e.get("screen"),         # 撮った画面（経路の計算）。探索は撮るまで決まらない
-            "expect": e.get("expect", ""),     # 証跡の中で何を確かめるか。plan が正
+            "expect": r["expect"],             # 証跡の中で何を確かめるか。plan が正
             "checked": e.get("checked"),       # None なら証跡だけが根拠
-            "when": e.get("when") or [],       # 項目の前提（plan）
             # 撮るフローのファイル名（<flows>/<端末>/ の下）。run_flows.py が走らせるときに書く。
             # 探索で撮る項目は None
             "flow": e.get("flow"),
@@ -311,31 +312,32 @@ def main():
             "desc": prev.get("desc", ""),
             "note": prev.get("note", ""),      # この項目だけの但し書き。判定で埋める
             "result": prev.get("result", "PENDING"),
-        })
-    out.parent.mkdir(parents=True, exist_ok=True)
-    # テストケースそのもの。レビューの「ここで起動し直す」、sim-driver の起動、レポートの見出し
+        }
+
+    # plan の並びのまま、項目はテストケースの下に置く。探索のテストケースもその場に置く（フローは持たない）。
     # after はテストケースの後始末（画面マップの leaves / reset から flowgen が決めたもの。#83）
     case_list = [{"title": c["title"], "launch": c["launch"], "explore": c["explore"],
                   "after": afters.get(c["title"]),
-                  "items": [r["name"] for r in c["items"]]} for c in cases]
-    out.write_text(json.dumps(dict(top, app=plan.get("app"), clear_state=bool(plan.get("clear_state")),
-                                   repo=plan["repo"], devices=info, flows=str(flows),
-                                   cases=case_list, sections=sections),
-                              ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                  "items": [item_of(r) for r in c["items"]]} for c in cases]
+    out.parent.mkdir(parents=True, exist_ok=True)
+    manifest = dict(top, app=plan.get("app"), clear_state=bool(plan.get("clear_state")),
+                    repo=plan["repo"], devices=info, flows=str(flows), cases=case_list)
+    out.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    items = [it for _, it in manifest_items.walk(manifest)]
     carried = []
-    for sec in sections:
-        for d, dev in sec["devices"].items():
+    for it in items:
+        for d, dev in it["devices"].items():
             kept_inputs = {k: v for k, v in dev["inputs"].items() if v}
             if kept_inputs:
                 carried.append("{} {}: {}".format(
-                    sec["name"], d, ", ".join(f"{k}={v}" for k, v in kept_inputs.items())))
-    blank = sum(1 for s in sections if not s["flow"])
-    empty = [s["name"] for s in sections if not s["title"] or not s["expect"]]
+                    it["name"], d, ", ".join(f"{k}={v}" for k, v in kept_inputs.items())))
+    blank = sum(1 for s in items if not s["flow"])
+    empty = [s["name"] for s in items if not s["title"] or not s["expect"]]
     print(out)
     if not re.fullmatch(r"sim-test-report-\d{8}-.+", out_dir.resolve().name):
         print(f"  出力先の名前 {out_dir.resolve().name} が sim-test-report-<日付>-<テーマ> の形でない"
               "（例 sim-test-report-20260928-search）。回ごとに分かれるように付け直すとよい")
-    print(f"  {len(sections)}セクション × {len(devices)}端末")
+    print(f"  {len(case_list)}テストケース・{len(items)}項目 × {len(devices)}端末")
     for n in devices:
         print(f"    {n}: {info[n]['model']} ({info[n]['os']})  {info[n]['udid']}")
     if empty:
@@ -344,7 +346,7 @@ def main():
         print("  前のマニフェストから引き継いだ実行時の値（データが変わっていれば直す）:")
         for c in carried:
             print("    " + c)
-    nochk = sum(1 for s in sections if s["flow"] and not s["checked"])
+    nochk = sum(1 for s in items if s["flow"] and not s["checked"])
     if nochk:
         print(f"  {nochk}件はフローに自動確認が無い（証跡だけが根拠）")
     if blank:

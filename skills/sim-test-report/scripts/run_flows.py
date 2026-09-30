@@ -28,13 +28,13 @@
 止まった項目から走る。状態はマニフェストの `resume` に書き、走り切ったら消す。`resume` には
 止まったテストケースを組んだ状態（`cursor`）も入れ、叩き直したときに同じフローを組み直す。
 
-`flow` を持つセクションだけを対象にする。持たないセクション（経路が組めず探索で
+`flow` を持つ項目だけを対象にする。持たない項目（経路が組めず探索で
 撮るもの）は飛ばすので、**そちらは sim-driver に任せる。**
 
 **フローを一息に走らせる。** 続きのフローは前のフローが終わった画面から始まるので、
 間にアプリの画面を動かすものが入ると次の到達判定が落ちる。ここが最後まで
 走り切ってから sim-driver に渡せば、そうならない。マニフェストの並びに探索の
-セクションが混ざっていてもよい（実行しないだけ）。
+テストケースが混ざっていてもよい（実行しないだけ）。
 
 **`--only` はその項目だけ撮り直す**（判定の `RETAKE` を撮り直すとき）。テストケースの中の
 項目は前の項目に依存するので、その項目だけを走らせても前提の状態が無い。**そのテスト
@@ -51,7 +51,7 @@
 フローを上書きしない。撮り直しはいつもテストケースの頭で起動し直して組むので、
 `--prepare` で書いたものと同じフローになり、直した行だけが違う。
 
-やることは1セクションにつき2つだけ。
+やることは1項目につき2つだけ。
 
   maestrod.py run     <UDID> @<フロー> <名前> <出力先>/shots/<端末>  操作して撮る
   maestrod.py inspect <UDID> <名前> <出力先>/shots/<端末>  同名のダンプを置く
@@ -126,6 +126,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import manifest_items            # マニフェストの項目を名前で引く
 from device import simulators   # UDID から起動しているかを引く
 from flowgen import flow as flows_of   # テストケースごとにフローを組む
 from screenmap.map import load_map
@@ -192,7 +193,7 @@ def save(manifest_path, manifest):
                              encoding="utf-8")
 
 
-def retake_runs(cases, sections, only):
+def retake_runs(cases, manifest, only):
     """`--only` で走らせるテストケースと項目。[(テストケース, [(項目, "shot" / "replay")])]。
 
     撮り直す項目ごとに、**そのテストケースの頭（起動し直して）からその項目まで**を走らせる。
@@ -203,9 +204,9 @@ def retake_runs(cases, sections, only):
     names = [it["name"] for c in cases for it in c["items"]]
     for n in only:
         if n not in names:
-            sec = next((s for s in sections if s.get("name") == n), None)
-            sys.exit(f"{n} はフローを持たない（探索で撮る項目）。sim-driver に渡す" if sec
-                     else f"{n} というセクションが無い。ある名前: {', '.join(names)}")
+            _, found = manifest_items.find(manifest, n)
+            sys.exit(f"{n} はフローを持たない（探索で撮る項目）。sim-driver に渡す" if found
+                     else f"{n} という項目が無い。ある名前: {', '.join(names)}")
     out = []
     for c in cases:
         hit = [k for k, it in enumerate(c["items"]) if it["name"] in only]
@@ -621,9 +622,9 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, only=Non
     plan = flows_of.plan_of(manifest)
     mp = load_map(plan["repo"])
     cases = flows_of.flow_cases(plan)
-    secs = {s["name"]: s for s in manifest["sections"]}
+    secs = {it["name"]: it for _, it in manifest_items.walk(manifest)}
     if only:
-        runs = retake_runs(cases, manifest["sections"], only)
+        runs = retake_runs(cases, manifest, only)
     else:
         runs = [(c, [(it, "shot") for it in c["items"]]) for c in cases]
     resume_name, resume_part = (resume["from"], resume["part"]) if resume else (None, 0)
@@ -646,7 +647,7 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, only=Non
     else:
         # 最初から撮るときは、進捗ログと、マニフェストに無い名前の証跡と、前の回のフローを消す
         log.write_text("", encoding="utf-8")
-        current = {s["name"] for s in manifest["sections"]}
+        current = set(secs)
         for old in list(shots.glob("*.png")) + list(shots.glob("*.txt")):
             if old.stem not in current:
                 old.unlink()
@@ -819,8 +820,10 @@ def main():
     if down:
         sys.exit("起動していないシミュレーターがある。起動してから叩き直す:\n  " + "\n  ".join(down))
 
-    if not any(s.get("flow") for s in manifest["sections"]):
-        sys.exit("flow を持つセクションが無い。全部探索なので sim-driver に渡す。")
+    if "sections" in manifest:
+        sys.exit("古いマニフェスト（sections が平らに並んでいる）。manifest.py で作り直す")
+    if not any(it.get("flow") for _, it in manifest_items.walk(manifest)):
+        sys.exit("flow を持つ項目が無い。全部探索なので sim-driver に渡す。")
 
     # 撮り直しは再開の状態を使わない。止まったら、同じコマンドでまたテストケースの頭から走らせる
     if only:
@@ -869,7 +872,7 @@ def main():
     manifest.pop("resume", None)
     save(manifest_path, manifest)
 
-    skipped = [s.get("name") for s in manifest["sections"] if not s.get("flow")]
+    skipped = [it.get("name") for _, it in manifest_items.walk(manifest) if not it.get("flow")]
     print(f"\nこの実行で {total}件を撮った")
     if skipped:
         print(f"飛ばした（フローが無い。探索で撮る）: {', '.join(x or '?' for x in skipped)}")

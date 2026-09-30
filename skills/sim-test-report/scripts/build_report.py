@@ -24,17 +24,23 @@
     "iphone": {"udid": "…", "model": "iPhone 17 Pro", "os": "iOS 26.5"},
     "ipad": {"udid": "…", "model": "iPad Air 13-inch (M4)", "os": "iOS 26.5"}
   },
-  "sections": [
+  "cases": [
     {
-      "title": "一覧のセルにお気に入りボタンが表示される",
-      "images": [
-        {"src": "shots/iphone/test_01.png", "label": "iPhone"},
-        {"src": "shots/ipad/test_01.png", "label": "iPad"}
-      ],
-      "expect": "各セルの右端に星アイコンのボタンが出る",
-      "desc": "アイテム一覧画面。各セルの右端に星アイコンのボタンが表示される。",
-      "note": "",
-      "result": "OK"
+      "title": "一覧からお気に入り登録できる",
+      "items": [
+        {
+          "name": "test_01",
+          "title": "一覧のセルにお気に入りボタンが表示される",
+          "images": [
+            {"src": "shots/iphone/test_01.png", "label": "iPhone"},
+            {"src": "shots/ipad/test_01.png", "label": "iPad"}
+          ],
+          "expect": "各セルの右端に星アイコンのボタンが出る",
+          "desc": "アイテム一覧画面。各セルの右端に星アイコンのボタンが表示される。",
+          "note": "",
+          "result": "OK"
+        }
+      ]
     }
   ],
   "footer": "実行全体の補足（確認していない項目、一時コード、作成したテストデータなど）",
@@ -43,7 +49,7 @@
 
 - **「実施日」だけは件数の行の右端に出す。** 他の項目（確認環境）は何で確かめたかで、
   いつの結果かはそれと性格が違う。他の項目は件数の行の下に1行ずつ並ぶ
-- 1セクションに複数の画像を並べられる。同じ確認項目をiPhoneとiPadで撮った場合など
+- 1項目に複数の画像を並べられる。同じ確認項目をiPhoneとiPadで撮った場合など
 - images の要素は {"src": ..., "label": ...} か、ラベル不要なら文字列だけでもよい
 - 画像が1枚なら "image": "shots/01_foo.png" と書いてもよい（images 1件と等価）
 - 複数端末を撮った項目は、全ての端末で確認できたときだけ result を "OK" にする
@@ -59,10 +65,11 @@
   読む側は全項目で画像と判定を見る。確認として弱い項目は手順0のレビューで扱う
 - **項目ごとの話はカードに書き、footer は実行全体の話だけにする。** footer に項目番号つきで
   書くと、読む側がカードと行き来して突き合わせることになる
-- **`case`（属するテストケースの題）があれば、変わるところに見出しを置く。** 同じ機能を
+- **カードはテストケース（`cases` の要素）ごとにまとめ、頭にその題の見出しを置く。** 同じ機能を
   順に確かめる項目のまとまりが読める。1項目だけで題が項目と同じなら置かない
-- sections には他の欄を持たせてよい。**知らない欄は無視する** — このマニフェストは
-  手順0で作って工程ごとに埋めていくので、screen / flow / dump なども載っている
+- テストケースと項目には他の欄を持たせてよい。**知らない欄は無視する** — このマニフェストは
+  手順0で作って工程ごとに埋めていくので、screen / flow なども載っている
+- 項目を引くのは manifest_items.py（`walk()`）。平らな `sections` の古いマニフェストは拒む
 - src はマニフェストからの相対パスまたは絶対パス
 - 画像は sips があれば --width（デフォルト750px）に縮小してから埋め込む
 - output 省略時は manifest と同じディレクトリに verification_report.html を出力
@@ -84,6 +91,9 @@ import sys
 import tempfile
 import time
 from datetime import date
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from manifest_items import walk   # noqa: E402  項目を並び順に引く
 
 DEFAULT_WIDTH = 750
 PNG_PAGE_WIDTH = 900
@@ -178,23 +188,19 @@ def meta_items(meta: list[str]) -> list[tuple[str, str]]:
     return [(k, v) for k, v in items if v]
 
 
-def case_heads(sections: list) -> dict:
-    """テストケースの見出しを置く位置。{セクションの番号（1始まり）: 見出し}。
+def case_heads(cases: list) -> dict:
+    """テストケースの見出しを置く位置。{項目の番号（1始まり、通し）: 見出し}。
 
-    セクションの `case`（属するテストケースの題）が変わるところに置く。**1項目だけで、
-    題が項目と同じテストケースには置かない** — 同じ文がカードのすぐ上に2回並ぶだけになる。
-    `case` の無いマニフェスト（スキルを経由せずに書いたもの）では何も置かない。
+    各テストケースの最初の項目の上に置く。**1項目だけで、題が項目と同じテストケースには
+    置かない** — 同じ文がカードのすぐ上に2回並ぶだけになる。
     """
-    sizes = {}
-    for s in sections:
-        if s.get("case"):
-            sizes[s["case"]] = sizes.get(s["case"], 0) + 1
-    heads, prev = {}, None
-    for i, s in enumerate(sections, start=1):
-        case = s.get("case")
-        if case and case != prev and not (sizes[case] == 1 and case == s.get("title")):
-            heads[i] = case
-        prev = case
+    heads, i = {}, 1
+    for case in cases:
+        items = case.get("items") or []
+        title = case.get("title")
+        if items and title and not (len(items) == 1 and title == items[0].get("title")):
+            heads[i] = title
+        i += len(items)
     return heads
 
 
@@ -220,19 +226,22 @@ def shape_problems(manifest: dict) -> list:
     出しようがない（見出しを付けたいなら、文字列の中に改行で書く）。
     """
     out = []
+    if "sections" in manifest:
+        out.append("古いマニフェスト（sections が平らに並んでいる）。manifest.py で作り直す")
     footer = manifest.get("footer", "")
     if not isinstance(footer, str):
         out.append(f"footer が文字列ではない（{type(footer).__name__}）。"
                    "見出しごとに改行した1つの文字列で書く（例: \"確認していないこと: …\\n作成したデータ: 無し\"）")
-    for i, section in enumerate(manifest.get("sections") or [], start=1):
+    for _, item in walk(manifest):
+        name = item.get("name", "")
         for key in TEXT_FIELDS:
-            v = section.get(key, "")
+            v = item.get(key, "")
             if v is not None and not isinstance(v, str):
-                out.append(f"sections[{i}] {section.get('name', '')} の {key} が文字列ではない"
+                out.append(f"{name} の {key} が文字列ではない"
                            f"（{type(v).__name__}）。1つの文字列で書く")
-        if section.get("result") not in ("OK", "NG", "RETAKE"):
-            out.append(f"sections[{i}] {section.get('name', '')} の result が "
-                       f"{section.get('result')!r}。OK / NG / RETAKE のどれかを書く")
+        if item.get("result") not in ("OK", "NG", "RETAKE"):
+            out.append(f"{name} の result が "
+                       f"{item.get('result')!r}。OK / NG / RETAKE のどれかを書く")
     return out
 
 
@@ -246,17 +255,17 @@ def build(manifest_path: pathlib.Path, width: int, title: str, meta: list) -> pa
 
     cards = ""
     counts = {"OK": 0, "NG": 0}
-    heads = case_heads(manifest["sections"])
-    for i, section in enumerate(manifest["sections"], start=1):
+    heads = case_heads(manifest.get("cases") or [])
+    for i, (_, section) in enumerate(walk(manifest), start=1):
         # **既定を OK にしない。** このマニフェストは工程ごとに埋めていくので、
         # 判定を書き忘れた項目が黙って OK で出ると、確かめていないものを
         # 確かめたことにしてしまう。画像を読む前に見る。
         if section.get("result") in (None, "", "PENDING", "RETAKE"):
-            raise SystemExit(f'sections[{i}] "{section.get("title", "")}" の result が'
+            raise SystemExit(f'{section.get("name", i)} "{section.get("title", "")}" の result が'
                              f' {section.get("result")!r}。判定していない項目と'
                              '撮り直しが要る項目を、レポートに出せない。')
         if not (section.get("title") or "").strip():
-            raise SystemExit(f'sections[{i}] に title が無い。'
+            raise SystemExit(f'{section.get("name", i)} に title が無い。'
                              'マニフェストの骨組みのまま生成しようとしている。')
         shots = ""
         for path, label in section_images(section, base_dir):

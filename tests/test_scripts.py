@@ -37,6 +37,7 @@ from screenmap import check as map_check  # noqa: E402
 from screenmap import map as screen_map  # noqa: E402
 from flowgen import flow as flows_of  # noqa: E402
 import diffscope  # noqa: E402
+import manifest_items as MI  # noqa: E402
 
 
 def load_run_flows():
@@ -48,6 +49,11 @@ def load_run_flows():
 
 
 RF = load_run_flows()
+
+
+def cases_manifest(items, title="A"):
+    """テストの便宜。項目をまとめて1つのテストケースに入れたマニフェスト。"""
+    return {"cases": [{"title": title, "items": items}]}
 
 
 def cases_of(items):
@@ -365,7 +371,10 @@ class Manifest(unittest.TestCase):
 
         self.assertEqual(sorted(m["devices"]), ["ipad", "iphone"])
         self.assertEqual(m["repo"], str(FIXTURE.resolve()))   # どのマップで組んだかを残す
-        first, explore = m["sections"]
+        # テストケースの入れ子。項目の中身はテストケースの下にあり、題の文字列では紐づけない
+        (a, first), (b, explore) = MI.walk(m)
+        self.assertEqual((a["title"], b["title"]), ("A", "B"))
+        self.assertNotIn("case", first)
         self.assertEqual(first["name"], "test_01")
         # フローを組むのに要るものをマニフェストに写す（run_flows.py は plan.json を読まない）
         self.assertEqual((m["app"], m["clear_state"]), ("jp.example.App", False))
@@ -382,8 +391,9 @@ class Manifest(unittest.TestCase):
         self.assertEqual(first["result"], "PENDING")
         # 経路が組めなかったテストケースの項目は、フロー無しで並ぶ
         self.assertEqual(explore["name"], "test_02")
-        self.assertEqual(explore["case"], "B")
         self.assertIsNone(explore["flow"])
+        self.assertEqual(MI.find(m, "test_02"), (b, explore))
+        self.assertEqual(MI.find(m, "test_09"), (None, None))
 
     def test_inputs_are_kept_when_rebuilt(self):
         work = Path(tempfile.mkdtemp())
@@ -399,19 +409,19 @@ class Manifest(unittest.TestCase):
         text = {"from": "list", "title": "a", "expect": "a",
                 "do": [{"op": "text:list.search_field", "runtime": True}]}
         m, _ = build([text])
-        m["sections"][0]["devices"]["iphone"]["inputs"]["LIST_SEARCH_FIELD"] = "牛乳(1L)"
+        MI.find(m, "test_01")[1]["devices"]["iphone"]["inputs"]["LIST_SEARCH_FIELD"] = "牛乳(1L)"
         (out / "manifest.json").write_text(json.dumps(m, ensure_ascii=False), encoding="utf-8")
 
         # 同じ変数なら引き継ぎ、引き継いだことを出す
         m, printed = build([dict(text, launch=True)])
-        self.assertEqual(m["sections"][0]["devices"]["iphone"]["inputs"],
+        self.assertEqual(MI.find(m, "test_01")[1]["devices"]["iphone"]["inputs"],
                          {"LIST_SEARCH_FIELD": "牛乳(1L)"})
         self.assertIn("test_01 iphone: LIST_SEARCH_FIELD=牛乳(1L)", printed)
 
         # 変数が変わったら空に戻す
         m, _ = build([{"from": "list", "title": "a", "expect": "a",
                        "do": [{"op": "tap:list.row.*", "pick": "x"}]}])
-        self.assertEqual(m["sections"][0]["devices"]["iphone"]["inputs"], {"LIST_ROW": ""})
+        self.assertEqual(MI.find(m, "test_01")[1]["devices"]["iphone"]["inputs"], {"LIST_ROW": ""})
         shutil.rmtree(Path(m["flows"]), ignore_errors=True)
         shutil.rmtree(work)
 
@@ -500,23 +510,20 @@ class Cases(unittest.TestCase):
         m = json.loads((work / "out" / "manifest.json").read_text(encoding="utf-8"))
         shutil.rmtree(Path(m["flows"]), ignore_errors=True)
         shutil.rmtree(work)
-        self.assertEqual([(s["name"], s["case"], bool(s["flow"])) for s in m["sections"]],
-                         [("test_01", "A", True), ("test_02", "A", True),
-                          ("test_03", "X", False), ("test_04", "B", True)])
-        self.assertEqual(m["cases"], [
-            {"title": "A", "launch": False, "explore": None, "after": None,
-             "items": ["test_01", "test_02"]},
-            {"title": "X", "launch": False, "explore": "画面 history がマップに無い",
-             "after": None, "items": ["test_03"]},
-            {"title": "B", "launch": True, "explore": None, "after": None, "items": ["test_04"]}])
+        self.assertEqual([(c["title"], it["name"], bool(it["flow"])) for c, it in MI.walk(m)],
+                         [("A", "test_01", True), ("A", "test_02", True),
+                          ("X", "test_03", False), ("B", "test_04", True)])
+        self.assertEqual([{k: v for k, v in c.items() if k != "items"} for c in m["cases"]], [
+            {"title": "A", "launch": False, "explore": None, "after": None},
+            {"title": "X", "launch": False, "explore": "画面 history がマップに無い", "after": None},
+            {"title": "B", "launch": True, "explore": None, "after": None}])
 
     def test_report_heads_where_the_case_changes(self):
         ns = runpy.run_path(str(SCRIPTS / "build_report.py"), run_name="build_report")
         heads = ns["case_heads"]([
-            {"case": "一覧から開く", "title": "a"}, {"case": "一覧から開く", "title": "b"},
-            {"case": "起動する", "title": "起動する"},        # 1項目で題が同じなら見出しは要らない
-            {"case": "絞り込む", "title": "語を打つ"},
-            {"title": "case の無いセクション"}])
+            {"title": "一覧から開く", "items": [{"title": "a"}, {"title": "b"}]},
+            {"title": "起動する", "items": [{"title": "起動する"}]},   # 1項目で題が同じなら見出しは要らない
+            {"title": "絞り込む", "items": [{"title": "語を打つ"}]}])
         self.assertEqual(heads, {1: "一覧から開く", 4: "絞り込む"})
 
 
@@ -957,6 +964,35 @@ class Interrupts(unittest.TestCase):
         self.assertIn("anchor と閉じる操作（screen: back）の両方が要る", out)
 
 
+class ManifestItems(unittest.TestCase):
+    """#110: 名前で1項目を引くときは、属するテストケースを親として一緒に返す。"""
+
+    def cli(self, *names):
+        f = Path(tempfile.mkdtemp()) / "manifest.json"
+        f.write_text(json.dumps({"cases": [
+            {"title": "A", "launch": False, "items": [{"name": "test_01", "title": "a"},
+                                                      {"name": "test_02", "title": "b"}]},
+            {"title": "B", "items": [{"name": "test_03", "title": "c"}]}]}), encoding="utf-8")
+        r = subprocess.run([sys.executable, str(SCRIPTS / "manifest_items.py"), str(f), *names],
+                           capture_output=True, text=True)
+        shutil.rmtree(f.parent)
+        return r
+
+    def test_lists_all_items_in_order(self):
+        self.assertEqual(self.cli().stdout.splitlines(),
+                         ["test_01\tA\ta", "test_02\tA\tb", "test_03\tB\tc"])
+
+    def test_finds_an_item_with_its_case(self):
+        got = json.loads(self.cli("test_02").stdout)
+        self.assertEqual(got, [{"case": {"title": "A", "launch": False, "siblings": ["test_01", "test_02"]},
+                                "item": {"name": "test_02", "title": "b"}}])
+
+    def test_unknown_name_is_refused(self):
+        r = self.cli("test_09")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("test_09 という項目が無い", r.stderr)
+
+
 class ReportShape(unittest.TestCase):
     """判定の欄は LLM が書くので形が揺れる。build_report.py --check で書いた直後に止める。"""
 
@@ -965,28 +1001,33 @@ class ReportShape(unittest.TestCase):
         return ns["shape_problems"](manifest)
 
     def test_footer_must_be_text(self):
-        out = self.problems({"sections": [], "footer": {"確認していないこと": "エラー系"}})
+        out = self.problems({"cases": [], "footer": {"確認していないこと": "エラー系"}})
         self.assertEqual(len(out), 1)
         self.assertIn("footer が文字列ではない（dict）", out[0])
 
     def test_section_fields_must_be_text(self):
-        out = self.problems({"sections": [
-            {"name": "test_01", "title": "a", "desc": ["x"], "note": {"a": 1}, "result": "OK"}]})
+        out = self.problems(cases_manifest([
+            {"name": "test_01", "title": "a", "desc": ["x"], "note": {"a": 1}, "result": "OK"}]))
         self.assertEqual(len(out), 2)
         self.assertIn("test_01 の desc が文字列ではない（list）", out[0])
         self.assertIn("test_01 の note が文字列ではない（dict）", out[1])
 
     def test_pending_is_reported_but_retake_passes(self):
-        out = self.problems({"sections": [
+        out = self.problems(cases_manifest([
             {"name": "test_01", "title": "a", "result": "PENDING"},
-            {"name": "test_02", "title": "b", "result": "RETAKE"}]})
+            {"name": "test_02", "title": "b", "result": "RETAKE"}]))
         self.assertEqual(len(out), 1)
         self.assertIn("test_01 の result が 'PENDING'", out[0])
 
     def test_text_footer_passes(self):
-        self.assertEqual(self.problems({"sections": [
-            {"name": "test_01", "title": "a", "desc": "x", "result": "NG"}],
-            "footer": "確認していないこと: エラー系\n作成したデータ: 無し"}), [])
+        self.assertEqual(self.problems(dict(cases_manifest([
+            {"name": "test_01", "title": "a", "desc": "x", "result": "NG"}]),
+            footer="確認していないこと: エラー系\n作成したデータ: 無し")), [])
+
+    def test_flat_sections_are_refused(self):
+        out = self.problems({"sections": [{"name": "test_01", "title": "a", "result": "OK"}]})
+        self.assertEqual(len(out), 1)
+        self.assertIn("古いマニフェスト", out[0])
 
 def dump_line(cx, cy, on, rid, text="", state="", height=40):
     """elements.py の出力の1行（タブ区切り）。上端は中心から高さの半分を引く。"""
@@ -2071,7 +2112,7 @@ class CaseRunBase:
         return [b for c, n, _, b in self.calls if c == "run" and n == name][nth]
 
     def sec(self, name):
-        return next(s for s in self.manifest["sections"] if s["name"] == name)
+        return MI.find(self.manifest, name)[1]
 
     def log(self):
         return (self.out / "progress_iphone.log").read_text(encoding="utf-8")
@@ -2153,7 +2194,7 @@ class CaseRun(CaseRunBase, unittest.TestCase):
         d = self.out / "shots" / "iphone"
         d.mkdir(parents=True, exist_ok=True)
         (d / "test_04.png").write_text("前の回", encoding="utf-8")
-        for s in self.manifest["sections"]:
+        for _, s in MI.walk(self.manifest):
             s["result"] = "OK"
         self.failing.add("test_03")
         self.run_device()
@@ -2273,8 +2314,8 @@ class RetakeRuns(unittest.TestCase):
         plan = {"app": "x", "repo": str(FIXTURE), "cases": CaseRunBase.CASES
                 + [{"title": "X", "explore": "理由", "items": [{"from": "list", "title": "x", "expect": "x"}]}]}
         cases = flows_of.flow_cases(plan)
-        sections = [{"name": "test_07", "flow": None}]
-        return [[(it["name"], m) for it, m in its] for _, its in RF["retake_runs"](cases, sections, only)]
+        manifest = {"cases": [{"title": "X", "items": [{"name": "test_07", "flow": None}]}]}
+        return [[(it["name"], m) for it, m in its] for _, its in RF["retake_runs"](cases, manifest, only)]
 
     def test_head_item_runs_alone(self):
         self.assertEqual(self.runs(["test_03"]), [[("test_03", "shot")]])
@@ -2298,7 +2339,7 @@ class RetakeRun(CaseRunBase, unittest.TestCase):
 
     def setUp(self):
         CaseRunBase.setUp(self)
-        for s in self.manifest["sections"]:
+        for _, s in MI.walk(self.manifest):
             s.update(desc=f"{s['name']} の前の判定", result="OK")
 
     def test_replays_case_head_and_shoots_only_target(self):
