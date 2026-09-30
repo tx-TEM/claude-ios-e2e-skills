@@ -4,9 +4,8 @@ appId: jp.example.App
 - tapOn:
     id: '^list\.search_field$'
 - eraseText
-- inputText: '打った'
+- inputText: '猫'
 - extendedWaitUntil:
     visible:
       id: '^list\.search_field$'
     timeout: 10000
-- takeScreenshot: '/shots/test_02'

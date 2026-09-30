@@ -5,7 +5,7 @@
   manifest_items.py <manifest.json> test_05 […]  その項目を、属するテストケースと一緒に JSON で
 
 **マニフェストはテストケースの入れ子**（`cases` → `items`）で、項目の中身はテストケースの
-下にある。証跡1枚＝1項目の単位で引きたい側（run_flows.py の `--only`、build_report.py の
+下にある。証跡1枚＝1項目の単位で引きたい側（run_flows.py の撮り直し、build_report.py の
 カード、evidence-judge / retaker / sim-driver）は、ここの `walk()` と `find()` を通す。
 属するテストケースは、項目の中に題の文字列で持たせず、入れ子の親として返す。
 

@@ -1,6 +1,4 @@
 appId: jp.example.App
-env:
-  SHOTS: ''
 ---
 - stopApp
 - launchApp
@@ -30,4 +28,4 @@ env:
     timeout: 10000
 - waitForAnimationToEnd:
     timeout: 3000
-- takeScreenshot: '${SHOTS}/test_01'
+- takeScreenshot: '/shots/test_01'

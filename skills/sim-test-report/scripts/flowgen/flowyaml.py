@@ -14,7 +14,7 @@ PyYAML を使わないのは、スキルを使うだけで環境に手を入れ�
 
 
 class Raw(str):
-    """引用符を付けずに書く値。env の参照（`${LIST_ROW}`）や、`DOWN` のような語。"""
+    """引用符を付けずに書く値。`DOWN` のような語。"""
 
 
 class Comment(str):
@@ -54,12 +54,9 @@ def mapping(d, indent):
     return out
 
 
-def render(app, env, commands, notes=()):
-    """フロー1本。`env` は未定のまま置く変数名の並び、`notes` は末尾に付ける補足。"""
-    out = ["appId: " + app]
-    if env:
-        out += ["env:"] + ["  {}: ''".format(v) for v in env]
-    out.append("---")
+def render(app, commands, notes=()):
+    """フロー1本。`notes` は末尾に付ける補足。"""
+    out = ["appId: " + app, "---"]
     for c in commands:
         out += ["# " + c] if isinstance(c, Comment) else command(c)
     if notes:

@@ -10,10 +10,16 @@ plan はテストケース（`cases`）の集合で、項目は必ずどれか�
 次のテストケースを組めるように。テストケースをまたいで持ち越すもの（居る画面、履歴、
 スクロール、アプリの外に居るか、後に残した状態）は `Cursor` に持たせて受け渡す。
 
-  plan の項目 ─→ build_case() ─→ ステップ列 ─→ render_case() ─→ フロー（撮影ごとに1本）＋次の Cursor
+  plan の項目 ─→ build_case() ─→ ステップ列 ─→ render_case() ─→ 項目ごとの Unit の並び＋次の Cursor
   （1テストケース）├ 頭: 前のテストケースの後始末（clean_up）か、起動し直し
                    ├ 項目の間: bridge.py（Route.to）
                    └ 項目の do: do_step()
+
+**1項目は「経路のフロー」と「`do` の1手ずつ」に分かれる**（Unit、#113）。経路（`from` まで）は
+今までどおり1本のフローで、要素は `scrollUntilVisible` で探す。`do` の要素は run_flows.py が
+ダンプを読みながら探し、スクロールの端に着いたら諦め、見つかれば1手ぶんのフロー（操作と
+着いた確認）を流す。フローの `scrollUntilVisible` は端を検知しないので、無い要素では
+上限の60秒を払ってしまう。フローは流す直前に `render_unit()` で書き、値はそこで埋める。
 
 呼ぶのは2か所。
 
@@ -28,15 +34,14 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .maestro import (Return, ScrollState, add_returns, add_reveals, assign_vars, emit_flow, needs_value,
-                      runtime_picks, runtime_sees, runtime_uses, shot_context, split_at_shots, split_parts,
-                      var_of)
+from .maestro import (Return, Reveal, ScrollState, add_returns, add_reveals, caller_keys, emit_flow,
+                      needs_value, shot_context, split_at_shots)
 from screenmap.map import load_map
 from screenmap.screen import DO_OPS, GESTURES, is_pattern, pattern_prefix
-from .actions import HideKeyboard, Scroll, resolve_action
+from .actions import HideKeyboard, resolve_action
 from .bridge import Route, Unroutable, emit_path, report_problems
 from .results import resolve_result
-from .steps import Act, Check, Enter, Restart, See, Shot, nest
+from .steps import Act, Enter, Restart, See, Shot, goes_out, nest, stays_out
 
 PLAN_KEYS = {"app", "repo", "clear_state", "cases"}
 CASE_KEYS = {"title", "items", "launch", "explore"}
@@ -324,7 +329,6 @@ class CaseBuild:
     typed: bool
     touched: list                 # テストケースの中で使った leaves のある操作。落ちたときに戻す候補
     ends: dict                    # 項目の名前 → その項目を撮り終えた時点の route.trail の長さ
-    checks: list = field(default_factory=list)   # [(do の最初のステップ, その手前に置く Check)]（#107）
 
 
 def build_case(mp, items, cursor):
@@ -335,6 +339,8 @@ def build_case(mp, items, cursor):
     bridge.py で `from` まで繋ぐ → `do` を1つずつステップにする → 撮る。**組めなかったら
     そこで止める**（先の項目は、手前の項目が終わった画面を前提にしているので、組んでも
     意味が無い）。
+
+    **`do` のステップには鍵（`key`）を振る**（steps.py の KEYS）。run_flows.py はそれを1手ずつ流す。
 
     **テストケースの後始末は画面マップが決める**（#83）。テストケースの `do` で、マップに
     `leaves`（後に残る状態）のある操作を使ったら、次のテストケースの頭で（clean_up）:
@@ -360,7 +366,7 @@ def build_case(mp, items, cursor):
             restart = True     # マップが変わって戻す操作が引けない。起動し直しに倒す
         else:
             _, restart = clean_up(mp, route, steps, specs, cursor.typed, items[0])
-    left, touched, typed, ends, checks = [], [], False, {}, []
+    left, touched, typed, ends = [], [], False, {}
     for n, item in enumerate(items):
         name = item["name"]
         tag = "({}) goto {}".format(name, item["from"])
@@ -369,6 +375,7 @@ def build_case(mp, items, cursor):
             if n == 0 and restart:
                 steps.append(route.restart())
             steps += route.to(item["from"], item["when"])
+            seen = {}
             for k, (op, how) in enumerate(item["do"]):
                 tag = "({}) do {}".format(name, op)
                 spec, _, _ = resolve(mp, route.at, op)
@@ -382,11 +389,12 @@ def build_case(mp, items, cursor):
                     left.append((route.at, spec))
                     touched.append((route.at, spec))
                 typed = typed or (spec is not None and spec.op == "text")
-                at = route.at
                 sts, wrong = do_step(mp, route, op, how, item["when"])
-                target = check_target(sts[0]) if k == 0 and sts else None
-                if target:
-                    checks.append((sts[0], Check(at, target, name)))
+                # 鍵を振る。run_flows.py はこれを持つステップを1手ずつ流し、値もこの鍵で持つ
+                seen[op] = seen.get(op, 0) + 1
+                key = op if seen[op] == 1 else "{}#{}".format(op, seen[op])
+                for st in sts:
+                    st.key = "{} in {}".format(key, st.target) if isinstance(st, Enter) else key
                 steps += sts
                 # 値の決め方の間違い。経路は組めるので、ほかの間違いもまとめて出す
                 problems += [("call", "({}) {}".format(name, m)) for m in wrong]
@@ -398,26 +406,7 @@ def build_case(mp, items, cursor):
         ends[name] = len(route.trail)
         if problems:
             break
-    return CaseBuild(steps, problems, route.notes, route, left, typed, touched, ends, checks)
-
-
-def check_target(st):
-    """項目の頭で、画面にあるかを確かめる要素の id（#107）。確かめないなら None。
-
-    `st` は `do` の最初のステップ。子の要素なら、いちばん外の親（横に送る親の中までは
-    探さない）。マップに無い文言（`see:text:`）、ラベルで指す要素、要素の無い操作
-    （`scroll:down`）は、ダンプの id で探せないので確かめない。
-    """
-    within = st.outer if isinstance(st, Enter) else getattr(st, "within", None) or []
-    if within:
-        return within[0].value or within[0].id
-    if isinstance(st, Enter):
-        return st.target
-    if isinstance(st, See):
-        return None if st.text or st.by_label else st.target
-    if isinstance(st, Act) and not isinstance(st.action, (Scroll, HideKeyboard)):
-        return None if st.action.by_label else st.action.target
-    return None
+    return CaseBuild(steps, problems, route.notes, route, left, typed, touched, ends)
 
 
 def clean_up(mp, route, steps, left, typed, nxt):
@@ -610,66 +599,122 @@ def branch_of(action, at, given):
 
 # ---------- フローに書く ----------
 
-def render_case(mp, app, clear, cursor, build, timeout=10000):
-    """組んだテストケース（CaseBuild）を、撮影ごとのフローにする。(項目ごとの行, 次の Cursor)。
+@dataclass
+class Unit:
+    """run_flows.py が1回で流すもの（#113）。
 
-    **項目（撮影）ごとに1本ずつ。** 走らせる側は順に run して inspect するだけで、
-    証跡と同名のダンプが揃う。2本目以降は前の続き（起動し直さない）。テストケースの
-    頭の本は、`cursor` の画面からの続きか、起動し直し（`Restart` が頭にあれば）。
+    - `flow`: 経路。前の項目が終わった画面から `from` まで（起動し直し、後始末、アプリの外から
+      戻す、も入る）。そのまま1本で流す。項目の頭にしか無い
+    - `hand`: `do` の1手（`steps[0]`。鍵を持つステップ）。run_flows.py がダンプを読んで対象を
+      探し、値を決めてから流す。項目の最後の1手には撮影（Shot）が付く
 
-    **実行時に値を決める操作があれば、項目のフローをその手前で割る**（`parts`）。
-    打つ文字、パターンの要素のどれを押すか。前の本で目的の画面に着き、対象が
-    見えるまでスクロールして止まり、走らせる側が値を決めてから次の本を走らせる。
-
-    **`from` に着いたところでも割る**（Check、#107）。走らせる側が `do` の最初の要素を
-    ダンプで探し、無ければその項目はそこで諦める。本の `check` がその要素。
-
-    行は項目ごとに、フローの中身（`flows`: ファイル名 → 中身）と、ここで計算した欄
-    （撮った画面・自動確認のID・フローのファイル名・起動し直すか・実行時に決める値）。
-
-    **フローは端末によらず同じ書き方。** 撮影先は `${SHOTS}` のまま書き、走らせる側
-    （run_flows.py）が端末に合わせて埋める。
+    `start` は流し始める画面、`launch` はこの1本でアプリを起動し直すか。
     """
-    # do の最初のステップの手前に Check を挟む。ここでフローを割り、run_flows.py が確かめる（#107）
-    checks = {id(st): ck for st, ck in build.checks}
-    steps = [x for st in build.steps for x in ([checks[id(st)]] if id(st) in checks else []) + [st]]
+    kind: str
+    start: str
+    steps: list
+    launch: bool = False
+
+    @property
+    def step(self):
+        return self.steps[0]
+
+
+def route_keys(steps):
+    """経路のうち、1手で流すステップに鍵を振る。`経路 <操作>`（同じ項目で重なれば `#2`）。
+
+    - 値を決めるステップ（パターンの要素を押す。見えている1件目）
+    - 子の要素（カルーセルの中のカードなど）と、その親を決める Enter。親の中を横に送って探すのは
+      run_flows.py の仕事で、経路のフローには書かない
+    """
+    used = {}
+    for st in steps:
+        if getattr(st, "key", None) is not None:
+            continue
+        if not (needs_value(st) or getattr(st, "within", None)):
+            continue
+        if isinstance(st, Enter):
+            base = "経路 in {}".format(st.target)
+        else:
+            base = "経路 {}:{}".format(st.action.label().split()[0], st.action.target)
+        used[(st.item, base)] = used.get((st.item, base), 0) + 1
+        n = used[(st.item, base)]
+        st.key = base if n == 1 else "{}#{}".format(base, n)
+
+
+def units_of(seg_start, seg_steps, launch):
+    """1項目のステップ列を Unit の並びにする。経路は1本、`do` のステップは1手ずつ。撮影は
+    最後の1手に付ける（`do` が無ければ経路の本に）。"""
+    units, cur, at, start = [], [], seg_start, seg_start
+    for st in seg_steps:
+        if getattr(st, "key", None) is not None:
+            if cur:
+                units.append(Unit("flow", start, cur, launch and not units))
+                cur = []
+            units.append(Unit("hand", st.screen, [st]))
+            if st.to:
+                at = st.to
+            start = at
+            continue
+        if isinstance(st, Shot) and units and units[-1].kind == "hand" and not cur:
+            units[-1].steps.append(st)
+            continue
+        cur.append(st)
+        if st.to:
+            at = st.to
+    if cur:
+        units.append(Unit("flow", start, cur, launch and not units))
+    if launch and units[0].kind != "flow":
+        # 起動し直した画面がそのまま from。起動するだけの本を頭に置く
+        units.insert(0, Unit("flow", seg_start, [], True))
+    return units
+
+
+def render_case(mp, app, clear, cursor, build, timeout=10000):
+    """組んだテストケース（CaseBuild）を、項目ごとの Unit の並びにする。(項目ごとの行, 次の Cursor)。
+
+    **項目（撮影）ごとに区切る。** 走らせる側は項目ごとに Unit を順に流して inspect するだけで、
+    証跡と同名のダンプが揃う。2つ目以降の項目は前の続き（起動し直さない）。テストケースの
+    頭の項目は、`cursor` の画面からの続きか、起動し直し（`Restart` が頭にあれば）。
+
+    行は項目ごとに、Unit の並び（`units`）と、ここで計算した欄（撮った画面・自動確認のID・
+    記録のファイル名・起動し直すか・撮影する側が決める値の鍵）。**フローの中身は書かない** —
+    値は流す直前に決まるので、run_flows.py が `render_unit()` で書く。
+    """
+    steps = list(build.steps)
+    route_keys(steps)
     if cursor.out and not (steps and isinstance(steps[0], Restart)):
         # 前のテストケースがアプリの外に居るまま終わった。戻してから始める
         steps.insert(0, Return(cursor.out, steps[0].item if steps else None))
     scroll = cursor.scroll.copy()
-    # 押す前のスクロール（Reveal）と、外から戻す操作（Return）を挟んでから切る
+    # 経路の押す前のスクロール（Reveal）と、外から戻す操作（Return）を挟んでから切る
     steps, out = add_returns(add_reveals(steps, scroll))
+    for i, st in enumerate(steps):
+        if goes_out(st):
+            # 外に居るまま撮るか。1手ずつ書くと撮影は別の本になるので、ここで並び全体から決める
+            st.stay = stays_out(steps, i, skip=(Reveal,))
     rows = []
     for seg_start, seg_steps, shot, lch in split_at_shots(mp, steps, cursor.at, launch_first=False):
-        names = assign_vars(seg_steps)
-        parts = split_parts(seg_start, seg_steps, launch=lch)
-        files, texts = [], {}
-        for k, (p_start, p_steps) in enumerate(parts):
-            last = k == len(parts) - 1
-            # 自分で起動するのは、起動し直す項目の最初の本だけ。他は居る場所から続ける
-            flow, _ = emit_flow(mp, p_steps, app, clear, None, timeout, p_start, launch=lch and k == 0,
-                                names=names)
-            fname = shot + ".yaml" if last else "{}.{}.yaml".format(shot, k + 1)
-            texts[fname] = flow
-            head = p_steps[0] if p_steps else None
-            files.append({"flow": fname,
-                          "decide": var_of(head, names) if k > 0 and needs_value(head) else None})
-            if isinstance(head, Check):
-                files[-1]["check"] = {"id": head.target, "up": head.up}
         screen, checked = shot_context(mp, seg_start, seg_steps)
-        uses = runtime_uses(seg_steps, names)
-        picks = runtime_picks(mp, seg_steps, names)
-        sees = runtime_sees(mp, seg_steps, names)
-        # 走らせる側（や LLM）が埋める値。見えている1件目を選ぶものは run_flows.py が埋めるので入れない
-        # 何番目か（_INDEX）は run_flows.py が数えるので入れない
-        inputs = {v: "" for v, use in uses.items()
-                  if use != "index" and not (v in picks and not picks[v]["pick"])}
-        rows.append({"name": shot, "flows": texts, "parts": files, "flow": files[-1]["flow"],
+        rows.append({"name": shot, "units": units_of(seg_start, seg_steps, lch), "flow": shot + ".yaml",
                      "screen": screen, "checked": checked, "launch": lch,
-                     "inputs": inputs, "input_use": uses, "picks": picks, "sees": sees})
+                     "inputs": {k: "" for k in caller_keys(seg_steps)}})
     end = Cursor(build.route.at, list(build.route.stack), scroll, out, False,
                  [(sid, op_id(spec)) for sid, spec in build.left], build.typed)
     return rows, end
+
+
+def render_unit(mp, app, clear, unit, values=None, indexes=None, shots=".", timeout=10000):
+    """Unit を1本のフローに書く。流すものが無ければ None（親を決めるだけの Enter）。
+
+    `values` / `indexes` は run_flows.py が決めた値と、同じ ID の行のうち何番目か（鍵はステップの
+    `key`）。`shots` は撮影先。1手のフローは頭で anchor を待たない（ダンプで見てから流すので）。
+    """
+    if unit.kind == "hand" and isinstance(unit.step, Enter) and len(unit.steps) == 1:
+        return None
+    flow, _ = emit_flow(mp, unit.steps, app, clear, None, timeout, unit.start, launch=unit.launch,
+                        values=values, indexes=indexes, shots=shots, head=unit.kind == "flow")
+    return flow
 
 
 def plan_rows(plan, timeout=10000):
@@ -706,7 +751,7 @@ def plan_rows(plan, timeout=10000):
         steps = build.steps[1:] if build.steps and isinstance(build.steps[0], Restart) else build.steps
         shown.append("■ {}\n{}".format(case["title"], emit_path(mp, steps, build.notes)))
         for r in render_case(mp, app, clear, Cursor.fresh(mp), build, timeout)[0]:
-            r.pop("flows")
+            r.pop("units")
             rows[r["name"]] = r
     if problems:
         report_problems(problems)
