@@ -1,6 +1,6 @@
 {
   "skill_name": "sim-test-report",
-  "note": "手順の途中の分岐に来た状況を渡し、次にやること（叩くコマンド・呼ぶサブエージェントと渡す内容・ユーザーへのメッセージ）を書かせる。シミュレーターは要らない。SKILL.md を軽くする前後で同じシナリオを走らせ、ルールが守られ続けているかを比べる（#32）。",
+  "note": "手順の途中の分岐に来た状況を渡し、次にやること（叩くコマンド・呼ぶサブエージェントと渡す内容・ユーザーへのメッセージ）を書かせる。シミュレーターは要らない。SKILL.md を軽くする前後で同じシナリオを走らせ、ルールが守られ続けているかを比べる。",
   "context": "対象アプリは青空文庫リーダー（~/Program/AozoraReader）。bundle id は jp.example.AozoraReader。画面マップがあり、画面の呼び名は browse=さがす画面、book_detail=詳細画面、history=履歴画面。起動中のシミュレーターは iPhone 17 Pro (iOS 26.5) UDID=AAAA-1111 と iPad Pro 11-inch (M4) (iOS 18.3) UDID=BBBB-2222。出力先は ~/Desktop/sim-test-report-search-debounce/。このスキルのディレクトリは SKILL.md のあるディレクトリ。",
   "evals": [
     {

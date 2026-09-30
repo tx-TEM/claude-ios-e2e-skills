@@ -62,7 +62,7 @@ class Scroll:
 
 @dataclass
 class HideKeyboard:
-    """キーボードを閉じる。マップの操作ではなく、テストケースの後に状態を戻すときに flowgen が足す（#83）。"""
+    """キーボードを閉じる。マップの操作ではなく、テストケースの後に状態を戻すときに flowgen が足す。"""
     summary: Optional[str] = "打ったあとに開いたキーボードを閉じる"
 
     def label(self):

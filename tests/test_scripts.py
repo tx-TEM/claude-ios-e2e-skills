@@ -187,7 +187,7 @@ class Snapshot(unittest.TestCase):
 
 
 class BackUsesHistory(unittest.TestCase):
-    """#28: do の戻る操作は、マップの to ではなく歩いた履歴から戻り先を決める。"""
+    """do の戻る操作は、マップの to ではなく歩いた履歴から戻り先を決める。"""
 
     def test_back_after_shortcut_returns_home(self):
         # 起点から詳細へはお気に入り（home.fav）が最短。戻ると一覧ではなくホーム
@@ -247,8 +247,8 @@ def item_flow(flows, name):
 
 
 class ScrollUp(unittest.TestCase):
-    """#57: 経路では、スクロールされているかもしれない画面で、押す前に上も探す。
-    do の要素はフローで探さない（run_flows.py がダンプで上下を探す。#113）。"""
+    """経路では、スクロールされているかもしれない画面で、押す前に上も探す。
+    do の要素はフローで探さない（run_flows.py がダンプで上下を探す）。"""
 
     def test_route_on_a_scrolled_screen_searches_up(self):
         rows, flows = write_flows([
@@ -289,7 +289,7 @@ class ScrollUp(unittest.TestCase):
 
 
 class SeeWaits(unittest.TestCase):
-    """#39: see でマップに無い文言と、撮るときに決まる語を待てる。"""
+    """see でマップに無い文言と、撮るときに決まる語を待てる。"""
 
     def test_text_outside_the_app(self):
         # 外に出て、外のページの文言を待ってから撮る。アプリには次のフローの頭で戻す
@@ -336,7 +336,7 @@ class SeeWaits(unittest.TestCase):
 
 
 class NotesPerFlow(unittest.TestCase):
-    """#31: 補足は、そのフローのステップに関係するものだけが付く。"""
+    """補足は、そのフローのステップに関係するものだけが付く。"""
 
     def test_note_only_on_its_flow(self):
         repo = Path(tempfile.mkdtemp()) / "app"
@@ -355,8 +355,8 @@ class NotesPerFlow(unittest.TestCase):
 
 
 class RuntimeInputs(unittest.TestCase):
-    """#30: 実行時に決めた値は、tap のセレクタに入るものだけ正規表現としてエスケープする。
-    値は流す直前にフローへ直接書く（#113）。"""
+    """実行時に決めた値は、tap のセレクタに入るものだけ正規表現としてエスケープする。
+    値は流す直前にフローへ直接書く。"""
 
     def rows(self):
         rows, flows = write_flows([
@@ -478,7 +478,7 @@ class Manifest(unittest.TestCase):
 
 
 class Cases(unittest.TestCase):
-    """#78: plan はテストケースの集合。起動し直すのはテストケースの境目だけ。"""
+    """plan はテストケースの集合。起動し直すのはテストケースの境目だけ。"""
 
     def case(self, title, *froms, **flags):
         return dict({"title": title, "items": [
@@ -593,7 +593,7 @@ class ValueHint(unittest.TestCase):
 
 
 class LeavesReset(unittest.TestCase):
-    """#83: 後に残る状態（leaves）と既定に戻す操作（reset）は画面マップに書き、テストケースの
+    """後に残る状態（leaves）と既定に戻す操作（reset）は画面マップに書き、テストケースの
     後始末はスクリプトが決める。"""
 
     SEARCH = ("  - id: list.search_field\n"
@@ -764,7 +764,7 @@ class PlanRepo(unittest.TestCase):
 
 
 class DiffScope(unittest.TestCase):
-    """#72: 確かめる変更の範囲を決める（diffscope.py）。
+    """確かめる変更の範囲を決める（diffscope.py）。
 
     master ── A                                 既定ブランチ
                └── C（Tag.swift）          feature-x（オープン PR #11）
@@ -887,7 +887,7 @@ class Leftovers(unittest.TestCase):
 
 
 class Interrupts(unittest.TestCase):
-    """#33: 自動表示は画面として書き、auto_shows に並べた画面に着いたときだけ確かめて閉じる。"""
+    """自動表示は画面として書き、auto_shows に並べた画面に着いたときだけ確かめて閉じる。"""
 
     def setUp(self):
         self.repo = Path(tempfile.mkdtemp()) / "app"
@@ -1018,7 +1018,7 @@ class Interrupts(unittest.TestCase):
 
 
 class ManifestItems(unittest.TestCase):
-    """#110: 名前で1項目を引くときは、属するテストケースを親として一緒に返す。"""
+    """名前で1項目を引くときは、属するテストケースを親として一緒に返す。"""
 
     def cli(self, *names):
         f = Path(tempfile.mkdtemp()) / "manifest.json"
@@ -1102,7 +1102,7 @@ def build_err(items, repo=FIXTURE):
 
 
 class Routing(unittest.TestCase):
-    """#50: 経路は expect の screen を辺にして引く。"""
+    """経路は expect の screen を辺にして引く。"""
 
     def mp(self, repo=FIXTURE):
         return screen_map.load_map(str(repo))
@@ -1151,7 +1151,7 @@ class Routing(unittest.TestCase):
 
 
 class Flows(unittest.TestCase):
-    """#50: フローに積むもの。"""
+    """フローに積むもの。"""
 
     def test_scroll_before_every_tap_on_the_way(self):
         # 経路で押す要素は、押す前に見えるまでスクロールする
@@ -1191,7 +1191,7 @@ class Flows(unittest.TestCase):
         self.assertIn("id: '^detail$'", ext)
 
     def test_ending_outside_is_shot_outside(self):
-        # #58: 外に出る操作で終わる項目は、外に居るまま撮る。戻すのは次のフローの頭
+        # 外に出る操作で終わる項目は、外に居るまま撮る。戻すのは次のフローの頭
         rows, flows = write_flows([
             {"from": "detail", "title": "a", "expect": "a", "do": ["tap:detail.share_button"]},
             {"from": "detail", "title": "b", "expect": "b", "do": ["tap:detail.follow_button"]}])
@@ -1265,7 +1265,7 @@ class Flows(unittest.TestCase):
 
 
 class AutoShowAfter(unittest.TestCase):
-    """#50: after つきの自動表示は、after の画面から戻ったときだけ確かめる。"""
+    """after つきの自動表示は、after の画面から戻ったときだけ確かめる。"""
 
     def setUp(self):
         self.repo = Path(tempfile.mkdtemp()) / "app"
@@ -1316,7 +1316,7 @@ class AutoShowAfter(unittest.TestCase):
 
 
 class FirstVisible(unittest.TestCase):
-    """#50: パターンの要素は、ツリー順ではなく画面に見えている1件目を選ぶ。"""
+    """パターンの要素は、ツリー順ではなく画面に見えている1件目を選ぶ。"""
 
     DUMP = (DUMP_HEAD
             + dump_line(195, -40, "×", "list.row.吾輩は猫である", "吾輩は猫である")
@@ -1391,7 +1391,7 @@ class ElementsOutput(unittest.TestCase):
 
 
 class CoveredRows(unittest.TestCase):
-    """#41: 画面の中でも、前面の要素の裏にある行は `裏` にし、見えている1件目に選ばない。"""
+    """画面の中でも、前面の要素の裏にある行は `裏` にし、見えている1件目に選ばない。"""
 
     def run_elements(self, dump):
         f = Path(tempfile.mkdtemp()) / "d.json"
@@ -1413,7 +1413,7 @@ class CoveredRows(unittest.TestCase):
             {"b": "[0,0][402,54]"}]}   # ステータスバーの窓
 
     def test_rows_under_pinned_header_and_status_bar(self):
-        # スクロールした一覧。行が先に並び、固定された検索欄が後ろに並ぶ（#41 の実測の形）
+        # スクロールした一覧。行が先に並び、固定された検索欄が後ろに並ぶ（実測の形）
         out, on = self.run_elements(self.app([
             self.row(-18, "A"), self.row(48, "B"), self.row(115, "C"), self.row(182, "D"),
             {"b": "[8,72][394,116]", "rid": "browse.search_field", "txt": "作品名で絞り込む"},
@@ -1467,7 +1467,7 @@ class CoveredRows(unittest.TestCase):
 
 
 class ItemRunBase:
-    """#113: 1項目を run_item() で流す。plan から組んだ行（units）を使い、Maestro は叩かない。
+    """1項目を run_item() で流す。plan から組んだ行（units）を使い、Maestro は叩かない。
 
     `sh` を差し替える。画面を読むと `self.dumps` を頭から1つずつ返し（尽きたら最後のものを
     返し続ける）、生のダンプは `self.raw`。流したもの（名前と中身）は `self.calls` に残す。
@@ -1553,7 +1553,7 @@ class ItemRunBase:
 
 
 class SeekRun(ItemRunBase, unittest.TestCase):
-    """#113: do の要素をダンプを読みながら探す。送っても見えている ID が変わらなければ端で、
+    """do の要素をダンプを読みながら探す。送っても見えている ID が変わらなければ端で、
     下の端 → 上の端まで探して無ければ、送らずに読み直してから諦める（フローの
     scrollUntilVisible の60秒を払わない）。"""
 
@@ -1624,7 +1624,7 @@ class SeekRun(ItemRunBase, unittest.TestCase):
 
 
 class AutoPickRun(ItemRunBase, unittest.TestCase):
-    """#50: 条件の無い選択は run_flows.py が画面を読んで決め、picked に書く。条件つきは止めて決めさせる。"""
+    """条件の無い選択は run_flows.py が画面を読んで決め、picked に書く。条件つきは止めて決めさせる。"""
 
     items = [{"from": "list", "do": ["tap:list.row.*"]}]
     SAME = (DUMP_HEAD + dump_line(195, -40, "×", "list.row.牛乳", "")
@@ -1721,7 +1721,7 @@ class TypedRun(ItemRunBase, unittest.TestCase):
 
 
 class SeeContainsRun(ItemRunBase, unittest.TestCase):
-    """#85: 見たい行が含む語（see の runtime）。探して当たらなければ、表示中の行を並べて止める。"""
+    """見たい行が含む語（see の runtime）。探して当たらなければ、表示中の行を並べて止める。"""
 
     items = [{"from": "list", "do": [{"op": "see:list.row.*", "runtime": True}]}]
 
@@ -1764,7 +1764,7 @@ class SeeContainsRun(ItemRunBase, unittest.TestCase):
 
 
 class ParentRun(ItemRunBase, unittest.TestCase):
-    """#70: 子の要素は、親を縦に探して寄せ、親の枠の中を横に送って探す。端の決め方は縦と同じ。"""
+    """子の要素は、親を縦に探して寄せ、親の枠の中を横に送って探す。端の決め方は縦と同じ。"""
 
     RAW = json.dumps({"ui_schema": {}, "elements": [{"b": "[0,0][402,874]", "c": [
         {"b": "[0,220][402,410]", "rid": "recommend.carousel.8"},
@@ -1818,7 +1818,7 @@ class ParentRun(ItemRunBase, unittest.TestCase):
 
 
 class Liveness(unittest.TestCase):
-    """#51: check はマップの ID がその画面の files に残っているかを確かめる。"""
+    """check はマップの ID がその画面の files に残っているかを確かめる。"""
 
     SOURCE = """
 struct ListView: View {
@@ -1910,7 +1910,7 @@ struct ListView: View {
 
 
 class Check(unittest.TestCase):
-    """#50: check は expect / ready が指す ID と、スキーマの形を確かめる。"""
+    """check は expect / ready が指す ID と、スキーマの形を確かめる。"""
 
     def setUp(self):
         self.repo = Path(tempfile.mkdtemp()) / "app"
@@ -1974,7 +1974,7 @@ class Check(unittest.TestCase):
 
 
 class NestingCheck(Check):
-    """#70: children を持てるのは scroll かパターンの要素だけ。子の ID は親の接頭辞で始めない。"""
+    """children を持てるのは scroll かパターンの要素だけ。子の ID は親の接頭辞で始めない。"""
 
     def test_children_need_scroll_or_pattern(self):
         self.edit("recommend.yaml", "    scroll: horizontal\n    children:\n      - id: recommend.filter.*",
@@ -2008,7 +2008,7 @@ class NestingCheck(Check):
 
 
 class Nesting(unittest.TestCase):
-    """#70: 子の要素は、親を縦に寄せ、親の上から送り、childOf で親の中を指す。"""
+    """子の要素は、親を縦に寄せ、親の上から送り、childOf で親の中を指す。"""
 
     def hands(self, row):
         return [u.step.key for u in row["units"] if u.kind == "hand"]
@@ -2016,7 +2016,7 @@ class Nesting(unittest.TestCase):
     def test_pattern_parent_is_chosen_at_run_time(self):
         rows, flows = write_flows([{"from": "recommend", "do": ["see:recommend.more"]}])
         # 親を選ぶ手（Enter）と、見る手に分かれる。親を選ぶ手は流すものが無い（run_flows.py が
-        # ダンプで選ぶだけ）。親を縦に寄せて横に送るのも run_flows.py（#113）
+        # ダンプで選ぶだけ）。親を縦に寄せて横に送るのも run_flows.py
         self.assertEqual(self.hands(rows[0]), ["see:recommend.more in recommend.carousel.*", "see:recommend.more"])
         self.assertEqual(sorted(flows), ["test_01.1.yaml", "test_01.yaml"])
         self.assertEqual(rows[0]["inputs"], {})
@@ -2112,7 +2112,7 @@ class CaseRunBase:
         self.manifest = json.loads((self.out / "manifest.json").read_text(encoding="utf-8"))
         self.flows = self.tmp / "flows"
         self.calls, self.failing, self.fail_once = [], set(), set()
-        # 項目の頭で探す要素（#107）も見えている画面。探しに送ると、ダンプが変わらないので端になる
+        # do で探す要素も見えている画面。探しに送ると、ダンプが変わらないので端になる
         self.dump = (FirstVisible.DUMP + dump_line(195, 120, "○", "list.search_field", "")
                      + dump_line(195, 700, "○", "list.footer", ""))
         self.saved = {k: RF[k] for k in ("sh", "HERE", "pause")}
@@ -2333,7 +2333,7 @@ class RecoveryResets(CaseRunBase, unittest.TestCase):
 
 
 class RetakeRuns(unittest.TestCase):
-    """#24: 撮り直す項目だけを、そのテストケースの頭からなぞって撮る。撮り直す項目は判定の RETAKE で決まる（#113）。"""
+    """撮り直す項目だけを、そのテストケースの頭からなぞって撮る。撮り直す項目は判定の RETAKE で決まる。"""
 
     def runs(self, names):
         plan = {"app": "x", "repo": str(FIXTURE), "cases": CaseRunBase.CASES}
@@ -2360,7 +2360,7 @@ class RetakeRuns(unittest.TestCase):
 
 
 class RetakeRun(CaseRunBase, unittest.TestCase):
-    """#24: 撮り直しが実際に何を走らせ、どこへ撮り、何を書き換えるか。"""
+    """撮り直しが実際に何を走らせ、どこへ撮り、何を書き換えるか。"""
 
     def setUp(self):
         CaseRunBase.setUp(self)
@@ -2431,7 +2431,7 @@ class RetakeRun(CaseRunBase, unittest.TestCase):
 
 
 class MainRetake(CaseRunBase, unittest.TestCase):
-    """#113: run_flows.py はマニフェストを見て、RETAKE の項目があればそれだけを撮り直す。"""
+    """run_flows.py はマニフェストを見て、RETAKE の項目があればそれだけを撮り直す。"""
 
     CASES = [
         {"title": "A", "items": [{"from": "list", "title": "a1", "expect": "x"}]},
@@ -2537,7 +2537,7 @@ class ResumeRun(CaseRunBase, unittest.TestCase):
 
 
 class Migrate(unittest.TestCase):
-    """#50: 古い形のマップを変換し、そのまま check と経路計算が通る。"""
+    """古い形のマップを変換し、そのまま check と経路計算が通る。"""
 
     def test_migrate_old_fixture(self):
         repo = Path(tempfile.mkdtemp()) / "app"

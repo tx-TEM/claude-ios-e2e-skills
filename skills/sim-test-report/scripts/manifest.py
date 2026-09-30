@@ -177,7 +177,7 @@ sim-driver は同じテストケースの中で起動し直さない。**項目�
 テストケースの `launch` / `explore` は、レビューの「ここでアプリを起動し直す」や sim-driver の
 起動に、題はレポートの見出しに使う。`after` はテストケースの後始末で、
 画面マップの `leaves` / `reset` から flowgen が決めたもの（`relaunch`: 次の頭で起動し直す、
-`resets`: 叩いて戻す操作、`leaves`: 残る状態の文）。何も要らなければ null（#83）。
+`resets`: 叩いて戻す操作、`leaves`: 残る状態の文）。何も要らなければ null。
 走らせるときに `reset` の画面まで繋げなければ、そこで起動し直す。
 
 なぜスクリプトなのか。一覧の中身（証跡の名前、画面、自動確認のID、フローの
@@ -318,7 +318,7 @@ def main():
         }
 
     # plan の並びのまま、項目はテストケースの下に置く。探索のテストケースもその場に置く（フローは持たない）。
-    # after はテストケースの後始末（画面マップの leaves / reset から flowgen が決めたもの。#83）
+    # after はテストケースの後始末（画面マップの leaves / reset から flowgen が決めたもの）
     case_list = [{"title": c["title"], "launch": c["launch"], "explore": c["explore"],
                   "after": afters.get(c["title"]),
                   "items": [item_of(r) for r in c["items"]]} for c in cases]

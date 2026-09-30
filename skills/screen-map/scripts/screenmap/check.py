@@ -271,7 +271,7 @@ def check_action(mp, sid, a, ids, f):
 
 
 def check_leaves(mp, sid, a, where, f):
-    """後に残る状態（`leaves`）と、それを既定に戻す操作（`reset`）。#83。
+    """後に残る状態（`leaves`）と、それを既定に戻す操作（`reset`）。
 
     `reset` は同じ画面の操作を `tap:<id>` の形で指す。その操作自体が状態を残すなら、戻した
     ことにならない。入力欄に打つ操作（`text`）は、たいてい語と絞り込みを残すので、書いて
