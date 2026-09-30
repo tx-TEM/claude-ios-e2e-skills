@@ -1614,6 +1614,12 @@ class SeekRun(ItemRunBase, unittest.TestCase):
         self.dumps = [self.TOP + dump_line(195, 700, "裏", "list.footer", "")]
         self.assertEqual(self.run_item()[0], ("done", None))
 
+    def test_off_screen_in_the_tree_is_not_found_at_the_end(self):
+        # ツリーに画面外（×）で出ているだけの要素は、両端まで送っても見えなければ見つかったとしない。
+        # 押すと Maestro がその位置を叩いて別の要素を押す
+        self.dumps = [self.TOP + dump_line(195, 1400, "×", "list.footer", "")]
+        self.assertEqual(self.run_item()[0], ("failed", "list.footer が画面に無い（上下の端まで探した）"))
+
     def test_growing_list_stops_after_the_limit(self):
         # 読み込みで伸び続ける一覧は端に着かない。回数で諦める
         self.dumps = [DUMP_HEAD + dump_line(195, 300, "○", "list.row.{}".format(n), "")
@@ -1697,6 +1703,19 @@ class AutoPickRun(ItemRunBase, unittest.TestCase):
         self.given("tap:list.row.*", "list.row.こころ")
         self.run_item(first=1)
         self.assertEqual(self.flows_run(), ["test_01"])
+
+    def test_resume_keeps_the_record_of_the_hands_before(self):
+        # 止まる前に流した手（経路）を記録から落とさず、その続きに書く
+        self.conditional()
+        self.run_item()
+        before = (self.flows / "test_01.yaml").read_text(encoding="utf-8")
+        self.assertIn("launchApp", before)
+        self.given("tap:list.row.*", "list.row.こころ")
+        self.run_item(first=1)
+        record = (self.flows / "test_01.yaml").read_text(encoding="utf-8")
+        self.assertEqual(record.count("---"), 1)
+        self.assertLess(record.index("launchApp"), record.index("# ここから再開"))
+        self.assertLess(record.index("# ここから再開"), record.index("tapOn:\n    id: '^list\\.row\\.こころ$'"))
 
 
 class TypedRun(ItemRunBase, unittest.TestCase):

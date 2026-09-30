@@ -207,7 +207,7 @@ def dump_rows(dump):
         m = re.match(r"^\((-?\d+),(-?\d+)\)$", cols[0])
         if not m or len(cols) < 6 or not cols[2].lstrip("-").isdigit():
             continue
-        out.append({"cx": int(m.group(1)), "cy": int(m.group(2)), "on": cols[1] == "○",
+        out.append({"cx": int(m.group(1)), "cy": int(m.group(2)), "on": cols[1] == "○", "where": cols[1],
                     "top": int(cols[2]), "id": cols[3], "text": cols[4], "state": cols[5]})
     return out
 
@@ -427,6 +427,13 @@ class Record:
     def commands(self, body):
         self.lines += body.rstrip("\n").split("\n")
 
+    def load(self, path):
+        """前に書いた記録の続きから書く（止まった項目を再開したとき）。無ければ何もしない。"""
+        if path.exists():
+            body = path.read_text(encoding="utf-8").split("\n---\n", 1)
+            if len(body) == 2:
+                self.lines = body[1].rstrip("\n").split("\n") + ["# ここから再開"]
+
     def write(self, path):
         path.write_text("appId: {}\n---\n{}\n".format(self.app, "\n".join(self.lines)), encoding="utf-8")
 
@@ -489,8 +496,8 @@ class Seeker:
         - **縦で両端まで探して無ければ、送らずに SEEK_WAITS 回（1秒おき）読み直す。** ダンプは
           「今あるか」しか答えない。読み込みが遅れて出るもの（絞り込んだ結果の行）を、
           出る前に読んで諦めないように
-        - 見えている行が無くても、前面の要素（キーボード、バー）の裏にあれば最後に見つかったとする。
-          押せるかはフローに任せる
+        - 見えている行が無くても、画面の中の前面の要素（キーボード、バー）の裏（`裏`）にあれば、
+          最後に見つかったとする。押せるかはフローに任せる。画面の外（`×`）の行は見つかったとしない
         """
         if not self.read():
             return "画面を読めない"
@@ -525,8 +532,8 @@ class Seeker:
                     return "画面を読めない"
                 if any(r["on"] for r in self.hits(want)):
                     return None
-        if self.hits(want, parent):
-            return None                                   # 前面の要素の裏にある
+        if any(r["where"] == "裏" for r in self.hits(want, parent)):
+            return None                                   # 画面の中の、前面の要素の裏にある
         where = f"{parent} の中の左右" if parent is not None else "上下"
         return f"{want} が画面に無い（{where}の端まで探した）"
 
@@ -714,6 +721,8 @@ def run_item(dv, sec, row, replay, first=0):
     values = dict(dev["picked"], **{k: v for k, v in (dev.get("inputs") or {}).items() if v})
     notes = {}   # 同じ名前の行があったときの、何件目を押したか
     record = Record(dv.app)
+    if first and not replay:
+        record.load(dv.fdir / row["flow"])       # 止まる前に流した手を記録から落とさない
     units = row["units"]
 
     def done(status):
