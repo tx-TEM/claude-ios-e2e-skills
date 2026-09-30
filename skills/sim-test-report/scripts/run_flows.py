@@ -6,7 +6,7 @@
 **何をするかはマニフェストで決まる**（引数では選ばない）。
 
   1. `resume` があれば、止まったところから続ける
-  2. 判定が `RETAKE` の項目があれば、それだけを撮り直す（下の「撮り直し」）
+  2. 判定が `RETAKE` の項目か、撮れなかった項目（`unexpected`）があれば、それだけを撮り直す（下の「撮り直し」）
   3. どちらも無ければ、全部を最初から撮る
 
 **どのシミュレーターで撮るかはマニフェストの `devices` に、記録の置き場は `flows` に
@@ -60,7 +60,12 @@
 入ると次の到達判定が落ちる。ここが最後まで走り切ってから sim-driver に渡せば、そうならない。
 マニフェストの並びに探索のテストケースが混ざっていてもよい（実行しないだけ）。
 
-**撮り直し: 判定が `RETAKE` の項目だけを撮り直す。** 撮り直す項目を名前で渡さない — 判定
+**撮り直し: 判定が `RETAKE` の項目と、撮れなかった項目だけを撮り直す。** 撮れなかった項目は、
+どれかの端末に `unexpected` が付いた項目。**判定に回す前に撮り直す** — 撮れなかったのは撮る側の
+問題なので、retaker が直してから叩き直す。**拾うのは判定がまだ（`PENDING`）の項目だけ。**
+`unexpected` は探索で撮っても消えない記録なので、判定が付いたあと（探索で撮って OK / NG に
+なった、このまま出すと決めて `SKIP` になった）まで拾うと、別の項目の撮り直しのついでに撮り直してしまう。
+撮り直す項目を名前で渡さない — 判定
 （evidence-judge）と撮り直し（ここ）の間で名前を写し直すと、写し間違える。テストケースの中の
 項目は前の項目に依存するので、その項目だけを走らせても前提の状態が無い。**そのテスト
 ケースの頭で起動し直して走らせ、手前の項目は撮らずになぞる。** テストケースどうしは依存
@@ -947,8 +952,15 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, retake=N
 
 
 def to_retake(manifest):
-    """判定が `RETAKE` の項目。(フローで撮り直す名前, 探索で撮る名前)。"""
-    marked = [it for _, it in manifest_items.walk(manifest) if it.get("result") == "RETAKE"]
+    """撮り直す項目。(フローで撮り直す名前, 探索で撮る名前)。
+
+    判定が `RETAKE` の項目と、どれかの端末で撮れなかった（`unexpected` の付いた）項目のうち
+    判定がまだ（`PENDING`）のもの。判定が付いたもの（探索で撮った、`SKIP` にした）は拾わない。
+    """
+    def lost(it):
+        return any((d or {}).get("unexpected") for d in (it.get("devices") or {}).values())
+    marked = [it for _, it in manifest_items.walk(manifest)
+              if it.get("result") == "RETAKE" or (it.get("result") == "PENDING" and lost(it))]
     return ([it["name"] for it in marked if it.get("flow")],
             [it["name"] for it in marked if not it.get("flow")])
 
@@ -997,7 +1009,7 @@ def main():
     if retake is None and not state.get("device"):
         retake, explore = to_retake(manifest)
         if explore:
-            print(f"RETAKE のうち探索で撮る項目（sim-driver に渡す）: {', '.join(explore)}")
+            print(f"撮り直す項目のうち探索で撮る項目（sim-driver に渡す）: {', '.join(explore)}")
         if not retake and explore:
             return
         retake = retake or None

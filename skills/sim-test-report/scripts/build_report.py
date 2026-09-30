@@ -9,6 +9,7 @@
 形が揺れる（footer を見出しごとの辞書で書く、など）。レポートを作る段で止まると、
 直すのが判定を書いた本人ではなくなる。書いた直後に確かめて、その場で直させる。
 `RETAKE` はここでは通す（撮り直しを待っている項目で、判定の書き忘れではない）。
+`SKIP` は理由（`desc`）が空なら止める。
 
     python3 build_report.py manifest.json \
       --title "一覧からお気に入り登録できるようにする — 動作確認レポート"
@@ -53,6 +54,11 @@
 - images の要素は {"src": ..., "label": ...} か、ラベル不要なら文字列だけでもよい
 - 画像が1枚なら "image": "shots/01_foo.png" と書いてもよい（images 1件と等価）
 - 複数端末を撮った項目は、全ての端末で確認できたときだけ result を "OK" にする
+- **result の `SKIP` は「撮れなかった。成否を確かめていない」。** OK でも NG でもないので、
+  どちらにも数えず「撮れなかった」として別に数える。マニフェストから外して footer に書くと、
+  項目の話が footer に回り、「全 N 項目」からも消える。理由は desc に書き（空なら止まる）、
+  カードでは「撮れなかった理由」の帯になる。画像は撮れたぶんだけ出す（無いファイルは飛ばす。
+  1枚も無くてよい）。複数端末で1台だけ撮れたときは、その端末の画像が出る
 - **result は省略できず、`PENDING` や `RETAKE` のままでも止まる。** title が空のときも止まる（骨組みのまま生成しようとしている）
 - カードは「期待 → 結果 → 証跡 → 注記」の順。**2つを続けて証跡の上に置くのは、
   OK の根拠をその場で読めるようにするため。** 結果の帯は OK / NG と同じ色にする。 desc は観測した事実なので、それだけでは
@@ -165,8 +171,14 @@ def load_image_b64(path: pathlib.Path, width: int) -> str:
 
 
 def section_images(section: dict, base_dir: pathlib.Path) -> list[tuple[pathlib.Path, str]]:
-    """images / image のどちらの書き方でも (パス, ラベル) の一覧にして返す。"""
-    raw = section.get("images") or [section["image"]]
+    """images / image のどちらの書き方でも (パス, ラベル) の一覧にして返す。
+
+    `SKIP` の項目は、撮れたぶん（ファイルがあるもの）だけ。撮れなかった端末の証跡は無い。
+    """
+    skip = section.get("result") == "SKIP"
+    raw = section.get("images")
+    if not raw:
+        raw = [section["image"]] if section.get("image") or not skip else []
     items = []
     for item in raw:
         if isinstance(item, str):
@@ -174,6 +186,8 @@ def section_images(section: dict, base_dir: pathlib.Path) -> list[tuple[pathlib.
         path = pathlib.Path(item["src"])
         if not path.is_absolute():
             path = base_dir / path
+        if skip and not path.exists():
+            continue
         items.append((path, item.get("label", "")))
     return items
 
@@ -209,14 +223,20 @@ def section_rows(section: dict) -> tuple[list[tuple[str, str]], str]:
 
     **2つを続けて証跡の上に出す。** 何を期待し何が起きたかを突き合わせてから
     画像を見る。枚数でレイアウトを変えないので、1枚でも複数端末でも同じ順に並ぶ。
+    `SKIP` の項目の desc は観測した結果ではなく、撮れなかった理由。
     """
+    outcome = "撮れなかった理由" if section.get("result") == "SKIP" else "結果"
     top = [(label, section[key])
-           for label, key in (("期待", "expect"), ("結果", "desc"))
+           for label, key in (("期待", "expect"), (outcome, "desc"))
            if (section.get(key) or "").strip()]
     return top, (section.get("note") or "").strip()
 
 
 TEXT_FIELDS = ("title", "expect", "desc", "note")
+# レポートに出せる result。SKIP は撮れなかった項目（成否を確かめていない）
+RESULTS = ("OK", "NG", "SKIP")
+# カードの帯（記号, 見せる言葉）と、カードの class
+BADGES = {"OK": ("✓", "OK", ""), "NG": ("✗", "NG", " ng"), "SKIP": ("—", "撮れなかった", " skip")}
 
 
 def shape_problems(manifest: dict) -> list:
@@ -239,9 +259,12 @@ def shape_problems(manifest: dict) -> list:
             if v is not None and not isinstance(v, str):
                 out.append(f"{name} の {key} が文字列ではない"
                            f"（{type(v).__name__}）。1つの文字列で書く")
-        if item.get("result") not in ("OK", "NG", "RETAKE"):
+        if item.get("result") not in RESULTS + ("RETAKE",):
             out.append(f"{name} の result が "
-                       f"{item.get('result')!r}。OK / NG / RETAKE のどれかを書く")
+                       f"{item.get('result')!r}。OK / NG / SKIP / RETAKE のどれかを書く")
+        elif item.get("result") == "SKIP" and not str(item.get("desc") or "").strip():
+            out.append(f"{name} は SKIP なのに desc が空。撮れなかった理由（何を試して、どこで止まったか。"
+                       "端末ごとに違えば端末も）を書く")
     return out
 
 
@@ -254,13 +277,13 @@ def build(manifest_path: pathlib.Path, width: int, title: str, meta: list) -> pa
         raise SystemExit("マニフェストの形が崩れている:\n  " + "\n  ".join(bad))
 
     cards = ""
-    counts = {"OK": 0, "NG": 0}
+    counts = dict.fromkeys(RESULTS, 0)
     heads = case_heads(manifest.get("cases") or [])
     for i, (_, section) in enumerate(walk(manifest), start=1):
         # **既定を OK にしない。** このマニフェストは工程ごとに埋めていくので、
         # 判定を書き忘れた項目が黙って OK で出ると、確かめていないものを
         # 確かめたことにしてしまう。画像を読む前に見る。
-        if section.get("result") in (None, "", "PENDING", "RETAKE"):
+        if section.get("result") not in RESULTS:
             raise SystemExit(f'{section.get("name", i)} "{section.get("title", "")}" の result が'
                              f' {section.get("result")!r}。判定していない項目と'
                              '撮り直しが要る項目を、レポートに出せない。')
@@ -282,16 +305,16 @@ def build(manifest_path: pathlib.Path, width: int, title: str, meta: list) -> pa
         rows_html = (f'<div class="note"><span>注記</span><p>{html.escape(note)}</p></div>'
                      if note else "")
         result = section["result"]
-        ok = result == "OK"
-        counts["OK" if ok else "NG"] += 1
+        mark, word, kind = BADGES[result]
+        counts[result] += 1
         if i in heads:
             cards += f'''
     <h2 class="case">{html.escape(heads[i])}</h2>'''
         cards += f'''
-    <section class="card{"" if ok else " ng"}">
-      <h2><span class="badge">{i}</span><span class="title">{html.escape(section["title"])}</span><span class="result">{"✓" if ok else "✗"} {html.escape(result)}</span></h2>
+    <section class="card{kind}">
+      <h2><span class="badge">{i}</span><span class="title">{html.escape(section["title"])}</span><span class="result">{mark} {html.escape(word)}</span></h2>
       {expect_html}
-      <div class="shots{multi}">{shots}</div>
+      {f'<div class="shots{multi}">{shots}</div>' if shots else ""}
       {rows_html}
     </section>'''
 
@@ -303,7 +326,9 @@ def build(manifest_path: pathlib.Path, width: int, title: str, meta: list) -> pa
     meta_lines = f'<div class="meta">{meta_lines}</div>' if meta_lines else ""
     summary = (f'<div class="summary"><span class="ok">OK {counts["OK"]}</span>'
                f'<span class="ng">NG {counts["NG"]}</span>'
-               f'<span class="all">全 {counts["OK"] + counts["NG"]} 項目</span>'
+               # 撮れなかった項目が無い回は出さない。OK と NG は0件でも出す（0件であることが結果）
+               + (f'<span class="skip">撮れなかった {counts["SKIP"]}</span>' if counts["SKIP"] else "")
+               + f'<span class="all">全 {sum(counts.values())} 項目</span>'
                + "".join(f'<span class="date">実施日 {html.escape(d)}</span>' for d in dates)
                + '</div>')
     footer = manifest.get("footer", "")
@@ -322,11 +347,13 @@ def build(manifest_path: pathlib.Path, width: int, title: str, meta: list) -> pa
     --bg: #f4f5f7; --card: #fff; --text: #1f2328; --sub: #59636e; --faint: #8c959f;
     --line: #e3e6ea; --ok: #1a7f37; --ok-bg: #dafbe1; --ng: #cf222e; --ng-bg: #ffebe9;
     --expect-bg: #f0f4fa; --expect-line: #6e8fb8; --note-bg: #fff8c5; --badge: #57606a;
+    --skip: #59636e; --skip-bg: #eaeef2;
   }}
   @media (prefers-color-scheme: dark) {{ :root {{
     --bg: #16181b; --card: #22252a; --text: #e6e8eb; --sub: #aab1b9; --faint: #7d858f;
     --line: #33373d; --ok: #4ac26b; --ok-bg: #12311d; --ng: #ff6b6b; --ng-bg: #3d1618;
     --expect-bg: #1c2633; --expect-line: #6e8fb8; --note-bg: #3a3212; --badge: #6e7781;
+    --skip: #aab1b9; --skip-bg: #2d3137;
   }} }}
   body {{ font-family: -apple-system, "Hiragino Sans", sans-serif; margin: 0; padding: 32px 24px; background: var(--bg); color: var(--text); line-height: 1.7; }}
   .wrap {{ max-width: 880px; margin: 0 auto; }}
@@ -338,6 +365,7 @@ def build(manifest_path: pathlib.Path, width: int, title: str, meta: list) -> pa
   .summary span {{ padding: 3px 12px; border-radius: 999px; }}
   .summary .ok {{ color: var(--ok); background: var(--ok-bg); }}
   .summary .ng {{ color: var(--ng); background: var(--ng-bg); }}
+  .summary .skip {{ color: var(--skip); background: var(--skip-bg); }}
   .summary .all {{ color: var(--sub); background: var(--card); border: 1px solid var(--line); }}
   .summary {{ align-items: center; flex-wrap: wrap; }}
   .summary .date {{ margin-left: auto; padding: 0; color: var(--sub); font-weight: 400; }}
@@ -349,6 +377,8 @@ def build(manifest_path: pathlib.Path, width: int, title: str, meta: list) -> pa
   .badge {{ background: var(--badge); color: #fff; border-radius: 50%; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; flex: none; }}
   .result {{ flex: none; font-size: 13px; font-weight: 700; padding: 2px 12px; border-radius: 999px; color: var(--ok); background: var(--ok-bg); }}
   .card.ng .result {{ color: var(--ng); background: var(--ng-bg); }}
+  .card.skip {{ border-left: 4px solid var(--skip); }}
+  .card.skip .result {{ color: var(--skip); background: var(--skip-bg); }}
   .block {{ margin: 12px 0 0; padding: 8px 14px 10px; border-left: 3px solid; border-radius: 4px; font-size: 14px; }}
   .block span {{ display: block; font-size: 12px; font-weight: 700; margin-bottom: 2px; }}
   .block p {{ margin: 0; white-space: pre-wrap; }}
@@ -358,6 +388,8 @@ def build(manifest_path: pathlib.Path, width: int, title: str, meta: list) -> pa
   .block.outcome span {{ color: var(--ok); }}
   .card.ng .block.outcome {{ background: var(--ng-bg); border-color: var(--ng); }}
   .card.ng .block.outcome span {{ color: var(--ng); }}
+  .card.skip .block.outcome {{ background: var(--skip-bg); border-color: var(--skip); }}
+  .card.skip .block.outcome span {{ color: var(--skip); }}
   .shots {{ display: flex; gap: 12px; flex-wrap: wrap; margin: 16px 0 0; }}
   .shots figure {{ margin: 0; }}
   .shots img {{ width: 360px; max-width: 100%; border-radius: 10px; border: 1px solid var(--line); display: block; }}
