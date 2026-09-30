@@ -40,10 +40,32 @@ class Hidden:
     own: bool = False
 
 
+# 外のアプリが読み込みを終えたことを表す要素。外に居るまま撮るとき、この順に待つ。
+# (見せる名前, Maestro の id の正規表現)。
+#
+# Safari は自分の状態をアクセシビリティ ID に出している。IsPageLoaded=true は Safari の
+# 起動直後（読み込みが始まる前）や読み込みの途中でも出るので、それだけでは早い。停止ボタンが
+# 更新ボタン（ReloadButton）に変わるのは、実測（iOS 18.3 / 26.5 / 27.0、iPhone と iPad）では
+# どれも読み込みが終わってからだった。読み込みに失敗してもエラーページで両方が出るので、
+# 待ちは落ちずにエラーページが撮れる。公開された仕様ではないので、OS を上げたら確かめ直す
+LOADED = {
+    "safari": (("TabDocument?…IsPageLoaded=true", r"^TabDocument\?.*IsPageLoaded=true.*"),
+               ("ReloadButton", r"^ReloadButton$")),
+}
+
+
 @dataclass
 class External:
-    """アプリの外（Safari、App Store など）に出る。確かめない。すぐ後で撮るなら外に居るまま撮り、そうでなければアプリに戻す（maestro.py の FlowWriter.check）。"""
+    """アプリの外（Safari、App Store など）に出る。すぐ後で撮るなら外に居るまま撮り、そうでなければアプリに戻す（maestro.py の FlowWriter.check）。
+
+    外に居るまま撮るとき、読み込みの終わりが分かるアプリ（`LOADED`）ならそれを待つ。ほかは確かめない。
+    """
     name: str
+
+    @property
+    def loaded(self):
+        """読み込みが終わったことを表す要素（見せる名前, 正規表現）の並び。分からなければ空。"""
+        return LOADED.get(self.name, ())
 
 
 Result = Union[Arrive, Visible, Value, Selected, Hidden, External]

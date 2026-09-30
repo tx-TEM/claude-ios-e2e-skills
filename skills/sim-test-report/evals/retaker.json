@@ -29,10 +29,11 @@
     },
     {
       "id": "outside-app",
-      "prompt": "RETAKE の項目: test_16（マニフェストで RETAKE はこれだけ）\n\nマニフェストの test_16:\n  title: 図書カードのリンクをタップすると Safari で図書カードが開く\n  expect: Safari に作品の図書カードのページが表示されている\n  case: 図書カードを開く（テストケースの頭。前のテストケースの後始末（画面マップの leaves に reset が無い）で、ここで起動し直す）\n  result: RETAKE\n  desc: Safari は開いているが、ページが白いまま（読み込み前）。読み込み後の図書カードのページが写っていれば判定できる。\n\n記録 test_16.yaml（抜粋）:\n  - tapOn:\n      id: '^detail\\.card_link$'\n  # アプリの外（safari）に出る。確かめずに、外に居るまま撮る\n  - waitForAnimationToEnd:\n      timeout: 3000\n  - takeScreenshot: '/Users/me/Desktop/sim-test-report-general/shots/iphone/test_16'\n\n画面マップの detail.yaml:\n  - id: detail.card_link\n    name: 図書カード（リンク）\n    actions:\n      - tap:\n        summary: Safari で図書カードのページを開く\n        expect: {external: safari}\n    （Safari の中はマップの対象外で、待てる要素は無い）",
+      "prompt": "RETAKE の項目: test_16（マニフェストで RETAKE はこれだけ）\n\nマニフェストの test_16:\n  title: 「Web で探す」をタップすると Safari で作品名の検索結果が開く\n  expect: Safari に作品名で検索した結果が並んでいる\n  case: Web で探す（テストケースの頭。前のテストケースの後始末（画面マップの leaves に reset が無い）で、ここで起動し直す）\n  result: RETAKE\n  checked: ReloadButton\n  desc: Safari で検索のページは開いていて、ページの枠や検索欄は出ているが、結果の欄が「読み込み中…」のまま。結果が並んだところが写っていれば判定できる。\n\n記録 test_16.yaml（抜粋）:\n  - tapOn:\n      id: '^detail\\\\.web_search_button$'\n  # アプリの外（safari）に出る。ページの読み込みが終わるまで待って、外に居るまま撮る\n  - extendedWaitUntil:\n      visible:\n        id: '^TabDocument\\\\?.*IsPageLoaded=true.*'\n      timeout: 10000\n  - extendedWaitUntil:\n      visible:\n        id: '^ReloadButton$'\n      timeout: 10000\n  - waitForAnimationToEnd:\n      timeout: 3000\n  - takeScreenshot: '/Users/me/Desktop/sim-test-report-general/shots/iphone/test_16'\n\n画面マップの detail.yaml:\n  - id: detail.web_search_button\n    name: Web で探す\n    actions:\n      - tap:\n        summary: Safari で作品名を検索する\n        expect: {external: safari}\n    （Safari の中はマップの対象外で、待てる要素は無い）\n\nplan の test_16 の do: [\"tap:detail.web_search_button\"]。開いている作品は「吾輩は猫である」",
       "assertions": [
+        "フローはすでに Safari のページの読み込みの終わり（IsPageLoaded=true と ReloadButton）を待っていて、写っているのは読み込み後にページの中で結果を出している途中だと読んでいる。ページの読み込みの待ちが足りないとは扱っていない",
         "Safari はアプリの外で、画面マップにも待つ要素が無い（expect は external だけ）ことに触れている",
-        "plan の test_16 の do に、見たい状態でしか出ない文言を待つ see:text:<文言>（図書カードのページの見出しなど）を足し、manifest.py を叩き直している",
+        "plan の test_16 の do に、結果が並んだときにしか出ない文言を待つ see:text:<文言> を足し（検索欄にも入っている作品名「吾輩は猫である」だけを待つと、結果が出る前に当たる。そうならない文言を選んでいる）、manifest.py を叩き直している",
         "RETAKE の項目が全部 plan で直せたので、run_flows.py <manifest>（--only などを付けずに）で撮り直している",
         "撮れるかを確かめないまま、待ちを足したことにして撮れたと報告していない。文言の待ちが時間切れで落ちたら、それを事実として返している",
         "撮れなかった場合、「撮れない」として原因と、何があれば撮れるか（探索で撮る等）を返している",
