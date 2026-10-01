@@ -1654,7 +1654,7 @@ class ItemRunBase:
         """探すために流したもの（下へ / 上へ / 親を次へ / 親を戻す / 親を寄せる）。"""
         out = []
         for c, name, body in self.calls:
-            if c != "run" or ".seek" not in name:
+            if c != "run" or ".seek" not in name or "takeScreenshot" in body:
                 continue
             out.append("center" if "centerElement" in body else "next" if "LEFT" in body
                        else "back" if "RIGHT" in body else "up" if "direction: DOWN" in body else "down")
@@ -1915,8 +1915,18 @@ class SeePickRun(ItemRunBase, unittest.TestCase):
         # 送っても見えている行が変わらない。端まで見て無かったので撮れなかったことにする
         self.given("see:list.row.*", "次")
         got, out = self.run_item(first=1)
-        self.assertEqual(got[0], "failed")
-        self.assertIn("条件「古い作品の行」に合う list.row.* が無い（上下の端まで見た）", got[1])
+        self.assertEqual(got, ("not_found", {"condition": "古い作品の行", "reason": "上下の端まで見た"}))
+        # 最後に見た画面（端まで送ったところ）を、ふつうの項目と同じ名前で撮ってダンプを置く
+        shot = [b for c, n, b in self.calls if c == "run" and "takeScreenshot" in b]
+        self.assertEqual(len(shot), 1)
+        self.assertIn("shots/iphone/test_01'", shot[0])
+
+    def test_last_screen_dump_is_put_next_to_the_shot(self):
+        self.given("see:list.row.*", "次")
+        fake, args = RF["sh"], []
+        RF["sh"] = lambda a, quiet=True: (args.append(a), fake(a, quiet))[1]
+        self.run_item(first=1)
+        self.assertIn(["inspect", "AAAA", "test_01", str(self.out / "shots" / "iphone")], args)
 
     def test_inner_texts_come_from_the_row_subtree(self):
         # 行の中の文字は、生のダンプの入れ子から取る。枠の中心で拾うと、画面全体の要素（スクロールバー）が混ざる
@@ -1936,8 +1946,8 @@ class SeePickRun(ItemRunBase, unittest.TestCase):
         self.calls = []
         self.sec["devices"]["iphone"]["paged"]["see:list.row.*"] = RF["SEEK_SWIPES"]
         got, out = self.run_item(first=1)
-        self.assertEqual(got[0], "failed")
-        self.assertIn("（上下に{}画面送っても端に着かない）".format(RF["SEEK_SWIPES"]), got[1])
+        self.assertEqual(got[0], "not_found")
+        self.assertEqual(got[1]["reason"], "上下に{}画面送っても端に着かない".format(RF["SEEK_SWIPES"]))
         self.assertEqual(self.swipes(), [])               # 上限なら送らずに落とす
 
     def test_retake_sends_again_from_the_top(self):
@@ -2702,6 +2712,38 @@ class Recovery(unittest.TestCase):
         self.assertEqual(back.to_json(), c.to_json())
         self.assertTrue(back.scroll.is_scrolled("detail"))
         self.assertEqual(flows_of.Cursor.fresh(mp).restart, True)
+
+
+class NotFoundRun(CaseRunBase, unittest.TestCase):
+    """条件に合う要素が無かった（探しきって無い）のは、撮る側の失敗（unexpected）ではない。
+    not_found を付け、撮り直しに拾わせない。後ろの項目は巻き添えで飛ばし、同じく not_found にする。"""
+
+    CASES = [
+        {"title": "A", "items": [{"from": "list", "do": [{"op": "see:list.row.*", "pick": "古い作品の行"}],
+                                  "title": "a1", "expect": "x"},
+                                 {"from": "list", "title": "a2", "expect": "x"}]},
+        {"title": "B", "items": [{"from": "list", "title": "b1", "expect": "x"}]},
+    ]
+
+    def test_not_found_is_kept_apart_from_unexpected(self):
+        self.sec("test_01")["devices"]["iphone"]["inputs"]["see:list.row.*"] = "次"
+        stopped, done, lost = self.run_device()
+        dev = self.sec("test_01")["devices"]["iphone"]
+        self.assertEqual(dev["not_found"], {"condition": "古い作品の行", "reason": "上下の端まで見た"})
+        self.assertNotIn("unexpected", dev)
+        after = self.sec("test_02")["devices"]["iphone"]
+        self.assertEqual(after["not_found"]["after"], "test_01")
+        self.assertNotIn("unexpected", after)
+        self.assertEqual(lost, [])                        # 撮れなかった（撮る側の失敗）には並べない
+        self.assertEqual(done, 1)                         # 次のテストケースは撮る
+        self.assertEqual(RF["to_retake"](self.manifest), ([], []))
+        self.assertIn("test_01 撮影済み 条件「古い作品の行」に合う要素が無い（上下の端まで見た）", self.log())
+
+    def test_records_are_cleared_when_shot_again(self):
+        self.sec("test_01")["devices"]["iphone"]["not_found"] = {"condition": "x", "reason": "y"}
+        self.sec("test_01")["devices"]["iphone"]["inputs"]["see:list.row.*"] = "list.row.C++入門"
+        self.run_device()
+        self.assertNotIn("not_found", self.sec("test_01")["devices"]["iphone"])
 
 
 class RecoveryResets(CaseRunBase, unittest.TestCase):

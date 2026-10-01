@@ -208,6 +208,18 @@ sim-driver は同じテストケースの中で起動し直さない。**項目�
 **マニフェストを作り直しても引き継ぐ**（retaker が plan を直して叩き直したあとも、撮れなかった
 項目だけを撮り直すため）。
 
+**条件に合う要素が無かったことは `devices.<端末>.not_found` に run_flows.py が書く。** plan の `pick` で、
+端まで見ても（20画面送っても）条件に合う要素が見当たらなかった。期待どおりのものが画面に無いので、判定
+（evidence-judge）は `NG` にする。撮る側の失敗ではないので `unexpected` とは分け、撮り直しには拾わない
+（`unexpected` に入れると撮り直しに回り、「撮れなかった」になって NG と区別できなくなる）。証跡
+（<名前>.png）とダンプ（<名前>.txt）は、最後に見た画面（端まで送ったところ）を撮って置く。
+
+  {"condition": "著者が複数いる作品の行", "reason": "上下の端まで見た"}
+  {"after": "test_09", "reason": "同じテストケースの test_09 で条件に合う要素が無かった"}
+        前の項目で無かったので走らせていない（巻き添え）。判定は SKIP
+
+run_flows.py がその項目を走らせ直すと消える。マニフェストを作り直しても引き継ぐ。
+
 `desc` / `result` / `note` は手順2で埋める。`result` を `PENDING` で置くのは、
 build_report.py が result の無い項目を拒むため（判定していない項目が
 黙って OK で出ないように）。
@@ -324,8 +336,9 @@ def main():
             "devices": {d: dict({"inputs": {k: old_dev(d).get("inputs", {}).get(k, "")
                                             for k in (e.get("inputs") or {})},
                                  "picked": {}},
-                                # 撮れなかった記録。作り直しても残し、run_flows.py が撮り直す印にする
-                                **({"unexpected": old_dev(d)["unexpected"]} if old_dev(d).get("unexpected") else {}))
+                                # 撮れなかった記録。作り直しても残し、run_flows.py が撮り直す印にする。
+                                # 条件に合う要素が無かった記録も、判定が読むので残す
+                                **{k: old_dev(d)[k] for k in ("unexpected", "not_found") if old_dev(d).get(k)})
                         for d in devices},
             # 証跡は端末ごとに1枚。ダンプは同名の .txt
             "images": [{"src": f"shots/{d}/{name}.png", "label": LABELS.get(d, d)}

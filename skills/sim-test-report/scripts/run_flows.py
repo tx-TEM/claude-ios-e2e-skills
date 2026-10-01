@@ -106,8 +106,8 @@ flowgen/steps.py の KEYS）。決め方は2つ。
   - **条件つきの選択（`tap` / `see` / `in` の `pick`）は、いま画面に見えている行からだけ選ばせる。**
     止まるときに、並びの先頭（縦の一覧なら上の端、カルーセルなら先頭）まで戻し、見えている行を
     候補として出す。呼び出し元は、条件に合う行があればその ID を、無ければ `次`（NEXT）を書く。
-    `次` なら1画面だけ送ってまた候補を出し、送っても見えている行が変わらなければ端なので落とす
-    （撮れなかった記録になる）。集めてから選んだ行まで戻る形にしない — 選ぶのが画面に見えて
+    `次` なら1画面だけ送ってまた候補を出し、送っても見えている行が変わらなければ端。条件に合う
+    要素が無かった記録（`not_found`）を付けて先へ進む（撮る側の失敗ではないので `unexpected` にしない）。集めてから選んだ行まで戻る形にしない — 選ぶのが画面に見えて
     いない行になり、戻ったときに同じ状態である保証も無い
 
 **パターンの要素を押すときは、同じ ID の行のうち何番目かも数える**（`locate()`）。行の ID は
@@ -810,8 +810,7 @@ class Hand:
             cond = (self.st.pick if isinstance(self.st, (Enter, See)) else self.st.action.pick).condition
             where = f"{parent} の中の左右" if parent is not None else "上下"
             if paged.get(key, 0) >= SEEK_SWIPES:
-                return self.fail(f"条件「{cond}」に合う {want.pattern} が無い"
-                                 f"（{where}に{SEEK_SWIPES}画面送っても端に着かない）")
+                return self.not_found(seeker, cond, f"{where}に{SEEK_SWIPES}画面送っても端に着かない")
             why = None
             if self.dv.retake:
                 why = seeker.rewind(parent)
@@ -820,7 +819,7 @@ class Hand:
             why = why or seeker.advance(parent)
             paged[key] = paged.get(key, 0) + 1
             if why == "端":
-                return self.fail(f"条件「{cond}」に合う {want.pattern} が無い（{where}の端まで見た）")
+                return self.not_found(seeker, cond, f"{where}の端まで見た")
         if why:
             return self.fail(why)
         found = candidates(seeker.dump, seeker.raw, want.pattern, want.exclude,
@@ -828,6 +827,20 @@ class Hand:
         if not found:
             return self.fail(f"{want.pattern} が画面に見えていない")
         return self.missing(self.st.key, found)
+
+    def not_found(self, seeker, cond, how_far):
+        """探しきって、条件に合う要素が無かった。("not_found", 記録)。
+
+        期待どおりのものが画面に無かったので、判定は `NG` になる。撮る側の失敗（`unexpected`）に入れると
+        撮り直しに回って「撮れなかった」になり、NG なのか撮る側の問題なのかが分からなくなるので分ける。
+        **最後に見た画面（端まで送ったところ）を、ふつうの項目と同じ名前で撮ってダンプを置く。** NG の証跡になる。
+        """
+        shot = str((self.dv.shots / self.name).resolve()).replace("'", "''")
+        seeker.run(f"- takeScreenshot: '{shot}'\n", "shot")
+        sh(["inspect", self.dv.udid, self.name, str(self.dv.shots)])   # 出力は捨てる
+        self.dv.logline(f"{self.name} 撮影済み 条件「{cond}」に合う要素が無い（{how_far}）。最後に見た画面を撮った")
+        print(f"{self.name} 条件「{cond}」に合う要素が無い（{how_far}）", file=sys.stderr)
+        return ("not_found", {"condition": cond, "reason": how_far})
 
 
 def run_item(dv, sec, row, replay, first=0):
@@ -994,16 +1007,18 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, retake=N
         return got, {r["name"]: r for r in rows}, end, start
 
     def unexpected(sec, kind, reason=""):
-        """撮れなかったことを、その端末の欄に書く（kind が None なら消す）。判定（`result`）ではない。"""
+        """撮れなかったことを、その端末の欄に書く（kind が None なら消す）。判定（`result`）ではない。
+        消すときは、条件に合う要素が無かった記録（`not_found`）も消す。"""
         dev = sec["devices"][device]
         if kind:
             dev["unexpected"] = {"kind": kind, "reason": reason}
         else:
             dev.pop("unexpected", None)
+            dev.pop("not_found", None)
 
     print(f"--- {device}（{udid}）")
     cursor = flows_of.Cursor.from_json(resume["cursor"]) if resume else flows_of.Cursor.fresh(mp)
-    done, lost = 0, []
+    done, lost, absent = 0, [], []
     for ci, (case, items) in enumerate(runs):
         if retake:
             cursor = flows_of.Cursor.fresh(mp)        # 撮り直しは、テストケースの頭で起動し直す
@@ -1020,7 +1035,7 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, retake=N
                         unexpected(secs[it["name"]], "failed", f"フローが組めない（{msg}）")
                 cursor = flows_of.Cursor.fresh(mp)
                 break
-            got, missed, failed_at = 0, [], None
+            got, missed, failed_at, failed_why = 0, [], None, "落ちた"
             skipping = resume_name is not None       # 再開: 止まった項目の手前はもう撮ってある
             for n, (it, mode) in enumerate(items):
                 name = it["name"]
@@ -1035,17 +1050,31 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, retake=N
                 if not replay:
                     unexpected(sec, None)
                 if failed_at is not None:
-                    missed.append(f"{device} {name}")
-                    logline(f"{name} 撮影できず 同じテストケースの {failed_at} が落ちたので飛ばした")
-                    if not replay:
+                    if failed_why == "落ちた":
+                        missed.append(f"{device} {name}")
+                    logline(f"{name} 撮影できず 同じテストケースの {failed_at} が{failed_why}ので飛ばした")
+                    if replay:
+                        pass
+                    elif failed_why == "落ちた":
                         unexpected(sec, "skipped", f"同じテストケースの {failed_at} が落ちた")
+                    else:
+                        # 前提の要素が無かった巻き添え。撮る側の失敗ではないので、撮り直しに拾わせない
+                        sec["devices"][device]["not_found"] = {
+                            "after": failed_at, "reason": f"同じテストケースの {failed_at} で条件に合う要素が無かった"}
+                        absent.append(f"{device} {name}（{failed_at} の巻き添え）")
                     continue
                 status = run_item(dv, sec, rows[name], replay, resume_part if continuing else 0)
                 if status[0] == "stopped":
                     rest = len(items) - n + sum(len(its) for _, its in runs[ci + 1:])
                     print(f"{device} のここから先の {rest}件はまだ撮っていない。")
                     return {"from": name, "part": status[1], "cursor": start.to_json()}, done + got, lost
-                if status[0] == "failed":
+                if status[0] == "not_found" and not replay:
+                    # 探しきって無かった。撮る側の失敗ではないので unexpected にしない（撮り直さない）。
+                    # 後ろの項目はこの項目を当てにしているので、落ちたときと同じく飛ばす
+                    failed_at, failed_why = name, "条件に合う要素が無かった"
+                    sec["devices"][device]["not_found"] = status[1]
+                    absent.append(f"{device} {name}（条件「{status[1]['condition']}」。{status[1]['reason']}）")
+                elif status[0] == "failed":
                     failed_at = name
                     missed.append(f"{device} {name}" + ("（なぞる途中で落ちた）" if replay else ""))
                     if not replay:
@@ -1054,7 +1083,7 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, retake=N
                     got += 1
             resume_name, resume_part = None, 0
             done += got
-            if failed_at == items[0][0]["name"] and start.recovered and attempt == 0:
+            if failed_at == items[0][0]["name"] and failed_why == "落ちた" and start.recovered and attempt == 0:
                 # 前が落ちた地点から繋いだ頭の項目が落ちた。繋ぎ方（後始末の reset、落ちた画面からの
                 # 経路）が悪かったのかもしれないので、起動し直してこのテストケースをもう1回だけ走らせる
                 logline(f"{failed_at} 繋いだ頭で落ちた。起動し直してテストケース「{case['title']}」を走らせ直す")
@@ -1064,6 +1093,10 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, retake=N
             cursor = recover(made, case, failed_at) if failed_at else end
             break
     print(f"{done}件を撮った: {shots}")
+    if absent:
+        print(f"\n条件に合う要素が無かった {len(absent)}件（撮り直さない。そのまま判定に回す）:")
+        for line in absent:
+            print("  " + line)
     return None, done, lost
 
 
