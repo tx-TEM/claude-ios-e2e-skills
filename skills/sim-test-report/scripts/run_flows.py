@@ -788,18 +788,38 @@ class Hand:
         値が空なら、並びの先頭まで戻してから出す。NEXT なら1画面だけ送ってから出し、送っても
         見えている行が変わらなければ、端まで見て無かったとして落とす。送る並びは、いちばん内側の
         親が横に送るもの（`scroll`）ならその中、そうでなければ画面の縦。
+
+        **NEXT で送るのは SEEK_SWIPES 回まで。** 読み込みで伸び続ける一覧は端に着かないので、数えないと
+        呼び出し元が `次` を書き続ける限り終わらない。送った回数は手ごとに `devices.<端末>.paged` に
+        残し（止まるたびに実行が終わるので、マニフェストに持つ）、先頭まで戻したときに0に戻す。
+
+        **撮り直しでは、送った位置から続けられない。** 止まったあと叩き直すと、テストケースの頭から
+        なぞり直すので、画面は先頭に戻っている。先頭まで戻してから、それまでに送った回数ぶん送り直し、
+        そこから1画面進める。
         """
         if self.replay:
             return self.missing(self.st.key)           # なぞる項目では選ばない（前に撮った値が要る）
+        key = self.st.key
+        paged = self.dev.setdefault("paged", {})
         chain = chain_of(self.st, self.values)
         parent = chain[-1][0] if chain and chain[-1][1] else None
         if given is None:
+            paged[key] = 0
             why = seeker.rewind(parent)
         else:
-            why = seeker.advance(parent)
+            cond = (self.st.pick if isinstance(self.st, (Enter, See)) else self.st.action.pick).condition
+            where = f"{parent} の中の左右" if parent is not None else "上下"
+            if paged.get(key, 0) >= SEEK_SWIPES:
+                return self.fail(f"条件「{cond}」に合う {want.pattern} が無い"
+                                 f"（{where}に{SEEK_SWIPES}画面送っても端に着かない）")
+            why = None
+            if self.dv.retake:
+                why = seeker.rewind(parent)
+                for _ in range(paged.get(key, 0)):
+                    why = why or seeker.advance(parent)
+            why = why or seeker.advance(parent)
+            paged[key] = paged.get(key, 0) + 1
             if why == "端":
-                cond = (self.st.pick if isinstance(self.st, (Enter, See)) else self.st.action.pick).condition
-                where = f"{parent} の中の左右" if parent is not None else "上下"
                 return self.fail(f"条件「{cond}」に合う {want.pattern} が無い（{where}の端まで見た）")
         if why:
             return self.fail(why)
@@ -821,6 +841,8 @@ def run_item(dv, sec, row, replay, first=0):
     dest = dv.scratch if replay else dv.shots
     dev = sec["devices"][device]
     dev["picked"] = {} if first == 0 else dev.get("picked") or {}
+    # 「次」で送った回数（Hand.choose()）。撮り直しは頭からなぞり直すので、止まる前の数を引き継ぐ
+    dev["paged"] = {} if first == 0 and not dv.retake else dev.get("paged") or {}
     # 前の手で決めた値。再開のときは、止まる前に決めたもの（picked）と撮影する側が決めたもの
     values = dict(dev["picked"], **{k: v for k, v in (dev.get("inputs") or {}).items() if v})
     notes = {}   # 同じ名前の行があったときの、何件目を押したか
