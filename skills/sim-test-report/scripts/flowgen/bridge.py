@@ -294,11 +294,10 @@ def emit_path(mp, steps, notes, start=None):
                 "✓ 「{}」が出ている（文言で待つ）".format(st.target))
             continue
         if isinstance(st, See):
-            word = st.contains if st.contains is not None else ("撮るときに決める語" if st.later else None)
             inside = " in " + " > ".join(x.label() for x in st.within) if st.within else ""
-            row("  {}  see {}{}{}".format(st.screen.ljust(w), st.target,
-                                           " [「{}」を含む行]".format(word) if st.contains is not None
-                                           else " [{}を含む行]".format(word) if word else "", inside),
+            which = (" [「{}」を含む行]".format(st.contains) if st.contains is not None
+                     else " [{}]".format(st.pick.condition) if st.pick else "")
+            row("  {}  see {}{}{}".format(st.screen.ljust(w), st.target, which, inside),
                 "✓ {} が見える".format(st.target))
             continue
         a = st.action

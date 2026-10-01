@@ -101,16 +101,19 @@ flowgen/steps.py の KEYS）。決め方は2つ。
     1件目**を選ぶ（`locate()`）。モデルには訊かない。選んだ値は `devices.<端末>.picked` に書く
     （判定する側が、どれを押したかを知るため）。撮るたびに選び直す — データが変わっても
     古い値で走らないように。経路の途中で押す行（`経路 tap:…`）もこれ
-  - **打つ文字、条件つきの選択、見たい行が含む語**: `devices.<端末>.inputs` の値を使う。空なら
+  - **打つ文字、条件つきの選択**: `devices.<端末>.inputs` の値を使う。空なら
     止まる（下の「入力が未定なら」）。再開のときは止まった手から走る（もうそこに居る）
+  - **条件つきの選択（`tap` / `see` / `in` の `pick`）は、いま画面に見えている行からだけ選ばせる。**
+    止まるときに、並びの先頭（縦の一覧なら上の端、カルーセルなら先頭）まで戻し、見えている行を
+    候補として出す。呼び出し元は、条件に合う行があればその ID を、無ければ `次`（NEXT）を書く。
+    `次` なら1画面だけ送ってまた候補を出し、送っても見えている行が変わらなければ端なので落とす
+    （撮れなかった記録になる）。集めてから選んだ行まで戻る形にしない — 選ぶのが画面に見えて
+    いない行になり、戻ったときに同じ状態である保証も無い
 
 **パターンの要素を押すときは、同じ ID の行のうち何番目かも数える**（`locate()`）。行の ID は
 表示中の名前なので、同じ名前の行は ID も同じになる。数えた番号を Maestro の `index` に渡して
 1件に絞る。値はアクセシビリティ ID そのもの（ダンプの id の欄）。条件つきの選択は
 `<ID>#2`（見えている同じ ID の行のうち上から2件目）とも書ける。
-
-**見たい行が含む語（`see` の `runtime`）は、行の ID をまるごと書いたら走らせずに止める**。
-探しても語を含む行が無く、ほかの行はあるなら、表示中の行を並べて止める（語の選び違い）。
 
 **値はフローにだけ書き、マニフェストに書き戻さない**（`picked` を除く）。`inputs` は撮影する側が
 決めた値で、ここは読むだけ。セレクタに入る値は正規表現としてエスケープし（flowgen/maestro.py）、
@@ -149,7 +152,7 @@ import manifest_items            # マニフェストの項目を名前で引く
 from device import simulators   # UDID から起動しているかを引く
 from flowgen import flow as flows_of   # テストケースごとに手順を組む
 from flowgen.actions import HideKeyboard, Scroll, Tap
-from flowgen.maestro import decided_by_caller, exact
+from flowgen.maestro import decided_by_caller, exact, picks_pattern
 from flowgen.steps import Act, Enter, See
 from screenmap.map import load_map
 from screenmap.screen import is_pattern, pattern_prefix
@@ -231,12 +234,13 @@ def shown(dump):
     return ids, texts
 
 
-def box_of(raw, rid):
-    """生のダンプ（maestrod.py が置く JSON）で、その ID の要素の枠 (x0, y0, x1, y1)。無ければ None。
+def children_of(n):
+    return n.get("c") or n.get("children") or []
 
-    **親の中の行だけから選ぶのに使う。** elements.py の行は中心しか持たないので、親の枠は
-    生のほうから取る。同じ ID の要素が複数あれば、ツリーで先のもの。
-    """
+
+def node_of(raw, rid):
+    """生のダンプ（maestrod.py が置く JSON）で、その ID の要素。同じ ID の要素が複数あれば、ツリーで先のもの。
+    無ければ None。生のダンプは、略号の形（b / rid / a11y / c）と属性の形のどちらもある。"""
     try:
         d = json.loads(raw)
     except ValueError:
@@ -248,10 +252,44 @@ def box_of(raw, rid):
             continue
         a = n.get("attributes") or {}
         if (n.get("rid") or a.get("resource-id")) == rid:
-            m = re.match(r"^\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]$", n.get("b") or a.get("bounds") or "")
-            return tuple(map(int, m.groups())) if m else None
-        stack[0:0] = n.get("c") or n.get("children") or []
+            return n
+        stack[0:0] = children_of(n)
     return None
+
+
+def box_of(raw, rid):
+    """その ID の要素の枠 (x0, y0, x1, y1)。無ければ None。
+
+    **親の中の行だけから選ぶのに使う。** elements.py の行は中心しか持たないので、親の枠は
+    生のほうから取る。
+    """
+    n = node_of(raw, rid)
+    if n is None:
+        return None
+    a = n.get("attributes") or {}
+    m = re.match(r"^\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]$", n.get("b") or a.get("bounds") or "")
+    return tuple(map(int, m.groups())) if m else None
+
+
+def inner_texts(raw, rid):
+    """その ID の要素の中（子孫）にある要素の表示テキスト。重ねずに、ツリーの順で。
+
+    elements.py の行は中心しか持たないので、枠の中かで拾うと画面全体の要素（スクロールバー、
+    ウィンドウ）まで混ざる。行の中のものは生のダンプの入れ子から取る。
+    """
+    n = node_of(raw, rid)
+    out, stack = [], list(children_of(n)) if n else []
+    while stack:
+        c = stack.pop(0)
+        if not isinstance(c, dict):
+            continue
+        a = c.get("attributes") or {}
+        text = (c.get("a11y") or c.get("txt") or c.get("val")
+                or a.get("accessibilityText") or a.get("text") or "").strip()
+        if text:
+            out.append(text)
+        stack[0:0] = children_of(c)
+    return list(dict.fromkeys(out))
 
 
 def pattern_rows(dump, pattern, exclude=(), box=None):
@@ -388,7 +426,7 @@ def exclude_of(mp, screen, pattern):
                   if el.get("id") != pattern and str(el.get("id") or "").startswith(prefix))
 
 
-def target_of(mp, st, word=None):
+def target_of(mp, st):
     """ステップの対象を探す Want。探せない（要素の無い操作、マップに無い文言）なら None。"""
     if isinstance(st, Enter):
         return Want(pattern=st.target, exclude=exclude_of(mp, st.screen, st.target))
@@ -398,8 +436,7 @@ def target_of(mp, st, word=None):
         if st.by_label:
             return Want(label=st.target)
         if is_pattern(st.target):
-            w = st.contains if st.contains is not None else word
-            return Want(pattern=st.target, word=w, exclude=exclude_of(mp, st.screen, st.target))
+            return Want(pattern=st.target, word=st.contains, exclude=exclude_of(mp, st.screen, st.target))
         return Want(exact=st.target)
     if isinstance(st, Act):
         a = st.action
@@ -551,6 +588,30 @@ class Seeker:
         where = f"{parent} の中の左右" if parent is not None else "上下"
         return f"{want} が画面に無い（{where}の端まで探した）"
 
+    def rewind(self, parent=None):
+        """並びの先頭（縦なら上の端、親の中なら先頭）まで戻す。戻せれば None、だめなら理由の文。
+        画面の中に見えている ID が送る前と同じなら端（hunt() と同じ）。"""
+        before = self.seen(parent)
+        for _ in range(SEEK_SWIPES):
+            if not self.run(scroll_body("back" if parent is not None else "up", parent), "rewind"):
+                return "先頭まで戻すフローが落ちた"
+            if not self.read():
+                return "画面を読めない"
+            now = self.seen(parent)
+            if now == before:
+                return None
+            before = now
+        return None                                       # 戻りきらなくても、見えている行から選ばせる
+
+    def advance(self, parent=None):
+        """1画面だけ先へ送る。送れれば None、送っても見えている ID が変わらなければ "端"、だめなら理由の文。"""
+        before = self.seen(parent)
+        if not self.run(scroll_body("next" if parent is not None else "down", parent), "advance"):
+            return "送るフローが落ちた"
+        if not self.read():
+            return "画面を読めない"
+        return "端" if self.seen(parent) == before else None
+
     def find(self, want, chain):
         """対象を探す。子の要素なら、いちばん外の親を縦に探してから、親の中を順に横へ。
         見つかれば None（`box` は対象を探した枠）、無ければ理由の文。"""
@@ -578,40 +639,53 @@ class Seeker:
         return None
 
 
-def value_hint(st):
-    """止まったときに、何を決めるのかを言う文。取り違えると、行の ID を渡すべきところに語を、
-    語を渡すべきところに行の ID を書いてしまう。
+NEXT = "次"   # 条件に合う行が見えていないとき、呼び出し元が書く値。1画面送って候補を出し直す
 
-    - 条件つきの選択（行・親）: 行の ID をまるごと
+
+def value_hint(st):
+    """止まったときに、何を決めるのかを言う文。取り違えると、行の ID を渡すべきところに打つ文字を書いてしまう。
+
+    - 条件つきの選択（押す行・見る行・親）: 行の ID をまるごと
     - 打つ文字: 入力欄に打つ文字
-    - 見る行が含む語（`see` の `runtime`）: 行の ID の一部になる語。
-      行の ID をまるごと書くと、その後ろに何も続かない行を探すことになり当たらない
     """
     if isinstance(st, Enter):
         return f"条件「{st.pick.condition}」に合う {st.target} を選んで、その ID（ダンプの id の欄をまるごと）を"
+    if isinstance(st, See):
+        return (f"条件「{st.pick.condition}」に合う {st.target} を選んで、"
+                "その ID（ダンプの id の欄をまるごと）を")
     if isinstance(st, Act) and isinstance(st.action, Tap):
         return (f"条件「{st.action.pick.condition}」に合う {st.action.target} を選んで、"
                 "その ID（ダンプの id の欄をまるごと）を")
-    if isinstance(st, Act):
-        return "打つ文字を"
-    return "見たい行が含む語（行の ID の一部。ID をまるごと書かない）を"
+    return "打つ文字を"
 
 
-def contains_problem(dump, want, value):
-    """見たい行が含む語（see の runtime）が当たらなかったとき、呼び出し元に見せる文。語の選び違い
-    （パターンの行はあるが、どれの ID にも語が入っていない）でなければ None。
+def candidates(dump, raw, pattern, exclude=(), box=None):
+    """いま画面に見えている、パターンの行（選ぶ候補）。[(値, 行の表示テキスト, 行の中の文字の並び)]。
 
-    フローは `^<接頭辞>.*<語>.*` の ID を探すので、作者で絞り込んだのに ID が作品名の行を
-    作者名で待つ、などは必ず落ちる。画面外の行もダンプに出ている範囲で並べる。
+    値は `inputs` にそのまま書けるもの。同じ ID の行が複数見えていれば、2件目からは `<ID>#2`
+    （locate() と同じ書き方）。行の中の文字は、行の子孫の要素の表示テキスト（inner_texts()）。
     """
-    prefix = pattern_prefix(want.pattern)
-    rows = [r["id"] for r in Want(pattern=want.pattern, exclude=want.exclude).rows(dump or "")]
-    if not rows:
-        return None
-    shown = ", ".join(v[len(prefix):] for v in rows[:10])
-    return (f"「{value}」を ID に含む {want.pattern} の行が、いまの画面に無い。"
-            f"表示中の行（{prefix} を除いた ID）: {shown}。"
-            "この中の行の ID の一部を書く — 打った語と同じとは限らない（作者で絞り込めば、行の ID は作品名）")
+    rows = {r["id"]: r for r in dump_rows(dump)}
+    out, counts = [], {}
+    for rid, on in pattern_rows(dump, pattern, exclude, box):
+        if not on:
+            continue
+        counts[rid] = counts.get(rid, 0) + 1
+        value = rid if counts[rid] == 1 else f"{rid}#{counts[rid]}"
+        out.append((value, rows[rid]["text"], inner_texts(raw, rid) if raw else []))
+    return out
+
+
+def candidates_text(found):
+    lines = []
+    for value, text, inner in found:
+        line = f"  - {value}"
+        if text:
+            line += f" ｜ {text}"
+        if inner:
+            line += " ｜ 中: " + " / ".join(inner)
+        lines.append(line)
+    return "\n".join(lines)
 
 
 class Hand:
@@ -642,33 +716,30 @@ class Hand:
         print(f"\n{self.dv.device} {self.name} {message}")
         return ("stopped", self.k)
 
-    def missing(self, key):
-        """撮影する側が決める値が空。なぞる項目なら止まらずに終える（前に撮ったときに決めてあるはず）。"""
+    def missing(self, key, found=None):
+        """撮影する側が決める値が空。なぞる項目なら止まらずに終える（前に撮ったときに決めてあるはず）。
+        `found` は選ぶ候補（candidates()）。条件つきの選択なら渡す。"""
         if self.replay:
             # ここで決めさせると、撮り直しのたびに手前の項目の判断をやり直すことになる
             sys.exit(f"{self.dv.device} {self.name} の値が未定（{key}）。撮り直しは手前の項目を"
                      f"なぞるので、devices.{self.dv.device}.inputs に前に撮ったときの値が要る")
-        picks = isinstance(self.st, Enter) or isinstance(getattr(self.st, "action", None), Tap)
-        extra = ("\n同じ ID の行が複数あるなら「<ID>#2」のように書く（画面に見えている同じ ID の行のうち上から2件目）。"
-                 if picks else "")
+        if found is not None:
+            return self.stop(f"入力が未定（{key}）",
+                             f"入力が未定（{key}）。\nいま画面に見えている行（候補）:\n{candidates_text(found)}\n"
+                             f"この中から{value_hint(self.st)} devices.{self.dv.device}.inputs の \"{key}\" に書く。"
+                             f"条件に合う行が無ければ「{NEXT}」と書く（1画面送って、次の候補を出す）。"
+                             f"{self.again()}")
         return self.stop(f"入力が未定（{key}）",
                          f"入力が未定（{key}）。\nいまこの画面に居る。見て{value_hint(self.st)}決め、"
-                         f"devices.{self.dv.device}.inputs の \"{key}\" に書き、{self.again()}{extra}")
+                         f"devices.{self.dv.device}.inputs の \"{key}\" に書き、{self.again()}")
 
     def play(self):
         st, key, mp = self.st, self.st.key, self.dv.mp
         given = (self.dev.get("inputs") or {}).get(key) or None
         caller = decided_by_caller(st)
-        later_see = isinstance(st, See) and st.later
-        if caller and given and later_see and given.startswith(pattern_prefix(st.target)):
-            prefix = pattern_prefix(st.target)
-            return self.stop(f"{key} の「{given}」は行の ID をまるごと書いている",
-                             f"{key}: 「{given}」は行の ID をまるごと書いている。行の ID の一部（{prefix} を"
-                             f"除いた語）を書く。devices.{self.dv.device}.inputs を直し、{self.again()}")
-        picks = isinstance(st, Enter) or (isinstance(st, Act) and isinstance(st.action, Tap)
-                                          and st.action.pick is not None)
-        if caller and given and picks:
-            pattern = st.target if isinstance(st, Enter) else st.action.target
+        picks = isinstance(st, Enter) or picks_pattern(st)
+        if caller and given and given != NEXT and picks:
+            pattern = st.target if isinstance(st, (Enter, See)) else st.action.target
             prefix = pattern_prefix(pattern)
             if not given.startswith(prefix):
                 # 書いた ID がこの操作のパターンに当たらない（別の画面の ID、接頭辞の書き間違い）。
@@ -677,7 +748,7 @@ class Hand:
                                  f"{key} の値 {given} が {pattern} に当たらない。ダンプの id の欄"
                                  f"（{prefix}…）をそのまま devices.{self.dv.device}.inputs に書き、"
                                  "同じコマンドをもう一度叩く。")
-        want = target_of(mp, st, given if later_see else None)
+        want = target_of(mp, st)
         if want is None:
             if caller and not given:
                 return self.missing(key)
@@ -685,28 +756,20 @@ class Hand:
                 self.values[key] = given
             return None                                   # 探せないもの。フローで待つ
         seeker = Seeker(self.dv, self.name, self.k, self.record)
-        # 決める値が未定なら、語を含む行ではなく、パターンの行のどれかが見えるところまで運んで止まる
-        search = Want(pattern=want.pattern, exclude=want.exclude) if later_see and not given else want
-        self.record.note(f"run_flows.py がダンプで探す: {search}")
-        why = seeker.find(search, chain_of(st, self.values))
+        self.record.note(f"run_flows.py がダンプで探す: {want}")
+        why = seeker.find(want, chain_of(st, self.values))
         if why:
-            if later_see and given and seeker.dump is not None:
-                problem = contains_problem(seeker.dump, want, given)
-                if problem:
-                    if self.replay:
-                        sys.exit(f"{self.dv.device} {self.name} の {key}: {problem}。撮り直しは手前の項目を"
-                                 f"なぞるので、devices.{self.dv.device}.inputs を直してから叩き直す")
-                    return self.stop(f"{key} の「{given}」を含む行が無い",
-                                     f"{key}: {problem}。devices.{self.dv.device}.inputs を直し、{self.again()}")
             return self.fail(why)
+        if caller and picks and given in (None, NEXT):
+            return self.choose(seeker, want, given)
         if caller and not given:
             return self.missing(key)
         if picks:
-            # どの行を押すか（どの親の中でするか）を決め、同じ ID の行のうち何番目か（Maestro の index）を
+            # どの行を押す・見るか（どの親の中でするか）を決め、同じ ID の行のうち何番目か（Maestro の index）を
             # 数える。条件が無ければ画面に見えている1件目（モデルに訊かない）
             found = locate(seeker.dump, want.pattern, want.exclude, given if caller else None, seeker.box)
             if found is None:
-                what = f"{given} が" if caller else f"押す {want.pattern} が"
+                what = f"{given} が" if caller else f"{want.pattern} が"
                 return self.fail(f"{what}画面に見えていない")
             value, index, count = found
             self.values[key] = value
@@ -718,6 +781,33 @@ class Hand:
         elif caller:
             self.values[key] = given
         return None
+
+    def choose(self, seeker, want, given):
+        """条件つきの選択で、まだ行が決まっていない（値が空か NEXT）。いま見えている行を候補に出して止まる。
+
+        値が空なら、並びの先頭まで戻してから出す。NEXT なら1画面だけ送ってから出し、送っても
+        見えている行が変わらなければ、端まで見て無かったとして落とす。送る並びは、いちばん内側の
+        親が横に送るもの（`scroll`）ならその中、そうでなければ画面の縦。
+        """
+        if self.replay:
+            return self.missing(self.st.key)           # なぞる項目では選ばない（前に撮った値が要る）
+        chain = chain_of(self.st, self.values)
+        parent = chain[-1][0] if chain and chain[-1][1] else None
+        if given is None:
+            why = seeker.rewind(parent)
+        else:
+            why = seeker.advance(parent)
+            if why == "端":
+                cond = (self.st.pick if isinstance(self.st, (Enter, See)) else self.st.action.pick).condition
+                where = f"{parent} の中の左右" if parent is not None else "上下"
+                return self.fail(f"条件「{cond}」に合う {want.pattern} が無い（{where}の端まで見た）")
+        if why:
+            return self.fail(why)
+        found = candidates(seeker.dump, seeker.raw, want.pattern, want.exclude,
+                           seeker.boxed(chain[-1][0]) if chain else None)
+        if not found:
+            return self.fail(f"{want.pattern} が画面に見えていない")
+        return self.missing(self.st.key, found)
 
 
 def run_item(dv, sec, row, replay, first=0):
