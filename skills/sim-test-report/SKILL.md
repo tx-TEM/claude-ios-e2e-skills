@@ -157,7 +157,8 @@ python3 <このスキルのディレクトリ>/scripts/run_flows.py <出力先>/
 | 来たとき | やること | 読む |
 |---|---|---|
 | 「撮れなかった」項目がある | **判定に回す前に、retaker に撮り直させる。** その場で探索で撮り直さない（ずれを隠すと次も同じところで落ちる）。retaker でも撮れなかった項目だけ、探索で撮るかこのまま出すかをユーザーに2択で選んでもらう | `reference/flow-failed.md` |
-| 「入力が未定」で終わった | アプリはその画面に居る。ダンプと `expect` から値を決めて `devices.<端末>.inputs` に書き、同じコマンドを叩き直す。選ぶ行（`pick`）なら、メッセージに並んだ候補から条件に合う行の ID を書き、無ければ `次` と書く。**sim-driver に渡さない** | `reference/runtime-inputs.md` |
+| 「条件に合う要素が無かった」項目がある | **撮り直さない。そのまま判定に回す。** 探しきって見当たらなかったので、撮り直しても同じ。evidence-judge が `NG` にする（証跡は最後に見た画面）。後ろの巻き添えの項目は `SKIP` | `reference/runtime-inputs.md` |
+| 「入力が未定」で終わった | アプリはその画面に居る。ダンプと `expect` から値を決め、同じコマンドに `--value '<値>'` を付けて叩き直す。選ぶ行（`pick`）なら、メッセージに並んだ候補から条件に合う行の ID を `--value` で渡し、無ければ `--next` を付けて叩き直す。**マニフェストは手で書き換えない**（値は `run_flows.py` が `inputs` に書く）。**sim-driver に渡さない** | `reference/runtime-inputs.md` |
 | `flow` の無い項目が残った | 端末ごとに sim-driver を呼び、進捗ログに `Monitor` を張る | `reference/explore.md` |
 | いまのデータで踏めない項目、すぐ消えるUIがある | 一時コードで再現する。仕込みと revert は自分がやる | `reference/temp-code.md` |
 
