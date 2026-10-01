@@ -1,8 +1,10 @@
-"""操作をすると起きること（Arrive / Visible / Value / Selected / Hidden / External）。"""
+"""操作をすると起きること（Arrive / Closed / Visible / Value / Selected / Hidden / External）。"""
 from dataclasses import dataclass
 from typing import Union
 
-from screenmap.screen import expect_kind
+from typing import Optional
+
+from screenmap.screen import closes_then_opens, expect_kind
 
 
 @dataclass
@@ -10,6 +12,20 @@ class Arrive:
     """別の画面に着く。`via` は push / modal / tab / back / dismiss（着いたときの自動表示の確かめ方が変わる）。"""
     screen: str
     via: str
+
+
+@dataclass
+class Closed:
+    """居た画面が閉じる。そのあと別の画面に進む操作（メニューの選択肢でダイアログが出る、など）で、
+    進む先の Arrive と一緒に出る。閉じた画面の anchor が消えたことで確かめる。
+
+    戻った先の画面は確かめない。進んだ先が被さって、ツリーから隠れているので（実測）。
+
+    アプリの外に出るとき（`external`）は進む先の画面が無い。`to` に、閉じて残る画面（歩いた履歴で
+    決める。bridge.py の Route.close）を入れ、アプリに戻したらそこに居るとする。
+    """
+    screen: str
+    to: Optional[str] = None
 
 
 @dataclass
@@ -68,7 +84,7 @@ class External:
         return LOADED.get(self.name, ())
 
 
-Result = Union[Arrive, Visible, Value, Selected, Hidden, External]
+Result = Union[Arrive, Closed, Visible, Value, Selected, Hidden, External]
 
 OWN_RESULTS = {"visible": Visible, "value": Value, "selected": Selected, "hidden": Hidden}
 
@@ -78,11 +94,17 @@ def resolve_result(action, expects, back_to=None):
 
     `screen: back` は `back_to`（歩いた履歴で決めた、実際に戻る画面）に、`self` は操作した
     要素の ID にする。分かれる結果は、呼ぶ側が選んだ枝の expect だけを渡す。
+
+    `screen: back` と進む先（か `external`）の両方があれば、居た画面が閉じてから進む
+    （Closed と、進む先の Arrive か External）。
     """
+    closes = closes_then_opens(expects)
     out = []
     for e in expects:
         kind = expect_kind(e)
-        if kind == "screen":
+        if kind == "screen" and closes and e["screen"] == "back":
+            out.append(Closed(action.sid))
+        elif kind == "screen":
             out.append(Arrive(back_to if e["screen"] == "back" else e["screen"], e.get("via")))
         elif kind == "external":
             out.append(External(e[kind]))

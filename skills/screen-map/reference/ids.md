@@ -17,6 +17,8 @@ public var body: some View {
 
 SwiftUIのコンテナに振ったIDは要素として出る（実測で確認済み）。出ない場合は `.accessibilityElement(children: .contain)` を併せる。それでも出なければ常在要素を借りるしかないが、**借りた理由を手順6で報告する。**
 
+**ID を付ける手段が無い OS の部品**（`UIMenu`、`.confirmationDialog`、許可ダイアログ）は、借りる要素も無い。`anchor_by: label` で anchor を表示テキストにする（`reference/schema.md` の anchor_by）。
+
 ## IDの書き方
 
 **IDはリテラルで1箇所に書く。接頭辞と役割名を分けて合成しない。** 合成すると、完成したIDがソースのどこにも文字列として存在しなくなり、**ID生存チェックのgrepが生きているIDを `dead` と誤判定する。**

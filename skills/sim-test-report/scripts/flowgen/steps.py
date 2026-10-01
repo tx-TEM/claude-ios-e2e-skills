@@ -19,7 +19,7 @@ from typing import List, Optional
 from screenmap.screen import is_pattern, pattern_prefix
 
 from .actions import Action, InputLater, Pick, Tap
-from .results import Arrive, External, Result
+from .results import Arrive, Closed, External, Result
 
 
 # ---------- 親の中で操作する ----------
@@ -123,9 +123,20 @@ class Act:
         return next((r for r in self.result if isinstance(r, Arrive)), None)
 
     @property
+    def closed(self):
+        """居た画面が閉じるなら、その Closed。閉じなければ None。"""
+        return next((r for r in self.result if isinstance(r, Closed)), None)
+
+    @property
     def to(self):
-        """着く画面。着かなければ None（ほかのステップの `to` と同じ意味）。"""
-        return self.arrive.screen if self.arrive else None
+        """操作のあと居る画面。画面が変わらなければ None（ほかのステップの `to` と同じ意味）。
+
+        ふつうは着く画面。居た画面が閉じてアプリの外に出るなら、閉じて残る画面（Closed の `to`）。
+        こちらは着いたことを確かめない（外に居るので）。確かめるかは `arrive` で見る。
+        """
+        if self.arrive:
+            return self.arrive.screen
+        return self.closed.to if self.closed else None
 
     def needs_value(self):
         """走らせるときに値を決めるか（パターンの要素のどれに操作するか、打つ文字）。"""

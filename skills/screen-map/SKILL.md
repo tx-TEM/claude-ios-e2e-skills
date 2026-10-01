@@ -83,6 +83,7 @@ grep -rn "accessibilityIdentifier" --include="*.swift" . | head -50
 **振る前に `reference/ids.md` を、yaml を書く前に `reference/schema.md` と `reference/route.md`（経路として効いてくる書き方: 戻る操作、複数の入口、`when`、`summary` の書き方）を読む。** 書き方の実例と、下の規則の理由はそちらにある。規則だけ先に並べる。
 
 - **`anchor` は画面自体（コンテナ）に振る。画面内の要素を借りない** — 借りた要素を替えたり消したりすると、画面があるのに「着いていない」判定になる
+- **ID を付けられない OS の部品（`UIMenu`、`.confirmationDialog`、許可ダイアログ）だけ、anchor を表示テキストで書く**（`anchor_by: label`。`reference/schema.md` の anchor_by）。ほかのシートと同じく画面にする。選択肢を元の画面の要素に `when` 付きで書いて逃げない — 着いたことを確かめられず、その先の画面への経路も切れる
 - **IDはリテラルで1箇所に書く。接頭辞と役割名を分けて合成しない** — 完成したIDがソースに無いと、ID生存チェックのgrepが生きているIDを `dead` と誤判定する
 - **自分で振れないID（`BackButton`、検索キーの `Search`）はそのまま書き、**ID の生存チェックから外す（ソースに無いので）。`BackButton` と `Search` は共通で外れる。それ以外の OS の ID は `config.yaml` の `system_ids` に足す。手順6でlintの例外として報告する
 - **`accessibilityIdentifier` は読み上げられないので、命名を実利用者に配慮して曲げない。逆に、テストの都合で `label` に情報を足さない**（そちらは読み上げられる）
@@ -176,4 +177,4 @@ python3 ~/.claude/skills/sim-test-report/scripts/maestrod.py stop
 
 ## スキーマ
 
-`config.yaml`（`start`: 起動直後の画面）と、1画面1ファイルの `screens/<画面id>.yaml`（`anchor` / `names` / `summary` / `files` / `stub` / `ready` / `elements` / `gestures` / `auto_shows`）。操作と結果は要素（`elements`）の `actions` に持つ。**全体と各フィールドの規則は `reference/schema.md`。** yaml を書く前に読む。
+`config.yaml`（`start`: 起動直後の画面）と、1画面1ファイルの `screens/<画面id>.yaml`（`anchor` / `anchor_by` / `names` / `summary` / `files` / `stub` / `ready` / `elements` / `gestures` / `auto_shows`）。操作と結果は要素（`elements`）の `actions` に持つ。**全体と各フィールドの規則は `reference/schema.md`。** yaml を書く前に読む。
