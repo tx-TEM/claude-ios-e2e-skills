@@ -1,8 +1,6 @@
 """操作をすると起きること（Arrive / Closed / Visible / Value / Selected / Hidden / External）。"""
 from dataclasses import dataclass
-from typing import Union
-
-from typing import Optional
+from typing import Optional, Union
 
 from screenmap.screen import closes_then_opens, expect_kind
 
@@ -21,8 +19,8 @@ class Closed:
 
     戻った先の画面は確かめない。進んだ先が被さって、ツリーから隠れているので（実測）。
 
-    アプリの外に出るとき（`external`）は進む先の画面が無い。`to` に、閉じて残る画面（歩いた履歴で
-    決める。bridge.py の Route.close）を入れ、アプリに戻したらそこに居るとする。
+    `to` は閉じて残る画面（歩いた履歴で決める。resolve_result の `back_to`）。アプリの外に出るとき
+    （`external`）は進む先の画面が無いので、アプリに戻したらここに居るとする。
     """
     screen: str
     to: Optional[str] = None
@@ -102,10 +100,13 @@ def resolve_result(action, expects, back_to=None):
     out = []
     for e in expects:
         kind = expect_kind(e)
-        if kind == "screen" and closes and e["screen"] == "back":
-            out.append(Closed(action.sid))
-        elif kind == "screen":
-            out.append(Arrive(back_to if e["screen"] == "back" else e["screen"], e.get("via")))
+        if kind == "screen":
+            if e["screen"] != "back":
+                out.append(Arrive(e["screen"], e.get("via")))
+            elif closes:
+                out.append(Closed(action.sid, back_to))
+            else:
+                out.append(Arrive(back_to, e.get("via")))
         elif kind == "external":
             out.append(External(e[kind]))
         elif kind in OWN_RESULTS:
