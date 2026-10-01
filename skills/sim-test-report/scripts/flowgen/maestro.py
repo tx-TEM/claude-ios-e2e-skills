@@ -150,13 +150,15 @@ def add_reveals(steps, state=None):
 
 
 def needs_value(st):
-    """実行時に値を決めるステップか。打つ文字か、パターンの要素のどれに操作するか、
-    見る行が含む語（`see` の `runtime`）、パターンの親のどれの中でするか（Enter）。"""
+    """実行時に値を決めるステップか。打つ文字か、パターンの要素のどれを押す・見るか、
+    パターンの親のどれの中でするか（Enter）。"""
     return isinstance(st, (Act, See, Enter)) and st.needs_value()
 
 
 def picks_pattern(st):
-    """パターンの要素のどれを押すかを実行時に決めるステップか（打つ文字ではなく）。"""
+    """パターンの要素のどれを押す・見るかを実行時に決めるステップか（打つ文字ではなく）。"""
+    if isinstance(st, See):
+        return st.pick is not None
     return isinstance(st, Act) and isinstance(st.action, Tap) and st.action.pick is not None
 
 
@@ -165,14 +167,14 @@ def decided_by_caller(st):
     if isinstance(st, Enter):
         return bool(st.pick.condition)
     if picks_pattern(st):
-        return bool(st.action.pick.condition)
+        return bool((st.pick if isinstance(st, See) else st.action.pick).condition)
     return needs_value(st)
 
 
 def caller_keys(steps):
     """撮影する側（LLM）が決める値の鍵の並び。マニフェストの `inputs` に空で置く。
 
-    打つ文字（`runtime`）、見る行が含む語（`see` の `runtime`）、条件つきで選ぶ行と親（`pick`）。
+    打つ文字（`runtime`）と、条件つきで選ぶ行（押す・見る）と親（`pick`）。
     条件の無いパターンの要素は run_flows.py が見えている1件目を選ぶので入れない。
     """
     return [st.key for st in steps if getattr(st, "key", None) and decided_by_caller(st)]
@@ -241,11 +243,10 @@ def step_sel(st, values=None):
     """ステップが指す要素のセレクタ（See は見る要素、Act は操作の要素）。"""
     values = values or {}
     if isinstance(st, See):
-        if st.contains is not None or st.later:
+        if st.contains is not None:
             # その語を含む行。語は正規表現としてエスケープする
-            word = st.contains if st.contains is not None else values[st.key]
-            return "id", "^" + re.escape(pattern_prefix(st.target)) + ".*" + re.escape(word) + ".*"
-        return element_sel(st.target, st.by_label)
+            return "id", "^" + re.escape(pattern_prefix(st.target)) + ".*" + re.escape(st.contains) + ".*"
+        return element_sel(st.target, st.by_label, values.get(st.key) if st.pick else None)
     a = st.action
     value = values.get(st.key) if needs_value(st) and is_pattern(a.target) else None
     return element_sel(a.target, a.by_label, value)
@@ -530,16 +531,19 @@ class FlowWriter:
             what = st.target
             if st.contains is not None:
                 what += "（「{}」を含む行）".format(st.contains)
-            elif st.later:
-                what += "（「{}」を含む行）".format(self.values.get(st.key, "未定"))
+            elif st.pick:
+                what += " [{}: {}]".format(st.pick.condition, self.values.get(st.key, "未定"))
             if st.within:
                 what += " in " + " > ".join(self.parent_label(w) for w in st.within)
             self.out.append(Comment("{}: see {}{}".format(st.screen, what,
                                                             " — " + name if name else "")))
             key, val = step_sel(st, self.values)
+            # 選んだ行と同じ ID の行が複数あれば、何番目かで1つに絞る（tap の pick と同じ）
+            nth = {"index": int(self.indexes[st.key])} if st.pick and st.key in self.indexes else {}
             if st.within:
                 # 親の中まで run_flows.py が送って見つけてある。見えていることだけ確かめる
-                self.out.append(wait_for(key, val, self.timeout, extra=scope(st.within, self.values)))
+                self.out.append(wait_for(key, val, self.timeout,
+                                         extra=dict(scope(st.within, self.values), **nth)))
             else:
                 # run_flows.py が画面の中に見つけてある。下端から離すだけ（下端にかかって
                 # いれば少し送る。見えているのですぐ抜ける — 時間は着いたあとの待ちと同じ上限）。
@@ -549,7 +553,7 @@ class FlowWriter:
                 # 上のほうに見えている要素を下へ寄せようとして空打ちし（実測5回・約8秒）、
                 # アプリによっては「引っ張って更新」で一覧を読み込み直す
                 self.out.append({"scrollUntilVisible": {
-                    "element": {key: val}, "direction": Raw("DOWN"), "centerElement": True,
+                    "element": dict({key: val}, **nth), "direction": Raw("DOWN"), "centerElement": True,
                     "timeout": self.timeout}})
         else:
             self.action(i, st)

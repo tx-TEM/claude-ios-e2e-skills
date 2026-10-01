@@ -39,7 +39,7 @@ from .maestro import (Return, Reveal, ScrollState, add_returns, add_reveals, cal
                       needs_value, shot_context, split_at_shots)
 from screenmap.map import load_map
 from screenmap.screen import DO_OPS, GESTURES, closes_then_opens, is_pattern, pattern_prefix
-from .actions import HideKeyboard, resolve_action
+from .actions import HideKeyboard, Pick, resolve_action
 from .bridge import Route, Unroutable, emit_path, report_problems
 from .results import resolve_result
 from .steps import Act, Enter, Restart, See, Shot, goes_out, nest, stays_out
@@ -564,11 +564,14 @@ def do_step(mp, route, op, how, given):
     if kind == "see" and el is not None:
         st = See(at, target or el.get("id"), el.get("name"), el.get("by") == "label", within=within)
         if how:
-            if "pick" in how or not is_pattern(st.target) or st.by_label:
-                raise Unroutable([("call", "「{}」に添えられるのは input か runtime で、パターンの要素"
-                                           "（`*` で終わる ID）にだけ。その語を含む行を待つ".format(op))])
+            if "runtime" in how:
+                raise Unroutable([("call", "「{}」に runtime は付けられない。どの行を見るかは pick に"
+                                           "条件で書く（「〇〇を含む行」も条件で書ける）".format(op))])
+            if not is_pattern(st.target) or st.by_label:
+                raise Unroutable([("call", "「{}」に添えられるのは input か pick で、パターンの要素"
+                                           "（`*` で終わる ID）にだけ".format(op))])
             st.contains = str(how["input"]) if "input" in how else None
-            st.later = bool(how.get("runtime"))
+            st.pick = Pick(how["pick"]) if "pick" in how else None
         return enters + [st], wrong_in
     if found is None:
         raise Unroutable([("call", "{} に「{}」という操作がマップに無い。この画面にあるのは {}"

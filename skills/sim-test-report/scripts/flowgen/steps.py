@@ -152,8 +152,9 @@ class See:
     アプリの外（Safari など）はマップに無いので、外の文言は ID の代わりにこれで待つしかない。
     Safari のページの読み込みは、外に居るまま撮るときに FlowWriter.check が待つ。
 
-    パターンの要素（`list.row.*`）には、その語を含む行を待つ語を添えられる。`contains` は
-    plan に書いた語（`input`）、`later` は撮るときに決める語（`runtime`）。
+    パターンの要素（`list.row.*`）には、どの行を見るかを添えられる。`contains` は plan に書いた語
+    （`input`）で、その語を含む行を待つ。`pick` は条件で、撮るときに画面に見えている行から選ぶ
+    （`tap` の `pick` と同じ）。
     """
     screen: str
     target: str                       # 要素の id（ID まで書いたら、その ID）。text なら文言
@@ -162,13 +163,13 @@ class See:
     item: Optional[str] = None
     text: bool = False                # マップに無い文言を待つ（see:text:<文言>）
     contains: Optional[str] = None    # この語を含む行を待つ（input）
-    later: bool = False               # 含む語を撮るときに決める（runtime）
+    pick: Optional[Pick] = None       # 見る行を撮るときに選ぶ条件（pick）
     within: List[Within] = field(default_factory=list)   # 子の要素なら、その親（外から順）
     key: Optional[str] = None         # 項目の do の操作なら、その鍵（KEYS の説明）
     to = None
 
     def needs_value(self):
-        return self.later
+        return self.pick is not None
 
 
 @dataclass

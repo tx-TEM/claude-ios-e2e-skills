@@ -75,8 +75,8 @@ def cases_of(items):
 
 
 def fake_values(unit):
-    """テストの便宜。1手を書くときに埋める値（run_flows.py が決めるもの。ダンプから選ぶ行と、inputs から取る打つ文字・語）。
-    パターンの要素は `<接頭辞>選んだ`、打つ文字は `打った`、含む語は `語`。"""
+    """テストの便宜。1手を書くときに埋める値（run_flows.py が決めるもの。ダンプから選ぶ行と、inputs から取る打つ文字）。
+    パターンの要素は `<接頭辞>選んだ`、打つ文字は `打った`。"""
     from flowgen.actions import InputLater
     from flowgen.steps import Act, Enter, See
     from screenmap.screen import pattern_prefix
@@ -87,8 +87,9 @@ def fake_values(unit):
             continue
         if isinstance(st, Enter):
             values[key] = pattern_prefix(st.target) + "選んだ"
-        elif isinstance(st, See) and st.later:
-            values[key] = "語"
+        elif isinstance(st, See) and st.pick is not None:
+            values[key] = pattern_prefix(st.target) + "選んだ"
+            indexes[key] = 0
         elif isinstance(st, Act) and isinstance(st.action, InputLater):
             values[key] = "打った"
         elif isinstance(st, Act) and getattr(st.action, "pick", None) is not None:
@@ -294,7 +295,7 @@ class ScrollUp(unittest.TestCase):
 
 
 class SeeWaits(unittest.TestCase):
-    """see でマップに無い文言と、撮るときに決まる語を待てる。"""
+    """see でマップに無い文言と、語を含む行を待てる。見る行は撮るときに条件で選べる（pick）。"""
 
     def test_text_outside_the_app(self):
         # 外に出て、外のページの文言を待ってから撮る。アプリには次のフローの頭で戻す
@@ -321,15 +322,27 @@ class SeeWaits(unittest.TestCase):
                     {"op": "see:list.row.*", "input": "猫"}]}])
         self.assertIn("id: '^list\\.row\\..*猫.*'", flows["test_01.yaml"])
 
-    def test_row_containing_a_word_decided_later(self):
+    def test_row_picked_by_condition(self):
         rows, flows = write_flows([
             {"from": "list", "title": "a", "expect": "a",
              "do": [{"op": "text:list.search_field", "runtime": True},
-                    {"op": "see:list.row.*", "runtime": True}]}])
-        # 語は流す直前に決めて、フローに直接書く（テストでは「語」）
-        self.assertIn("id: '^list\\.row\\..*語.*'", flows["test_01.yaml"])
+                    {"op": "see:list.row.*", "pick": "在庫ありの行"}]}])
+        # 見る行は撮るときに選び（テストでは「選んだ」）、その ID と何番目かで見る
+        self.assertIn("element:\n      id: '^list\\.row\\.選んだ$'\n      index: 0", flows["test_01.yaml"])
+        self.assertIn("# list: see list.row.* [在庫ありの行: list.row.選んだ]", flows["test_01.yaml"])
         # 撮影する側が決める値。鍵は do に書いた操作そのもの
         self.assertEqual(rows[0]["inputs"], {"text:list.search_field": "", "see:list.row.*": ""})
+
+    def test_runtime_is_refused_on_see(self):
+        # 見る行は pick で選ぶ。語を撮るときに決める runtime はもう使えない
+        code, err = build_err([{"from": "list", "title": "a", "expect": "a",
+                                "do": [{"op": "see:list.row.*", "runtime": True}]}])
+        self.assertIn("runtime は付けられない。どの行を見るかは pick に条件で書く", err)
+
+    def test_pick_only_on_patterns(self):
+        code, err = build_err([{"from": "list", "title": "a", "expect": "a",
+                                "do": [{"op": "see:list.footer", "pick": "x"}]}])
+        self.assertIn("パターンの要素", err)
 
     def test_values_only_on_patterns(self):
         code, err = build_err([{"from": "list", "title": "a", "expect": "a",
@@ -610,9 +623,8 @@ class ValueHint(unittest.TestCase):
         hint = RF["value_hint"]
         self.assertIn("ID（ダンプの id の欄をまるごと）", hint(Act("list", Tap("list.row.*", Pick("在庫あり")))))
         self.assertIn("ID（ダンプの id の欄をまるごと）", hint(Enter("recommend", "recommend.carousel.*", Pick("x"))))
+        self.assertIn("ID（ダンプの id の欄をまるごと）", hint(See("list", "list.row.*", pick=Pick("在庫あり"))))
         self.assertEqual(hint(Act("list", InputLater("list.search_field"))), "打つ文字を")
-        # see の runtime（見たい行が含む語）は、行の ID ではなく語
-        self.assertIn("ID をまるごと書かない", hint(See("list", "list.row.*", later=True)))
 
 
 class LeavesReset(unittest.TestCase):
@@ -1807,8 +1819,18 @@ class AutoPickRun(ItemRunBase, unittest.TestCase):
         got, out = self.run_item()
         self.assertEqual(got, ("stopped", 1))
         self.assertEqual(self.flows_run(), ["test_01.1"])
-        self.assertIn('devices.iphone.inputs の "tap:list.row.*" に書き', out)
-        self.assertIn("「<ID>#2」", out)
+        self.assertIn('devices.iphone.inputs の "tap:list.row.*" に書く', out)
+        # いま見えている行を候補に出す。同じ ID の2件目は <ID>#2 で書ける
+        self.assertIn("  - list.row.C++入門 ｜ C++入門\n  - list.row.こころ\n", out)
+        self.assertNotIn("坊っちゃん", out)              # 画面外の行は候補にしない
+        self.assertIn("無ければ「次」と書く", out)
+        self.assertEqual(self.swipes(), ["up"])          # 並びの先頭まで戻してから出す
+
+    def test_same_ids_are_numbered(self):
+        self.conditional()
+        self.dumps = [self.SAME]
+        got, out = self.run_item()
+        self.assertIn("  - list.row.牛乳\n  - list.row.牛乳#2\n", out)
 
     def test_resume_starts_from_the_stopped_hand(self):
         self.conditional()
@@ -1852,47 +1874,63 @@ class TypedRun(ItemRunBase, unittest.TestCase):
         self.assertEqual(self.picked(), {})
 
 
-class SeeContainsRun(ItemRunBase, unittest.TestCase):
-    """見たい行が含む語（see の runtime）。探して当たらなければ、表示中の行を並べて止める。"""
+class SeePickRun(ItemRunBase, unittest.TestCase):
+    """見る行を条件で選ぶ（see の pick）。いま見えている行から選ばせ、無ければ「次」で1画面ずつ送る。"""
 
-    items = [{"from": "list", "do": [{"op": "see:list.row.*", "runtime": True}]}]
+    items = [{"from": "list", "do": [{"op": "see:list.row.*", "pick": "古い作品の行"}]}]
+    BELOW = (DUMP_HEAD
+             + dump_line(195, 60, "○", "list", "一覧")
+             + dump_line(195, 300, "○", "list.row.坊っちゃん", "坊っちゃん, 夏目 漱石"))
 
     def setUp(self):
         ItemRunBase.setUp(self)
         self.dumps = [FirstVisible.DUMP]
 
-    def test_word_in_a_row_runs(self):
-        self.given("see:list.row.*", "C++")
-        self.assertEqual(self.run_item(first=1)[0], ("done", None))
-        self.assertIn("id: '^list\\.row\\..*C\\+\\+.*'", self.body("test_01"))
-
-    def test_word_in_no_row_stops_and_lists_rows(self):
-        # 作者で絞り込んだのに作者名で待つ、のように、行の ID に入っていない語
-        self.given("see:list.row.*", "夏目")
-        got, out = self.run_item(first=1)
-        self.assertEqual(got, ("stopped", 1))
-        self.assertEqual(self.flows_run(), [])
-        self.assertIn("「夏目」を ID に含む list.row.* の行が、いまの画面に無い", out)
-        self.assertIn("C++入門", out)
-        self.assertIn("坊っちゃん", out)   # 画面外でもダンプに出ている行は並べる
-
-    def test_word_with_no_rows_at_all_loses_the_item(self):
-        # 行そのものが無い（絞り込みの結果が空）。語の選び違いではないので止めない
-        self.given("see:list.row.*", "猫")
-        self.dumps = [DUMP_HEAD]
-        self.assertEqual(self.run_item(first=1)[0][0], "failed")
-
-    def test_whole_id_stops(self):
-        self.given("see:list.row.*", "list.row.C++入門")
-        got, out = self.run_item(first=1)
-        self.assertEqual(got, ("stopped", 1))
-        self.assertIn("行の ID をまるごと書いている", out)
-        self.assertEqual(self.calls, [])
-
-    def test_missing_word_stops_where_rows_are_shown(self):
+    def test_stops_with_the_rows_on_screen(self):
         got, out = self.run_item()
         self.assertEqual(got, ("stopped", 1))
-        self.assertIn("ID をまるごと書かない", out)
+        self.assertIn('条件「古い作品の行」に合う list.row.* を選んで', out)
+        self.assertIn("  - list.row.C++入門 ｜ C++入門\n  - list.row.こころ\n", out)
+        self.assertEqual(self.swipes(), ["up"])
+
+    def test_chosen_row_is_seen_and_shot(self):
+        self.given("see:list.row.*", "list.row.こころ")
+        self.assertEqual(self.run_item(first=1)[0], ("done", None))
+        self.assertEqual(self.swipes(), [])               # 選んだ画面のまま見る。送り直さない
+        body = self.body("test_01")
+        self.assertIn("element:\n      id: '^list\\.row\\.こころ$'\n      index: 0", body)
+        self.assertEqual(self.picked(), {"see:list.row.*": "list.row.こころ"})
+
+    def test_next_sends_one_screen_and_stops_again(self):
+        self.given("see:list.row.*", "次")
+        self.dumps = [FirstVisible.DUMP, self.BELOW]     # 探して読む → 送って読む
+        got, out = self.run_item(first=1)
+        self.assertEqual(got, ("stopped", 1))
+        self.assertEqual(self.swipes(), ["down"])
+        self.assertIn("  - list.row.坊っちゃん ｜ 坊っちゃん, 夏目 漱石\n", out)
+        self.assertNotIn("C++入門", out)
+
+    def test_next_at_the_end_loses_the_item(self):
+        # 送っても見えている行が変わらない。端まで見て無かったので撮れなかったことにする
+        self.given("see:list.row.*", "次")
+        got, out = self.run_item(first=1)
+        self.assertEqual(got[0], "failed")
+        self.assertIn("条件「古い作品の行」に合う list.row.* が無い（上下の端まで見た）", got[1])
+
+    def test_inner_texts_come_from_the_row_subtree(self):
+        # 行の中の文字は、生のダンプの入れ子から取る。枠の中心で拾うと、画面全体の要素（スクロールバー）が混ざる
+        self.raw = json.dumps({"ui_schema": {}, "elements": [{"b": "[0,0][402,874]", "a11y": "Vertical scroll bar", "c": [
+            {"b": "[0,280][402,320]", "rid": "list.row.C++入門", "a11y": "C++入門",
+             "c": [{"b": "[16,284][200,300]", "a11y": "C++入門"}, {"b": "[16,302][200,316]", "a11y": "山田 太郎、鈴木 花子"}]}]}]})
+        got, out = self.run_item()
+        self.assertIn("  - list.row.C++入門 ｜ C++入門 ｜ 中: C++入門 / 山田 太郎、鈴木 花子\n", out)
+        self.assertNotIn("scroll bar", out)
+
+    def test_id_of_another_pattern_stops(self):
+        self.given("see:list.row.*", "detail.title")
+        got, out = self.run_item(first=1)
+        self.assertEqual(got, ("stopped", 1))
+        self.assertIn("に当たらない", out)
 
 
 class ParentRun(ItemRunBase, unittest.TestCase):
@@ -1933,6 +1971,24 @@ class ParentRun(ItemRunBase, unittest.TestCase):
         got = self.run_item()[0]
         self.assertEqual(got, ("failed", "recommend.book.* が画面に無い（recommend.carousel.9 の中の左右の端まで探した）"))
         self.assertEqual(self.swipes(), ["center", "next", "back"])
+
+    def test_pick_in_the_parent_sends_inside_it(self):
+        # 条件つきでカードを選ぶ。候補は親の中に見えているカードだけで、「次」は親の中を横に送る
+        self.items = [{"from": "recommend", "do": [{"op": "see:recommend.book.*", "pick": "著者が複数",
+                                                    "in": "recommend.carousel.9"}]}]
+        self.build()
+        got, out = self.run_item()
+        self.assertEqual(got, ("stopped", 1))
+        self.assertEqual(self.swipes(), ["center", "back"])   # 寄せてから、親の先頭まで戻す
+        self.assertIn("  - recommend.book.下の段\n", out)
+        self.assertNotIn("上の段", out)
+        self.given("see:recommend.book.*", "次")
+        self.calls = []
+        # 親を探して読む → 親の中を読む → 送って読む
+        self.dumps = [self.BOOKS, self.BOOKS, self.CAROUSELS + dump_line(74, 573, "○", "recommend.book.次の段", "")]
+        got, out = self.run_item(first=1)
+        self.assertEqual(self.swipes(), ["center", "next"])
+        self.assertIn("  - recommend.book.次の段\n", out)
 
     def test_missing_parent_loses_the_item(self):
         self.items = [{"from": "recommend", "do": [{"op": "tap:recommend.book.*", "in": "recommend.carousel.3"}]}]

@@ -169,7 +169,7 @@ elements:
         expect: {screen: item_detail, via: push}
 ```
 
-どの行を押すかはスクリプトが実行時に決める。条件が無ければ画面に見えている1件目、条件があれば plan の `do` に `pick` で書く（sim-test-report の test-case-builder）。**特定の行を名指しするのはテストケースの側で、表示テキストまで書く**（`tap:item_list.cell.牛乳`）。
+どの行を押す・見るかはスクリプトが実行時に決める。条件が無ければ画面に見えている1件目、条件があれば plan の `do` に `pick` で書く（sim-test-report の test-case-builder）。**特定の行を名指しするのはテストケースの側で、表示テキストまで書く**（`tap:item_list.cell.牛乳`）。
 
 末尾の `*` がパターンの印。接頭辞（`item_list.cell.`）は静的なので、それでlintの存在確認ができる。**接頭辞を補間の中に散らさない。**
 
