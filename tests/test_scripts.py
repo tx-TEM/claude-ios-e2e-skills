@@ -1638,14 +1638,16 @@ class ItemRunBase:
     def given(self, key, value):
         self.sec["devices"]["iphone"]["inputs"][key] = value
 
-    def run_item(self, first=0, retake=False):
+    def run_item(self, first=0, retake=False, ask=None):
         """(結果, 標準出力)。結果は ("done", None) / ("failed", 理由) / ("stopped", 何手目か)。
-        `retake` なら撮り直し中として流す（止まったあとはテストケースの頭からなぞり直す）。"""
+        `retake` なら撮り直し中として流す（止まったあとはテストケースの頭からなぞり直す）。
+        `ask` は条件つきの選択の問答（--next と送った回数）。流したあとの問答は `self.dv.ask`。"""
         shots = self.out / "shots" / "iphone"
         shots.mkdir(parents=True, exist_ok=True)
         dv = RF["DeviceRun"]("iphone", "AAAA", shots, self.tmp / "replay", self.flows,
                              self.out / "progress_iphone.log", "jp.example.App",
-                             screen_map.load_map(str(FIXTURE)), False, retake)
+                             screen_map.load_map(str(FIXTURE)), False, retake, ask)
+        self.dv = dv
         with contextlib.redirect_stdout(io.StringIO()) as o, contextlib.redirect_stderr(io.StringIO()):
             got = RF["run_item"](dv, self.sec, self.row, False, first)
         return got, o.getvalue()
@@ -1820,11 +1822,12 @@ class AutoPickRun(ItemRunBase, unittest.TestCase):
         got, out = self.run_item()
         self.assertEqual(got, ("stopped", 1))
         self.assertEqual(self.flows_run(), ["test_01.1"])
-        self.assertIn('devices.iphone.inputs の "tap:list.row.*" に書く', out)
+        self.assertIn('この中に条件「下の方の牛乳」に合うものがあれば、その ID', out)
+        self.assertIn('devices.iphone.inputs の "tap:list.row.*" に書き', out)
         # いま見えている行を候補に出す。同じ ID の2件目は <ID>#2 で書ける
         self.assertIn("  - list.row.C++入門 ｜ C++入門\n  - list.row.こころ\n", out)
         self.assertNotIn("坊っちゃん", out)              # 画面外の行は候補にしない
-        self.assertIn("無ければ「次」と書く", out)
+        self.assertIn("無ければ、同じコマンドに --next を付けて叩き直す", out)
         self.assertEqual(self.swipes(), ["up"])          # 並びの先頭まで戻してから出す
 
     def test_same_ids_are_numbered(self):
@@ -1876,7 +1879,7 @@ class TypedRun(ItemRunBase, unittest.TestCase):
 
 
 class SeePickRun(ItemRunBase, unittest.TestCase):
-    """見る行を条件で選ぶ（see の pick）。いま見えている行から選ばせ、無ければ「次」で1画面ずつ送る。"""
+    """見る行を条件で選ぶ（see の pick）。いま見えている行から選ばせ、無ければ --next で1画面ずつ送る。"""
 
     items = [{"from": "list", "do": [{"op": "see:list.row.*", "pick": "古い作品の行"}]}]
     BELOW = (DUMP_HEAD
@@ -1890,7 +1893,7 @@ class SeePickRun(ItemRunBase, unittest.TestCase):
     def test_stops_with_the_rows_on_screen(self):
         got, out = self.run_item()
         self.assertEqual(got, ("stopped", 1))
-        self.assertIn('条件「古い作品の行」に合う list.row.* を選んで', out)
+        self.assertIn('この中に条件「古い作品の行」に合うものがあれば', out)
         self.assertIn("  - list.row.C++入門 ｜ C++入門\n  - list.row.こころ\n", out)
         self.assertEqual(self.swipes(), ["up"])
 
@@ -1903,18 +1906,19 @@ class SeePickRun(ItemRunBase, unittest.TestCase):
         self.assertEqual(self.picked(), {"see:list.row.*": "list.row.こころ"})
 
     def test_next_sends_one_screen_and_stops_again(self):
-        self.given("see:list.row.*", "次")
         self.dumps = [FirstVisible.DUMP, self.BELOW]     # 探して読む → 送って読む
-        got, out = self.run_item(first=1)
+        got, out = self.run_item(first=1, ask={"next": True})
         self.assertEqual(got, ("stopped", 1))
         self.assertEqual(self.swipes(), ["down"])
         self.assertIn("  - list.row.坊っちゃん ｜ 坊っちゃん, 夏目 漱石\n", out)
         self.assertNotIn("C++入門", out)
+        self.assertEqual(self.dv.ask["paged"], {"see:list.row.*": 1})
+        self.assertEqual(self.dv.ask["pick"], "see:list.row.*")    # 条件つきの選択で止まった（--next を受け付ける）
+        self.assertEqual(self.sec["devices"]["iphone"]["inputs"]["see:list.row.*"], "")   # 値の欄は空のまま
 
     def test_next_at_the_end_loses_the_item(self):
-        # 送っても見えている行が変わらない。端まで見て無かったので撮れなかったことにする
-        self.given("see:list.row.*", "次")
-        got, out = self.run_item(first=1)
+        # 送っても見えている行が変わらない。端まで見て無かった
+        got, out = self.run_item(first=1, ask={"next": True})
         self.assertEqual(got, ("not_found", {"condition": "古い作品の行", "reason": "上下の端まで見た"}))
         # 最後に見た画面（端まで送ったところ）を、ふつうの項目と同じ名前で撮ってダンプを置く
         shot = [b for c, n, b in self.calls if c == "run" and "takeScreenshot" in b]
@@ -1922,10 +1926,9 @@ class SeePickRun(ItemRunBase, unittest.TestCase):
         self.assertIn("shots/iphone/test_01'", shot[0])
 
     def test_last_screen_dump_is_put_next_to_the_shot(self):
-        self.given("see:list.row.*", "次")
         fake, args = RF["sh"], []
         RF["sh"] = lambda a, quiet=True: (args.append(a), fake(a, quiet))[1]
-        self.run_item(first=1)
+        self.run_item(first=1, ask={"next": True})
         self.assertIn(["inspect", "AAAA", "test_01", str(self.out / "shots" / "iphone")], args)
 
     def test_inner_texts_come_from_the_row_subtree(self):
@@ -1938,32 +1941,38 @@ class SeePickRun(ItemRunBase, unittest.TestCase):
         self.assertNotIn("scroll bar", out)
 
     def test_next_is_counted_and_stops_at_the_limit(self):
-        # 伸び続ける一覧は端に着かない。「次」で送るのは SEEK_SWIPES 回まで
-        self.given("see:list.row.*", "次")
-        self.dumps = [FirstVisible.DUMP, self.BELOW]
-        self.run_item(first=1)
-        self.assertEqual(self.sec["devices"]["iphone"]["paged"], {"see:list.row.*": 1})
-        self.calls = []
-        self.sec["devices"]["iphone"]["paged"]["see:list.row.*"] = RF["SEEK_SWIPES"]
-        got, out = self.run_item(first=1)
+        # 伸び続ける一覧は端に着かない。--next で送るのは SEEK_SWIPES 回まで
+        got, out = self.run_item(first=1, ask={"next": True, "paged": {"see:list.row.*": RF["SEEK_SWIPES"]}})
         self.assertEqual(got[0], "not_found")
         self.assertEqual(got[1]["reason"], "上下に{}画面送っても端に着かない".format(RF["SEEK_SWIPES"]))
         self.assertEqual(self.swipes(), [])               # 上限なら送らずに落とす
 
     def test_retake_sends_again_from_the_top(self):
         # 撮り直しは頭からなぞり直すので、画面は先頭に戻っている。送った回数ぶん送り直してから1画面進める
-        self.given("see:list.row.*", "次")
-        self.sec["devices"]["iphone"]["paged"] = {"see:list.row.*": 2}
         self.dumps = [FirstVisible.DUMP, FirstVisible.DUMP, self.BELOW, FirstVisible.DUMP, self.BELOW]
-        got, out = self.run_item(retake=True)
+        got, out = self.run_item(retake=True, ask={"next": True, "paged": {"see:list.row.*": 2}})
         self.assertEqual(got, ("stopped", 1))
         self.assertEqual(self.swipes(), ["up", "down", "down", "down"])
-        self.assertEqual(self.sec["devices"]["iphone"]["paged"], {"see:list.row.*": 3})
+        self.assertEqual(self.dv.ask["paged"], {"see:list.row.*": 3})
 
     def test_count_starts_over_when_shown_from_the_top(self):
-        self.sec["devices"]["iphone"]["paged"] = {"see:list.row.*": 5}
+        # --next が付いていなければ、先頭から出し直す
+        self.run_item(first=1, ask={"paged": {"see:list.row.*": 5}})
+        self.assertEqual(self.dv.ask["paged"], {"see:list.row.*": 0})
+        self.assertEqual(self.swipes(), ["up"])
+
+    def test_wrong_id_keeps_the_stop_open_for_next(self):
+        self.given("see:list.row.*", "detail.title")
         self.run_item(first=1)
-        self.assertEqual(self.sec["devices"]["iphone"]["paged"], {"see:list.row.*": 0})
+        self.assertEqual(self.dv.ask["pick"], "see:list.row.*")
+
+    def test_value_and_next_together_stop(self):
+        self.given("see:list.row.*", "list.row.こころ")
+        got, out = self.run_item(first=1, ask={"next": True})
+        self.assertEqual(got, ("stopped", 1))
+        self.assertIn("値 list.row.こころ が書いてあるのに --next が付いている", out)
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.dv.ask["pick"], "see:list.row.*")   # 値を空に戻せば --next を付け直せる
 
     def test_id_of_another_pattern_stops(self):
         self.given("see:list.row.*", "detail.title")
@@ -2012,7 +2021,7 @@ class ParentRun(ItemRunBase, unittest.TestCase):
         self.assertEqual(self.swipes(), ["center", "next", "back"])
 
     def test_pick_in_the_parent_sends_inside_it(self):
-        # 条件つきでカードを選ぶ。候補は親の中に見えているカードだけで、「次」は親の中を横に送る
+        # 条件つきでカードを選ぶ。候補は親の中に見えているカードだけで、--next は親の中を横に送る
         self.items = [{"from": "recommend", "do": [{"op": "see:recommend.book.*", "pick": "著者が複数",
                                                     "in": "recommend.carousel.9"}]}]
         self.build()
@@ -2021,11 +2030,10 @@ class ParentRun(ItemRunBase, unittest.TestCase):
         self.assertEqual(self.swipes(), ["center", "back"])   # 寄せてから、親の先頭まで戻す
         self.assertIn("  - recommend.book.下の段\n", out)
         self.assertNotIn("上の段", out)
-        self.given("see:recommend.book.*", "次")
         self.calls = []
         # 親を探して読む → 親の中を読む → 送って読む
         self.dumps = [self.BOOKS, self.BOOKS, self.CAROUSELS + dump_line(74, 573, "○", "recommend.book.次の段", "")]
-        got, out = self.run_item(first=1)
+        got, out = self.run_item(first=1, ask={"next": True})
         self.assertEqual(self.swipes(), ["center", "next"])
         self.assertIn("  - recommend.book.次の段\n", out)
 
@@ -2563,10 +2571,10 @@ class CaseRunBase:
         RF.update(self.saved)
         shutil.rmtree(self.tmp)
 
-    def run_device(self, retake=None, resume=None):
+    def run_device(self, retake=None, resume=None, ask=None):
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             return RF["run_device"](self.manifest, self.out / "manifest.json", self.flows,
-                                    "iphone", "AAAA", resume, retake)
+                                    "iphone", "AAAA", resume, retake, ask)
 
     def runs(self):
         """流した項目の本（探すために送ったものは除く）。"""
@@ -2726,8 +2734,7 @@ class NotFoundRun(CaseRunBase, unittest.TestCase):
     ]
 
     def test_not_found_is_kept_apart_from_unexpected(self):
-        self.sec("test_01")["devices"]["iphone"]["inputs"]["see:list.row.*"] = "次"
-        stopped, done, lost = self.run_device()
+        stopped, done, lost = self.run_device(ask={"next": True})
         dev = self.sec("test_01")["devices"]["iphone"]
         self.assertEqual(dev["not_found"], {"condition": "古い作品の行", "reason": "上下の端まで見た"})
         self.assertNotIn("unexpected", dev)

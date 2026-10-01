@@ -2,6 +2,8 @@
 """マニフェストの項目を、テストケースごとに組みながら順に走らせ、証跡と同名のダンプを撮る。
 
   run_flows.py <manifest.json>
+  run_flows.py <manifest.json> --next   条件つきの選択で止まったとき、見せた候補に合うものが無い。
+                                         1画面送って、次の候補を出す
 
 **何をするかはマニフェストで決まる**（引数では選ばない）。
 
@@ -105,8 +107,9 @@ flowgen/steps.py の KEYS）。決め方は2つ。
     止まる（下の「入力が未定なら」）。再開のときは止まった手から走る（もうそこに居る）
   - **条件つきの選択（`tap` / `see` / `in` の `pick`）は、いま画面に見えている行からだけ選ばせる。**
     止まるときに、並びの先頭（縦の一覧なら上の端、カルーセルなら先頭）まで戻し、見えている行を
-    候補として出す。呼び出し元は、条件に合う行があればその ID を、無ければ `次`（NEXT）を書く。
-    `次` なら1画面だけ送ってまた候補を出し、送っても見えている行が変わらなければ端。条件に合う
+    候補として出す。呼び出し元は、条件に合う行があればその ID を `inputs` に書き、無ければ `--next` を
+    付けて叩き直す。`inputs` には決まった値だけを書く — 「無い」は値ではなく、止まったときの問いへの返事。
+    `--next` なら1画面だけ送ってまた候補を出し、送っても見えている行が変わらなければ端。条件に合う
     要素が無かった記録（`not_found`）を付けて先へ進む（撮る側の失敗ではないので `unexpected` にしない）。集めてから選んだ行まで戻る形にしない — 選ぶのが画面に見えて
     いない行になり、戻ったときに同じ状態である保証も無い
 
@@ -639,9 +642,6 @@ class Seeker:
         return None
 
 
-NEXT = "次"   # 条件に合う行が見えていないとき、呼び出し元が書く値。1画面送って候補を出し直す
-
-
 def value_hint(st):
     """止まったときに、何を決めるのかを言う文。取り違えると、行の ID を渡すべきところに打つ文字を書いてしまう。
 
@@ -657,6 +657,11 @@ def value_hint(st):
         return (f"条件「{st.action.pick.condition}」に合う {st.action.target} を選んで、"
                 "その ID（ダンプの id の欄をまるごと）を")
     return "打つ文字を"
+
+
+def pick_of(st):
+    """条件つきの選択のステップの、選ぶ条件（Pick）。"""
+    return st.pick if isinstance(st, (Enter, See)) else st.action.pick
 
 
 def candidates(dump, raw, pattern, exclude=(), box=None):
@@ -726,9 +731,10 @@ class Hand:
         if found is not None:
             return self.stop(f"入力が未定（{key}）",
                              f"入力が未定（{key}）。\nいま画面に見えている行（候補）:\n{candidates_text(found)}\n"
-                             f"この中から{value_hint(self.st)} devices.{self.dv.device}.inputs の \"{key}\" に書く。"
-                             f"条件に合う行が無ければ「{NEXT}」と書く（1画面送って、次の候補を出す）。"
-                             f"{self.again()}")
+                             f"この中に条件「{pick_of(self.st).condition}」に合うものがあれば、その ID（候補の行の先頭。"
+                             f"ダンプの id の欄をまるごと）を devices.{self.dv.device}.inputs の \"{key}\" に書き、"
+                             f"{self.again()}\n"
+                             "無ければ、同じコマンドに --next を付けて叩き直す（1画面送って、次の候補を出す）。")
         return self.stop(f"入力が未定（{key}）",
                          f"入力が未定（{key}）。\nいまこの画面に居る。見て{value_hint(self.st)}決め、"
                          f"devices.{self.dv.device}.inputs の \"{key}\" に書き、{self.again()}")
@@ -738,7 +744,15 @@ class Hand:
         given = (self.dev.get("inputs") or {}).get(key) or None
         caller = decided_by_caller(st)
         picks = isinstance(st, Enter) or picks_pattern(st)
-        if caller and given and given != NEXT and picks:
+        # この手で止まったら、条件つきの選択で止まったことになる（--next を受け付ける）。
+        # 止まった理由（値が未定、値と --next の両方、ID の書き間違い）によらない
+        self.dv.ask["pick"] = key if caller and picks and not self.replay else None
+        if caller and given and picks and self.dv.ask["next"] and not self.replay:
+            # 値を決めたのに「無い」とも言っている。どちらかに直させる
+            return self.stop(f"{key} の値と --next の両方",
+                             f"{key} に値 {given} が書いてあるのに --next が付いている。値で決めたなら --next を外し、"
+                             f"無かったなら devices.{self.dv.device}.inputs の値を空に戻して叩き直す。")
+        if caller and given and picks:
             pattern = st.target if isinstance(st, (Enter, See)) else st.action.target
             prefix = pattern_prefix(pattern)
             if not given.startswith(prefix):
@@ -760,8 +774,8 @@ class Hand:
         why = seeker.find(want, chain_of(st, self.values))
         if why:
             return self.fail(why)
-        if caller and picks and given in (None, NEXT):
-            return self.choose(seeker, want, given)
+        if caller and picks and not given:
+            return self.choose(seeker, want)
         if caller and not given:
             return self.missing(key)
         if picks:
@@ -782,16 +796,17 @@ class Hand:
             self.values[key] = given
         return None
 
-    def choose(self, seeker, want, given):
-        """条件つきの選択で、まだ行が決まっていない（値が空か NEXT）。いま見えている行を候補に出して止まる。
+    def choose(self, seeker, want):
+        """条件つきの選択で、まだ値が決まっていない。いま見えている行を候補に出して止まる。
 
-        値が空なら、並びの先頭まで戻してから出す。NEXT なら1画面だけ送ってから出し、送っても
-        見えている行が変わらなければ、端まで見て無かったとして落とす。送る並びは、いちばん内側の
-        親が横に送るもの（`scroll`）ならその中、そうでなければ画面の縦。
+        ふつうは並びの先頭まで戻してから出す。`--next` で叩き直されたら（`dv.ask["next"]`）1画面だけ
+        送ってから出し、送っても見えている行が変わらなければ、端まで見て無かったとする（not_found()）。
+        送る並びは、いちばん内側の親が横に送るもの（`scroll`）ならその中、そうでなければ画面の縦。
 
-        **NEXT で送るのは SEEK_SWIPES 回まで。** 読み込みで伸び続ける一覧は端に着かないので、数えないと
-        呼び出し元が `次` を書き続ける限り終わらない。送った回数は手ごとに `devices.<端末>.paged` に
-        残し（止まるたびに実行が終わるので、マニフェストに持つ）、先頭まで戻したときに0に戻す。
+        **`--next` で送るのは SEEK_SWIPES 回まで。** 読み込みで伸び続ける一覧は端に着かないので、数えないと
+        呼び出し元が `--next` を付け続ける限り終わらない。送った回数は手ごとに `dv.ask["paged"]` に持ち、
+        止まるときにマニフェストの `resume` に書く（止まっている間だけの状態なので、項目の記録には置かない）。
+        先頭まで戻したときに0に戻す。
 
         **撮り直しでは、送った位置から続けられない。** 止まったあと叩き直すと、テストケースの頭から
         なぞり直すので、画面は先頭に戻っている。先頭まで戻してから、それまでに送った回数ぶん送り直し、
@@ -800,14 +815,15 @@ class Hand:
         if self.replay:
             return self.missing(self.st.key)           # なぞる項目では選ばない（前に撮った値が要る）
         key = self.st.key
-        paged = self.dev.setdefault("paged", {})
+        paged = self.dv.ask["paged"]
         chain = chain_of(self.st, self.values)
         parent = chain[-1][0] if chain and chain[-1][1] else None
-        if given is None:
+        forward, self.dv.ask["next"] = self.dv.ask["next"], False      # --next はこの1回だけに効く
+        if not forward:
             paged[key] = 0
             why = seeker.rewind(parent)
         else:
-            cond = (self.st.pick if isinstance(self.st, (Enter, See)) else self.st.action.pick).condition
+            cond = pick_of(self.st).condition
             where = f"{parent} の中の左右" if parent is not None else "上下"
             if paged.get(key, 0) >= SEEK_SWIPES:
                 return self.not_found(seeker, cond, f"{where}に{SEEK_SWIPES}画面送っても端に着かない")
@@ -854,8 +870,6 @@ def run_item(dv, sec, row, replay, first=0):
     dest = dv.scratch if replay else dv.shots
     dev = sec["devices"][device]
     dev["picked"] = {} if first == 0 else dev.get("picked") or {}
-    # 「次」で送った回数（Hand.choose()）。撮り直しは頭からなぞり直すので、止まる前の数を引き継ぐ
-    dev["paged"] = {} if first == 0 and not dv.retake else dev.get("paged") or {}
     # 前の手で決めた値。再開のときは、止まる前に決めたもの（picked）と撮影する側が決めたもの
     values = dict(dev["picked"], **{k: v for k, v in (dev.get("inputs") or {}).items() if v})
     notes = {}   # 同じ名前の行があったときの、何件目を押したか
@@ -911,9 +925,14 @@ def forget(shots, sec):
 class DeviceRun:
     """1台ぶんを撮るときの置き場。run_item() に渡す。"""
 
-    def __init__(self, device, udid, shots, scratch, fdir, log, app=None, mp=None, clear=False, retake=False):
+    def __init__(self, device, udid, shots, scratch, fdir, log, app=None, mp=None, clear=False, retake=False,
+                 ask=None):
         self.device, self.udid, self.app, self.mp, self.clear = device, udid, app, mp, clear
         self.retake = retake                          # 撮り直し中か（止まったときの案内が変わる）
+        # 条件つきの選択の問答。next: --next で叩き直された（まだ使っていない）。paged: 手ごとに送った
+        # 回数（止まったら resume に書き、叩き直したら読む）。pick: 条件つきの選択で止まった手の鍵
+        ask = ask or {}
+        self.ask = {"next": bool(ask.get("next")), "paged": dict(ask.get("paged") or {}), "pick": None}
         self.shots, self.scratch, self.fdir, self.log = shots, scratch, fdir, log
 
     def logline(self, text):
@@ -921,13 +940,14 @@ class DeviceRun:
             f.write(text + "\n")
 
 
-def run_device(manifest, manifest_path, flow_dir, device, udid, resume, retake=None):
+def run_device(manifest, manifest_path, flow_dir, device, udid, resume, retake=None, ask=None):
     """1台ぶんを、テストケースごとに組んで走らせる。(止まった位置, 撮った数, 撮れなかった行) を返す。
 
     入力が未定で止まったら、{"from": 項目の名前, "part": 何手目か, "cursor": そのテストケースを
-    組んだ状態} を返す（呼ぶ側が再開位置に書く）。`resume` も同じ形で、同じ状態から
-    そのテストケースを組み直し、その項目のその手から走らせる。
-    `retake` を渡すと、その項目だけ撮り直す（`retake_runs()`）。
+    組んだ状態, "paged": 送った回数, "pick": 条件つきの選択で止まったならその手の鍵} を返す（呼ぶ側が
+    再開位置に書く）。`resume` も同じ形で、同じ状態からそのテストケースを組み直し、その項目のその手から
+    走らせる。`retake` を渡すと、その項目だけ撮り直す（`retake_runs()`）。`ask` は条件つきの選択の問答
+    （DeviceRun）で、`--next` と、止まる前に送った回数を渡す。
     """
     out = manifest_path.parent
     shots, log = out / "shots" / device, out / f"progress_{device}.log"
@@ -955,7 +975,7 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, retake=N
             sys.exit(f"再開先 {resume_name} が見つからない。ある名前: {', '.join(names)}")
         runs = runs[at:]
 
-    dv = DeviceRun(device, udid, shots, scratch, fdir, log, plan["app"], mp, plan["clear_state"], bool(retake))
+    dv = DeviceRun(device, udid, shots, scratch, fdir, log, plan["app"], mp, plan["clear_state"], bool(retake), ask)
     logline = dv.logline
 
     if retake:
@@ -1067,7 +1087,9 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, retake=N
                 if status[0] == "stopped":
                     rest = len(items) - n + sum(len(its) for _, its in runs[ci + 1:])
                     print(f"{device} のここから先の {rest}件はまだ撮っていない。")
-                    return {"from": name, "part": status[1], "cursor": start.to_json()}, done + got, lost
+                    stop = {"from": name, "part": status[1], "cursor": start.to_json()}
+                    stop.update(paged=dv.ask["paged"], **({"pick": dv.ask["pick"]} if dv.ask["pick"] else {}))
+                    return stop, done + got, lost
                 if status[0] == "not_found" and not replay:
                     # 探しきって無かった。撮る側の失敗ではないので unexpected にしない（撮り直さない）。
                     # 後ろの項目はこの項目を当てにしているので、落ちたときと同じく飛ばす
@@ -1127,6 +1149,8 @@ def main():
         sys.exit("--only / --prepare / --keep は無くなった。撮り直すのは判定が RETAKE の項目で、"
                  "マニフェストを渡して叩けば、それだけを撮り直す（待ちが足りないなら、マップの ready / "
                  "expect か plan の see で直す）")
+    forward = "--next" in argv
+    argv = [a for a in argv if a != "--next"]
     unknown = [a for a in argv if a.startswith("--")]
     if unknown:
         sys.exit("知らない引数: " + ", ".join(unknown) + "（どの端末で撮るかはマニフェストに入っている）")
@@ -1154,6 +1178,11 @@ def main():
         sys.exit("flow を持つ項目が無い。全部探索なので sim-driver に渡す。")
 
     state = manifest.get("resume") or {}
+    if forward and not state.get("pick"):
+        sys.exit("--next は、条件つきの選択で止まって候補が出たあとにだけ付ける（いまは止まっていないか、"
+                 "別のことで止まっている）。--next を外して叩く")
+    # 条件つきの選択の問答。止まった端末にだけ渡す（--next と、それまでに送った回数）
+    ask = {"next": forward, "paged": state.get("paged") or {}}
     retake = state.get("retake")
     if retake is None and not state.get("device"):
         retake, explore = to_retake(manifest)
@@ -1173,10 +1202,13 @@ def main():
             if d in finished:
                 print(f"--- {d} は撮り直し終えている。飛ばす")
                 continue
-            stopped, done, lost = run_device(manifest, manifest_path, flow_dir, d, u, None, retake)
+            stopped, done, lost = run_device(manifest, manifest_path, flow_dir, d, u, None, retake, ask)
+            ask = None                                    # 撮り直しで止まるのは1台ずつ。次の端末には渡さない
             total += done
             lost_all += lost
             if stopped:
+                manifest["resume"].pop("pick", None)
+                manifest["resume"].update({k: stopped[k] for k in ("paged", "pick") if k in stopped})
                 save(manifest_path, manifest)
                 print("値を埋めたら、同じコマンドをもう一度叩く。撮り直す項目のテストケースの頭からなぞり直す。")
                 sys.exit(1)
@@ -1203,7 +1235,8 @@ def main():
         resume = state if state.get("device") == d and state.get("cursor") else None
         if state.get("device") == d and not state.get("cursor"):
             sys.exit("再開の状態が古い（テストケースを組んだ状態が無い）。manifest.py で作り直してから最初から撮る")
-        stopped, done, lost = run_device(manifest, manifest_path, flow_dir, d, u, resume)
+        stopped, done, lost = run_device(manifest, manifest_path, flow_dir, d, u, resume, None,
+                                         ask if resume else None)
         total += done
         lost_all += lost
         if stopped:
