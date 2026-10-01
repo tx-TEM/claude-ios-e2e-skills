@@ -1823,7 +1823,7 @@ class AutoPickRun(ItemRunBase, unittest.TestCase):
         self.assertEqual(got, ("stopped", 1))
         self.assertEqual(self.flows_run(), ["test_01.1"])
         self.assertIn('この中に条件「下の方の牛乳」に合うものがあれば、その ID', out)
-        self.assertIn('devices.iphone.inputs の "tap:list.row.*" に書き', out)
+        self.assertIn("同じコマンドに --value '<ID>' を付けて叩き直す（続きから走る。", out)
         # いま見えている行を候補に出す。同じ ID の2件目は <ID>#2 で書ける
         self.assertIn("  - list.row.C++入門 ｜ C++入門\n  - list.row.こころ\n", out)
         self.assertNotIn("坊っちゃん", out)              # 画面外の行は候補にしない
@@ -1913,7 +1913,7 @@ class SeePickRun(ItemRunBase, unittest.TestCase):
         self.assertIn("  - list.row.坊っちゃん ｜ 坊っちゃん, 夏目 漱石\n", out)
         self.assertNotIn("C++入門", out)
         self.assertEqual(self.dv.ask["paged"], {"see:list.row.*": 1})
-        self.assertEqual(self.dv.ask["pick"], "see:list.row.*")    # 条件つきの選択で止まった（--next を受け付ける）
+        self.assertEqual((self.dv.ask["key"], self.dv.ask["pick"]), ("see:list.row.*", True))   # --next を受け付ける
         self.assertEqual(self.sec["devices"]["iphone"]["inputs"]["see:list.row.*"], "")   # 値の欄は空のまま
 
     def test_next_at_the_end_loses_the_item(self):
@@ -1964,15 +1964,7 @@ class SeePickRun(ItemRunBase, unittest.TestCase):
     def test_wrong_id_keeps_the_stop_open_for_next(self):
         self.given("see:list.row.*", "detail.title")
         self.run_item(first=1)
-        self.assertEqual(self.dv.ask["pick"], "see:list.row.*")
-
-    def test_value_and_next_together_stop(self):
-        self.given("see:list.row.*", "list.row.こころ")
-        got, out = self.run_item(first=1, ask={"next": True})
-        self.assertEqual(got, ("stopped", 1))
-        self.assertIn("値 list.row.こころ が書いてあるのに --next が付いている", out)
-        self.assertEqual(self.calls, [])
-        self.assertEqual(self.dv.ask["pick"], "see:list.row.*")   # 値を空に戻せば --next を付け直せる
+        self.assertEqual((self.dv.ask["key"], self.dv.ask["pick"]), ("see:list.row.*", True))
 
     def test_id_of_another_pattern_stops(self):
         self.given("see:list.row.*", "detail.title")
@@ -2900,6 +2892,71 @@ class RetakeRun(CaseRunBase, unittest.TestCase):
         text = log.read_text(encoding="utf-8")
         self.assertIn("最初の回の行", text)
         self.assertIn("--- 撮り直し: test_06", text)
+
+
+class MainAnswer(CaseRunBase, unittest.TestCase):
+    """止まったときの返事は引数で渡す（--value / --next）。inputs に書くのは run_flows.py だけ。"""
+
+    CASES = [
+        {"title": "A", "items": [{"from": "list", "do": [{"op": "text:list.search_field", "runtime": True}],
+                                  "title": "a1", "expect": "x"}]},
+        {"title": "B", "items": [{"from": "list", "do": [{"op": "see:list.row.*", "pick": "古い作品の行"}],
+                                  "title": "b1", "expect": "x"}]},
+    ]
+
+    def setUp(self):
+        CaseRunBase.setUp(self)
+        self.path = self.out / "manifest.json"
+        self.saved["simulators"] = RF["simulators"]
+        RF["simulators"] = type("Sims", (), {"lookup": staticmethod(lambda udid: {"booted": True})})
+
+    def main(self, *extra):
+        RF["save"](self.path, self.manifest)
+        argv = sys.argv
+        sys.argv = ["run_flows.py", str(self.path)] + list(extra)
+        try:
+            out = type("Out", (io.StringIO,), {"reconfigure": lambda self, **k: None})()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                try:
+                    RF["main"]()
+                    code = 0
+                except SystemExit as e:
+                    code = e.code
+        finally:
+            sys.argv = argv
+        self.printed = out.getvalue()
+        self.manifest = json.loads(self.path.read_text(encoding="utf-8"))
+        return code
+
+    def inputs(self, name):
+        return self.sec(name)["devices"]["iphone"]["inputs"]
+
+    def test_value_is_written_by_the_script_and_the_run_goes_on(self):
+        self.assertEqual(self.main(), 1)
+        ask = self.manifest["resume"]["ask"]
+        self.assertEqual({k: ask[k] for k in ("item", "device", "key", "pick")},
+                         {"item": "test_01", "device": "iphone", "key": "text:list.search_field", "pick": False})
+        self.assertIn("同じコマンドに --value '<値>' を付けて叩き直す", self.printed)
+        self.assertEqual(self.main("--value", "猫"), 1)      # 次の項目（条件つきの選択）で止まる
+        self.assertEqual(self.inputs("test_01"), {"text:list.search_field": "猫"})
+        self.assertEqual(self.manifest["resume"]["ask"]["key"], "see:list.row.*")
+        self.assertTrue(self.manifest["resume"]["ask"]["pick"])
+
+    def test_next_is_only_for_a_pick_and_clears_the_value(self):
+        self.main()                                       # 打つ文字で止まる（条件つきの選択ではない）
+        self.assertIn("--next は、条件つきの選択で止まって候補が出たあとにだけ付ける", self.main("--next"))
+        self.assertEqual(self.manifest["resume"]["ask"]["key"], "text:list.search_field")   # 止まったまま
+        self.main("--value", "猫")
+        self.manifest["cases"][1]["items"][0]["devices"]["iphone"]["inputs"]["see:list.row.*"] = "list.row.書き間違い"
+        self.main("--next")
+        self.assertEqual(self.inputs("test_02"), {"see:list.row.*": ""})   # 「無い」は値を空にする
+
+    def test_value_without_a_stop_and_both_are_refused(self):
+        self.assertEqual(self.main("--value", "猫"),
+                         "--value は、入力が未定で止まったあとにだけ付ける（いまは止まっていない）。--value を外して叩く")
+        self.main()
+        self.assertIn("一緒に付けない", self.main("--value", "猫", "--next"))
+        self.assertEqual(self.main("--value"), "--value の後ろに値が無い（--value '<値>'）")
 
 
 class MainRetake(CaseRunBase, unittest.TestCase):
