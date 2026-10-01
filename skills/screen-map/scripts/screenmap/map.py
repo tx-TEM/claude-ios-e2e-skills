@@ -116,16 +116,5 @@ def find_map(repo):
              "このアプリにはまだ画面マップが無いのかもしれない（screen-map スキルで作る）".format(p))
 
 
-def old_schema(mp):
-    """古い形（`actions` / `states` を画面に持つ）の画面。移行前のマップを黙って空として読まない。"""
-    return sorted(sid for sid, s in mp.screens.items()
-                  if isinstance(s.raw, dict) and ("actions" in s.raw or "states" in s.raw))
-
-
 def load_map(repo):
-    mp = ScreenMap(find_map(repo))
-    old = old_schema(mp)
-    if old:
-        sys.exit("画面マップが古い形（actions / states）のまま: {}。\n"
-                 "migrate_map.py --repo <アプリ> で要素中心の形に移す".format(" ".join(old)))
-    return mp
+    return ScreenMap(find_map(repo))

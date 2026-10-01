@@ -1,4 +1,4 @@
-"""スクリプトのテスト。screen-map（mapctl.py / migrate_map.py と screenmap/）と、
+"""スクリプトのテスト。screen-map（mapctl.py と screenmap/）と、
 sim-test-report（manifest.py / run_flows.py と flowgen/ / device/）。
 
   python3 -m unittest discover tests            テストを走らせる
@@ -334,7 +334,7 @@ class SeeWaits(unittest.TestCase):
         self.assertEqual(rows[0]["inputs"], {"text:list.search_field": "", "see:list.row.*": ""})
 
     def test_runtime_is_refused_on_see(self):
-        # 見る行は pick で選ぶ。語を撮るときに決める runtime はもう使えない
+        # runtime は打つ文字（text）にだけ付く。見る行は pick で選ぶ
         code, err = build_err([{"from": "list", "title": "a", "expect": "a",
                                 "do": [{"op": "see:list.row.*", "runtime": True}]}])
         self.assertIn("runtime は付けられない。どの行を見るかは pick に条件で書く", err)
@@ -573,18 +573,7 @@ class Cases(unittest.TestCase):
     def test_item_cannot_restart(self):
         c = self.case("A", "list")
         c["items"][0]["fresh"] = True
-        out = self.refused({"cases": [c]})
-        self.assertIn("起動し直せるのはテストケースの境目だけ", out)
-        c = self.case("A", "list", fresh=True)
-        self.assertIn("leaves", self.refused({"cases": [c]}))
-
-    def test_old_shape_is_refused(self):
-        f = Path(tempfile.mkdtemp()) / "plan.json"
-        f.write_text(json.dumps({"app": "x", "repo": str(FIXTURE), "items": [], "explore": []}), encoding="utf-8")
-        with self.assertRaises(SystemExit) as cm:
-            flows_of.load_plan(f)
-        shutil.rmtree(f.parent)
-        self.assertIn("項目はテストケースに入れる", str(cm.exception.code))
+        self.assertIn("plan の test_01 に知らない鍵: fresh", self.refused({"cases": [c]}))
 
     def test_manifest_lists_cases(self):
         work = Path(tempfile.mkdtemp())
@@ -1114,11 +1103,6 @@ class ReportShape(unittest.TestCase):
         self.assertEqual(self.problems(dict(cases_manifest([
             {"name": "test_01", "title": "a", "desc": "x", "result": "NG"}]),
             footer="確認していないこと: エラー系\n作成したデータ: 無し")), [])
-
-    def test_flat_sections_are_refused(self):
-        out = self.problems({"sections": [{"name": "test_01", "title": "a", "result": "OK"}]})
-        self.assertEqual(len(out), 1)
-        self.assertIn("古いマニフェスト", out[0])
 
     def test_skip_needs_a_reason(self):
         # 撮れなかった項目は、理由（desc）が無いと読む側に何も残らない
@@ -2382,17 +2366,6 @@ class Check(unittest.TestCase):
         self.assertIn("via は push / modal / tab（戻る操作は screen: back）", out)
         self.assertIn("when のある項目と無い項目が混ざっている", out)
 
-    def test_old_schema_is_refused(self):
-        shutil.rmtree(self.repo / "screen-map")
-        shutil.copytree(Path(__file__).resolve().parent / "fixtures" / "old_app" / "screen-map",
-                        self.repo / "screen-map")
-        code, out = self.check()
-        self.assertEqual(code, 1)
-        self.assertIn("migrate_map.py", out)
-        with self.assertRaises(SystemExit) as cm:
-            screen_map.load_map(str(self.repo))
-        self.assertIn("migrate_map.py", str(cm.exception.code))
-
 
 class NestingCheck(Check):
     """children を持てるのは scroll かパターンの要素だけ。子の ID は親の接頭辞で始めない。"""
@@ -3030,16 +3003,6 @@ class MainRetake(CaseRunBase, unittest.TestCase):
         self.assertIn("test_03", self.runs())
         self.assertNotIn("resume", self.manifest)
 
-    def test_old_flags_are_refused(self):
-        sys_argv = sys.argv
-        sys.argv = ["run_flows.py", str(self.path), "--only", "test_01"]
-        try:
-            with self.assertRaises(SystemExit) as cm:
-                RF["main"]()
-        finally:
-            sys.argv = sys_argv
-        self.assertIn("RETAKE", str(cm.exception.code))
-
 
 class ResumeRun(CaseRunBase, unittest.TestCase):
     """入力が未定で止まったら、そのテストケースを組んだ状態を返し、叩き直すと同じ手順の続きから走る。"""
@@ -3067,37 +3030,6 @@ class ResumeRun(CaseRunBase, unittest.TestCase):
         self.assertEqual(self.runs(), ["test_03", "test_04"])
         self.assertIn("- inputText: '牛乳(1L)'", self.body("test_03"))
         self.assertIn("--- 再開: test_03 の 2手目から", self.log())
-
-
-class Migrate(unittest.TestCase):
-    """古い形のマップを変換し、そのまま check と経路計算が通る。"""
-
-    def test_migrate_old_fixture(self):
-        repo = Path(tempfile.mkdtemp()) / "app"
-        shutil.copytree(Path(__file__).resolve().parent / "fixtures" / "old_app", repo)
-        argv = sys.argv
-        sys.argv = ["migrate_map.py", "--repo", str(repo), "--write"]
-        try:
-            with contextlib.redirect_stdout(io.StringIO()) as o:
-                runpy.run_path(str(MAP_SCRIPTS / "migrate_map.py"), run_name="__main__")
-        finally:
-            sys.argv = argv
-        out = o.getvalue()
-        self.assertIn("移した画面: detail home list review_dialog", out)
-        self.assertIn("select（index: 0, capture: itemTitle）を捨てた", out)
-        self.assertIn("に条件が書いてある", out)
-        mp = screen_map.load_map(str(repo))
-        lst = {el["id"]: el for el in mp.screens["list"].elements}
-        self.assertEqual(lst["list.empty_view"]["when"], "0件のとき")
-        self.assertIn("list.count_label", lst)          # 観測点だった ID も要素になる
-        self.assertEqual(lst["Clear text"]["by"], "label")
-        self.assertIs(lst["list.banner"]["in_tree"], False)
-        self.assertEqual(mp.screens["list"].actions[-1].label(), "scroll down")
-        self.assertEqual(mp.screens["list"].auto_shows(), ["review_dialog"])
-        with contextlib.redirect_stdout(io.StringIO()) as o:
-            self.assertEqual(map_check.cmd_check(mp), 0, o.getvalue())
-        self.assertEqual([e[0].target for _, e in mp.path_from("home", "detail")], ["home.fav"])
-        shutil.rmtree(repo.parent)
 
 
 class MiniYaml(unittest.TestCase):

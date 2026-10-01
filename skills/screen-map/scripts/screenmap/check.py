@@ -4,7 +4,6 @@ import subprocess
 from .screen import (ACTION_KEYS, BACKWARD, ELEMENT_KEYS, EXPECT_KEYS, FORWARD, GESTURE_KEYS,
                         GESTURES, KINDS, OPS, SCREEN_KEYS, SCROLLS, SYSTEM_IDS, closes_then_opens,
                         expect_kind, is_pattern, pattern_prefix)
-from .map import old_schema
 
 
 def last_commit(repo, paths):
@@ -376,11 +375,6 @@ def check_auto_shows(mp, sid, f):
 
 def cmd_check(mp):
     bad = []
-    old = old_schema(mp)
-    if old:
-        print("古い形（actions / states を画面に持つ）のマップ: {}".format(" ".join(old)))
-        print("migrate_map.py で要素中心の形に移す（screen-map スキルの reference/schema.md）")
-        return 1
     if mp.start not in mp.screens:
         bad.append("起点 {} のファイルが無い".format(mp.start))
     reach = mp.reachable()

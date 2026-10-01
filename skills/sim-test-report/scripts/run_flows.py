@@ -1155,10 +1155,6 @@ def main():
     if "--help" in argv or "-h" in argv:
         print(__doc__)
         sys.exit(0)
-    if "--only" in argv or "--prepare" in argv or "--keep" in argv:
-        sys.exit("--only / --prepare / --keep は無くなった。撮り直すのは判定が RETAKE の項目で、"
-                 "マニフェストを渡して叩けば、それだけを撮り直す（待ちが足りないなら、マップの ready / "
-                 "expect か plan の see で直す）")
     forward = "--next" in argv
     argv = [a for a in argv if a != "--next"]
     value = None
@@ -1189,8 +1185,6 @@ def main():
     if down:
         sys.exit("起動していないシミュレーターがある。起動してから叩き直す:\n  " + "\n  ".join(down))
 
-    if "sections" in manifest:
-        sys.exit("古いマニフェスト（sections が平らに並んでいる）。manifest.py で作り直す")
     if not any(it.get("flow") for _, it in manifest_items.walk(manifest)):
         sys.exit("flow を持つ項目が無い。全部探索なので sim-driver に渡す。")
 
@@ -1265,9 +1259,7 @@ def main():
         if d in finished:
             print(f"--- {d} は撮り終えている。飛ばす")
             continue
-        resume = state if state.get("device") == d and state.get("cursor") else None
-        if state.get("device") == d and not state.get("cursor"):
-            sys.exit("再開の状態が古い（テストケースを組んだ状態が無い）。manifest.py で作り直してから最初から撮る")
+        resume = state if state.get("device") == d else None
         stopped, done, lost = run_device(manifest, manifest_path, flow_dir, d, u, resume, None,
                                          ask if resume else None)
         total += done

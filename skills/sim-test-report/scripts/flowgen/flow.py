@@ -74,16 +74,8 @@ def load_plan(path):
         sys.exit("plan を読めない: {}: {}".format(path, e))
     unknown = set(plan) - PLAN_KEYS
     if unknown:
-        hint = ""
-        if unknown & {"items", "explore"}:
-            hint = ("。項目はテストケースに入れる（{\"cases\": [{\"title\": …, \"items\": [...]}]}）。"
-                    "経路が組めないテストケースには \"explore\": 理由 を付ける")
-        elif unknown & {"runtime", "inputs"}:
-            hint = "。打つ文字の決め方は do の操作に書く（{\"op\": …, \"runtime\": true}）"
-        elif "shots_dir" in unknown:
-            hint = "。証跡の出力先は manifest.py の引数で決まる"
-        sys.exit("plan に知らない鍵: {}（使えるのは {}）{}".format(
-            ", ".join(sorted(unknown)), ", ".join(sorted(PLAN_KEYS)), hint))
+        sys.exit("plan に知らない鍵: {}（使えるのは {}）".format(
+            ", ".join(sorted(unknown)), ", ".join(sorted(PLAN_KEYS))))
     if not plan.get("repo"):
         sys.exit("plan に repo（アプリのリポジトリ）が要る。plan の画面 id と要素 id が前提にしている"
                  "画面マップは、その下の screen-map/ にある")
@@ -115,15 +107,8 @@ def read_cases(plan):
             sys.exit("plan の{}はテストケース（{{\"title\": …, \"items\": [...]}}）で書く".format(where))
         unknown = set(case) - CASE_KEYS
         if unknown:
-            hint = ""
-            if unknown & {"from", "do", "expect"}:
-                hint = "。項目はテストケースの items に入れる"
-            elif "fresh" in unknown:
-                hint = "。後に残る状態は画面マップの操作に leaves（と、既定に戻す操作 reset）を書く。スクリプトがテストケースの後に reset を叩くか、起動し直す。起動そのものを確かめるなら launch"
-            elif "reason" in unknown:
-                hint = "。経路が組めない理由は \"explore\": 理由 で書く"
-            sys.exit("plan の{}に知らない鍵: {}（使えるのは {}）{}".format(
-                where, ", ".join(sorted(unknown)), ", ".join(sorted(CASE_KEYS)), hint))
+            sys.exit("plan の{}に知らない鍵: {}（使えるのは {}）".format(
+                where, ", ".join(sorted(unknown)), ", ".join(sorted(CASE_KEYS))))
         title = case.get("title")
         if not isinstance(title, str) or not title.strip():
             sys.exit("plan の{}に title（何の機能を確かめるまとまりか）が無い".format(where))
@@ -148,22 +133,8 @@ def read_cases(plan):
                 sys.exit("plan の {} の項目は {{\"from\": …, \"title\": …, \"expect\": …}} で書く".format(name))
             unknown = set(item) - ITEM_KEYS
             if unknown:
-                hint = ""
-                if "fresh" in unknown:
-                    hint = ("。起動し直せるのはテストケースの境目だけ" + "。後に残る状態は画面マップの操作に leaves（と、既定に戻す操作 reset）を書く。スクリプトがテストケースの後に reset を叩くか、起動し直す" +
-                            "。起動そのものを確かめるテストケースには launch を付ける")
-                elif "shot" in unknown:
-                    hint = "。証跡の名前は並び順から振る"
-                elif unknown & {"steps", "goto"}:
-                    hint = "。経路は書かない — from に着くまではスクリプトが計算する"
-                elif unknown & {"runtime", "inputs"}:
-                    hint = "。値の決め方は do の操作に書く（{\"op\": …, \"runtime\": true}）"
-                elif "screen" in unknown:
-                    hint = "。操作を始める画面は from"
-                elif "reason" in unknown:
-                    hint = "。経路が組めない理由は、テストケースに \"explore\": 理由 で書く"
-                sys.exit("plan の {} に知らない鍵: {}（使えるのは {}）{}".format(
-                    name, ", ".join(sorted(unknown)), ", ".join(sorted(ITEM_KEYS)), hint))
+                sys.exit("plan の {} に知らない鍵: {}（使えるのは {}）".format(
+                    name, ", ".join(sorted(unknown)), ", ".join(sorted(ITEM_KEYS))))
             if not item.get("from"):
                 sys.exit("plan の {} に from（操作を始める画面）が無い".format(name))
             expect = item.get("expect", "")
@@ -784,9 +755,7 @@ def plan_of(manifest):
     """
     for key in ("app", "repo", "cases"):
         if not manifest.get(key):
-            sys.exit("マニフェストに {} が無い（古いマニフェスト）。manifest.py で作り直す".format(key))
-    if "sections" in manifest:
-        sys.exit("古いマニフェスト（sections が平らに並んでいる）。manifest.py で作り直す")
+            sys.exit("マニフェストに {} が無い。manifest.py で作り直す".format(key))
     cases = []
     for c in manifest["cases"]:
         case = {"title": c["title"],

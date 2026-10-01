@@ -239,8 +239,7 @@ build_report.py が result の無い項目を拒むため（判定していな�
 **実行時に決めた値（`inputs`）も、同じ鍵のものは引き継ぐ。** 撮り直し
 （`RETAKE` の項目）は手前の項目をなぞるので、前に撮ったときの値が要る。
 消すと、手前の項目の判断を撮り直しのたびにやり直すことになる。plan を直して
-鍵が変わった（別の入力欄になった）ものは空に戻し、引き継がなかった値として出力に出す
-（鍵の形が古いマニフェスト — `LIST_ROW` のような変数名 — の値もこれ）。引き継いだものも出力に出す
+鍵が変わった（別の入力欄になった）ものは空に戻し、引き継がなかった値として出力に出す。引き継いだものも出力に出す
 — データが変わっていれば古い値で走るので、見て直せるように。
 """
 import json
@@ -308,11 +307,9 @@ def main():
     if out.exists():
         try:
             old = json.loads(out.read_text(encoding="utf-8"))
-            # 古い形（項目が名前だけ）のものは引き継がない
-            kept = {it.get("name"): it for _, it in manifest_items.walk(old)
-                    if isinstance(it, dict) and it.get("name")}
+            kept = {it.get("name"): it for _, it in manifest_items.walk(old) if it.get("name")}
             top = {k: v for k, v in old.items()
-                   if k not in ("sections", "cases", "title", "meta", "resume", "app", "clear_state")}
+                   if k not in ("cases", "title", "meta", "resume", "app", "clear_state")}
         except Exception:
             pass
 
@@ -369,7 +366,7 @@ def main():
             if kept_inputs:
                 carried.append("{} {}: {}".format(
                     it["name"], d, ", ".join(f"{k}={v}" for k, v in kept_inputs.items())))
-    # 鍵が変わって引き継がなかった値（plan を直した、鍵の形が古い）
+    # 鍵が変わって引き継がなかった値（plan を直した）
     dropped = []
     for name, prev in kept.items():
         now = next((it for it in items if it["name"] == name), None)

@@ -12,7 +12,7 @@
   テストケースを考える（sim-test-report の test-case-builder）
       which で差分から対象の画面を引き、screens で機能名から画面を探す。check の鮮度で、
       その画面のマップを信用してよいか（ソースを読むべきか）を決める
-  マップを作ったあとの検査（screen-map スキルの手順5、migrate_map.py のあと）
+  マップを作ったあとの検査（screen-map スキルの手順5）
       check で、書いたマップが経路として成り立つかを確かめる。テストケースとは関係ない
 
   フローを作って走らせる流れ（manifest.py → run_flows.py）はこれを通らない。

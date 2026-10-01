@@ -467,18 +467,3 @@ elements:
         summary: アイテム一覧を開く
         expect: {screen: item_list, via: push}
 ```
-
-## 古い形からの移行
-
-`actions` / `states` を画面に持つ古い形のマップは、`mapctl.py` も manifest.py も読まずに止まる。変換スクリプトで移す。
-
-```bash
-python3 ~/.claude/skills/screen-map/scripts/migrate_map.py --repo <アプリのリポジトリ>          # 変換結果を見る
-python3 ~/.claude/skills/screen-map/scripts/migrate_map.py --repo <アプリのリポジトリ> --write  # 書き換える
-```
-
-- `tap` / `text` を ID ごとにまとめて `elements` にする。`to` + `kind` は `expect: {screen, via}`、`kind: back` / `dismiss` は `screen: back`
-- `result` はアクションの `summary` に、`expect: <ID>` は `expect: {visible: <ID>}` に
-- `states` と `scroll: <ID>` と、`expect` が指していた観測点は見るだけの要素に。`scroll: down` は `gestures` に
-- `select`（`index` / `capture`）は捨てる。どれを押すかはスクリプトが実行時に決める
-- **機械に決められないものは一覧で出る**（`result` に書いてある条件、要素の `name`、遷移の `summary`）。直してから `mapctl.py check` を通す。yaml のコメントは消えるので、git の差分で確かめる

@@ -75,7 +75,7 @@
   順に確かめる項目のまとまりが読める。1項目だけで題が項目と同じなら置かない
 - テストケースと項目には他の欄を持たせてよい。**知らない欄は無視する** — このマニフェストは
   手順0で作って工程ごとに埋めていくので、screen / flow なども載っている
-- 項目を引くのは manifest_items.py（`walk()`）。平らな `sections` の古いマニフェストは拒む
+- 項目を引くのは manifest_items.py（`walk()`）
 - src はマニフェストからの相対パスまたは絶対パス
 - 画像は sips があれば --width（デフォルト750px）に縮小してから埋め込む
 - output 省略時は manifest と同じディレクトリに verification_report.html を出力
@@ -246,8 +246,6 @@ def shape_problems(manifest: dict) -> list:
     出しようがない（見出しを付けたいなら、文字列の中に改行で書く）。
     """
     out = []
-    if "sections" in manifest:
-        out.append("古いマニフェスト（sections が平らに並んでいる）。manifest.py で作り直す")
     footer = manifest.get("footer", "")
     if not isinstance(footer, str):
         out.append(f"footer が文字列ではない（{type(footer).__name__}）。"
