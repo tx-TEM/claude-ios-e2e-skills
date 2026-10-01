@@ -17,7 +17,7 @@ SYSTEM_IDS = ("BackButton",   # ナビゲーションの戻る
 KINDS = ("screen", "visible", "hidden", "selected", "value", "external")
 SCROLLS = ("horizontal",)                # 要素の `scroll`。画面の縦スクロールとは別に送る向き
 
-SCREEN_KEYS = {"anchor", "names", "summary", "files", "stub", "ready", "elements",
+SCREEN_KEYS = {"anchor", "anchor_by", "names", "summary", "files", "stub", "ready", "elements",
                "gestures", "auto_shows"}
 ELEMENT_KEYS = {"id", "name", "summary", "when", "by", "in_tree", "actions", "scroll", "children"}
 ACTION_KEYS = {"summary", "note", "expect", "leaves", "reset"} | set(OPS)
@@ -68,6 +68,9 @@ class Screen:
         self.raw = raw                      # yaml を読んだまま（check.py が形を確かめる）
         r = raw if isinstance(raw, dict) else {}
         self.anchor = r.get("anchor")       # この画面に居ることを確かめる ID
+        # ID を付けられない OS の部品（UIMenu、confirmationDialog、許可ダイアログ）は、
+        # anchor を表示テキストで書く（`anchor_by: label`）
+        self.anchor_by_label = r.get("anchor_by") == "label"
         self.names = r.get("names") or []   # 呼び名
         self.summary = r.get("summary")     # 何の画面で何ができるか
         self.files = r.get("files") or []   # この画面の主なソース

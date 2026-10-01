@@ -56,7 +56,7 @@ def staleness(mp):
 
 def screen_ids(scr):
     """その画面が持つ、ソースに書いてあるはずの ID。anchor と要素の id（ラベル指定は除く）。"""
-    out = [str(scr.anchor)] if scr.anchor else []
+    out = [str(scr.anchor)] if scr.anchor and not scr.anchor_by_label else []
     out += [str(el["id"]) for el in scr.elements if el.get("id") and el.get("by") != "label"]
     return list(dict.fromkeys(out))
 
@@ -110,11 +110,11 @@ def liveness(mp):
 
 
 def defined_ids(mp):
-    """どこかの画面に要素として定義されている ID と、画面の anchor。"""
+    """どこかの画面に要素として定義されている ID と、画面の anchor（ラベルで書いたものは除く。ID ではない）。"""
     ids = set()
     for sid in mp.screens:
         a = mp.screens[sid].anchor
-        if a:
+        if a and not mp.screens[sid].anchor_by_label:
             ids.add(str(a))
         ids.update(str(el.get("id")) for el in mp.screens[sid].elements if el.get("id"))
     return ids
@@ -150,6 +150,7 @@ def check_screen(mp, sid, ids):
     if not isinstance(s, dict):
         return ["{}: 画面の中身が辞書になっていない".format(sid)], [], []
     check_screen_keys(sid, s, f)
+    check_anchor_by(sid, s, f)
     check_ready(sid, s, ids, f)
     check_elements(sid, scr, f)
     for a in scr.actions:
@@ -166,6 +167,17 @@ def check_screen_keys(sid, s, f):
     if unknown_keys(s, SCREEN_KEYS):
         f.bad.append("{}: 知らない鍵 {}（使えるのは {}）".format(
             sid, unknown_keys(s, SCREEN_KEYS), ", ".join(sorted(SCREEN_KEYS))))
+
+
+def check_anchor_by(sid, s, f):
+    """`anchor_by: label`。ID を付けられない OS の部品（UIMenu、confirmationDialog、許可ダイアログ）に
+    決めて使うもの。弱い箇所としては出さない（要素の `by: label` と同じく、直しようがない）。"""
+    if "anchor_by" not in s:
+        return
+    if s["anchor_by"] != "label":
+        f.bad.append("{}: anchor_by に書けるのは label だけ（ID なら書かない）".format(sid))
+    elif is_pattern(str(s.get("anchor") or "")):
+        f.bad.append("{}: anchor がラベル指定なのでパターンにできない".format(sid))
 
 
 def check_ready(sid, s, ids, f):

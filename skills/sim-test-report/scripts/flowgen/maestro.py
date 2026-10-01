@@ -334,11 +334,12 @@ def auto_checks(mp, sid, keep=None, via=None, came=None):
         if found is None:
             continue            # 書き間違いは check が出す
         anchor, close = found
+        at_key, at_val = element_sel(str(anchor), mp.screens[iid].anchor_by_label)
         key, dismiss = element_sel(close.target, close.element.get("by") == "label")
         summary = mp.screens[iid].summary
         when = "（{} から戻ったとき）".format(came) if back else ""
         out.append(Comment("自動表示: {}{}{}（出ていたら閉じる）".format(iid, when, " — " + summary if summary else "")))
-        out.append({"runFlow": {"when": {"visible": {"id": sel_id(anchor)}},
+        out.append({"runFlow": {"when": {"visible": {at_key: at_val}},
                                 "commands": [{"tapOn": {key: dismiss}}]}})
     return out
 
@@ -363,10 +364,15 @@ def settle():
 
 
 def anchor_of(mp, sid, notes):
+    """その画面の anchor のセレクタ (キー, 値)。無ければ None。
+
+    `anchor_by: label` の画面（ID を付けられない OS の部品）は、表示テキストで待つ。
+    """
     a = mp.anchor(sid)
     if not a:
         notes.append("{} に anchor が無いので、着いたことを確かめられない".format(sid))
-    return a
+        return None
+    return element_sel(str(a), mp.screens[sid].anchor_by_label)
 
 
 def result_sel(st, r, values=None):
@@ -445,7 +451,7 @@ class FlowWriter:
     def wait_anchor(self, sid):
         a = anchor_of(self.mp, sid, self.notes)
         if a:
-            self.out.append(wait_for("id", sel_id(a), self.timeout))
+            self.out.append(wait_for(*a, timeout=self.timeout))
 
     def awaited_after(self, i):
         """steps[i] の次が自動表示を待つステップなら、その画面（着いた画面で閉じない）。"""

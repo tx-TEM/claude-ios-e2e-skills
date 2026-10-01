@@ -237,25 +237,31 @@ def emit_path(mp, steps, notes, start=None):
             checked += right.startswith("✓")
             unchecked += right.startswith("—")
 
-    start_anchor = mp.anchor(chain[0])
+    def shown(sid):
+        """その画面の anchor が出ていることの言い方。ラベルで書いた anchor は文言で待つ。"""
+        a = mp.anchor(sid)
+        if a and mp.screens[sid].anchor_by_label:
+            return "「{}」が出ている（文言で待つ）".format(a)
+        return "{} が出ている".format(a) if a else None
+
+    start_anchor = shown(chain[0])
     row("  {}  {}".format(chain[0].ljust(w), "起点" if chain[0] == mp.start else "続き"),
-        "✓ {} が出ている".format(start_anchor) if start_anchor else "— anchor が無い")
+        "✓ " + start_anchor if start_anchor else "— anchor が無い")
 
     for n, st in enumerate(steps):
         if isinstance(st, Restart):
-            a = mp.anchor(mp.start)
+            a = shown(mp.start)
             row("  {}  アプリを起動し直す".format("".ljust(w)), None)
-            row("  {}  起点".format(mp.start.ljust(w)),
-                "✓ {} が出ている".format(a) if a else "— anchor が無い")
+            row("  {}  起点".format(mp.start.ljust(w)), "✓ " + a if a else "— anchor が無い")
             continue
         if isinstance(st, Shot):
             # 撮影行は右カラムを持たないので、桁揃えの計算から外す
             row("  {}  撮影 {}".format("".ljust(w), os.path.basename(st.name)), None)
             continue
         if isinstance(st, Await):
-            dest = mp.anchor(st.to)
+            dest = shown(st.to)
             row("  {}  自動表示 {} を待つ".format(st.screen.ljust(w), st.to),
-                "✓ {} が出ている".format(dest) if dest else "— {} に anchor が無い".format(st.to))
+                "✓ " + dest if dest else "— {} に anchor が無い".format(st.to))
             continue
         if isinstance(st, Enter):
             row("  {}  {} のどれの中でするかを決める [{}]".format(
@@ -286,7 +292,8 @@ def emit_path(mp, steps, notes, start=None):
             rights.append("（{} が被さって隠れるので、次の自動表示で確かめる）".format(st.to))
         elif st.to:
             dest = mp.anchor(st.to)
-            rights.append("✓ {} に着いたことを確認".format(st.to) if dest
+            how = "（「{}」の文言で待つ）".format(dest) if dest and mp.screens[st.to].anchor_by_label else ""
+            rights.append("✓ {} に着いたことを確認{}".format(st.to, how) if dest
                           else "— {} に anchor が無い".format(st.to))
         for r in st.result:
             if isinstance(r, (Visible, Value)):

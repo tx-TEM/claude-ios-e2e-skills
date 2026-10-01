@@ -460,18 +460,24 @@ def stack_at(build, name, screen):
     return [screen]
 
 
-def screen_at(mp, ids):
-    """画面に出ている ID の並びから、居る画面を決める。(画面, anchor が見えている画面の並び)。
+def screen_at(mp, ids, texts=()):
+    """画面に出ている ID と表示テキストの並びから、居る画面を決める。(画面, anchor が見えている画面の並び)。
+
+    `anchor_by: label` の画面は、anchor を含む表示テキストがあれば見えているとする（フローの
+    `text` セレクタと同じく、前後に何か付いていても当てる）。
 
     **anchor が見えている画面がちょうど1つのときだけ決める。** 無い（アラート、システムの
     ダイアログ、アプリの外）か、2つ以上ある（シートの下に元の画面の anchor が残る、など）
     なら None で、呼ぶ側は起動し直す。
     """
-    def hit(anchor):
+    def hit(scr):
+        anchor = str(scr.anchor)
+        if scr.anchor_by_label:
+            return any(anchor in t for t in texts)
         if anchor.endswith("*"):
             return any(i.startswith(anchor[:-1]) for i in ids)
         return anchor in ids
-    hits = sorted(sid for sid, scr in mp.screens.items() if scr.anchor and hit(str(scr.anchor)))
+    hits = sorted(sid for sid, scr in mp.screens.items() if scr.anchor and hit(scr))
     return (hits[0] if len(hits) == 1 else None), hits
 
 
