@@ -159,7 +159,7 @@ def read_cases(plan):
 
 
 def read_items(plan):
-    """フローを組む項目を確かめて、[{name, from, do: [(操作id, 値の決め方)], restart, case, case_last, when}] にする。
+    """フローを組む項目を確かめて、[{name, from, do: [(操作id, 値の決め方)], restart, case, when}] にする。
 
     `explore` の付いたテストケースは入れない（経路が組めず、フローを持たない）。
 
@@ -209,7 +209,7 @@ def read_items(plan):
             when = item.get("when") or []
             out.append({"name": name, "from": item["from"], "do": ops,
                         "restart": k == 0 and case["launch"],
-                        "case": case["title"], "case_last": k == len(case["items"]) - 1,
+                        "case": case["title"],
                         "when": tuple([when] if isinstance(when, str) else when)})
     return out
 
@@ -265,9 +265,8 @@ class Cursor:
 
     @classmethod
     def from_json(cls, d):
-        return cls(d["at"], list(d["stack"]), ScrollState.from_json(d.get("scroll")), d.get("out"),
-                   bool(d.get("restart")), [tuple(x) for x in d.get("left") or []],
-                   bool(d.get("typed")), bool(d.get("recovered")))
+        return cls(d["at"], list(d["stack"]), ScrollState.from_json(d["scroll"]), d["out"],
+                   d["restart"], [tuple(x) for x in d["left"]], d["typed"], d["recovered"])
 
 
 def op_id(spec):
@@ -655,7 +654,7 @@ def units_of(seg_start, seg_steps, launch):
     return units
 
 
-def render_case(mp, app, clear, cursor, build, timeout=10000):
+def render_case(mp, cursor, build):
     """組んだテストケース（CaseBuild）を、項目ごとの Unit の並びにする。(項目ごとの行, 次の Cursor)。
 
     **項目（撮影）ごとに区切る。** 走らせる側は項目ごとに Unit を順に流して inspect するだけで、
@@ -670,7 +669,7 @@ def render_case(mp, app, clear, cursor, build, timeout=10000):
     route_keys(steps)
     if cursor.out and not (steps and isinstance(steps[0], Restart)):
         # 前のテストケースがアプリの外に居るまま終わった。戻してから始める
-        steps.insert(0, Return(cursor.out, steps[0].item if steps else None))
+        steps.insert(0, Return(cursor.out))
     scroll = cursor.scroll.copy()
     # 経路の押す前のスクロール（Reveal）と、外から戻す操作（Return）を挟んでから切る
     steps, out = add_returns(add_reveals(steps, scroll))
@@ -679,17 +678,17 @@ def render_case(mp, app, clear, cursor, build, timeout=10000):
             # 外に居るまま撮るか。1手ずつ書くと撮影は別の本になるので、ここで並び全体から決める
             st.stay = stays_out(steps, i, skip=(Reveal,))
     rows = []
-    for seg_start, seg_steps, shot, lch in split_at_shots(mp, steps, cursor.at, launch_first=False):
+    for seg_start, seg_steps, shot, lch in split_at_shots(mp, steps, cursor.at):
         screen, checked = shot_context(mp, seg_start, seg_steps)
         rows.append({"name": shot, "units": units_of(seg_start, seg_steps, lch), "flow": shot + ".yaml",
-                     "screen": screen, "checked": checked, "launch": lch,
+                     "screen": screen, "checked": checked,
                      "inputs": {k: "" for k in caller_keys(seg_steps)}})
     end = Cursor(build.route.at, list(build.route.stack), scroll, out, False,
                  [(sid, op_id(spec)) for sid, spec in build.left], build.typed)
     return rows, end
 
 
-def render_unit(mp, app, clear, unit, values=None, indexes=None, shots=".", timeout=10000):
+def render_unit(mp, app, clear, unit, values=None, indexes=None, shots="."):
     """Unit を1本のフローに書く。流すものが無ければ None（親を決めるだけの Enter）。
 
     `values` / `indexes` は run_flows.py が決めた値と、同じ ID の行のうち何番目か（鍵はステップの
@@ -697,12 +696,11 @@ def render_unit(mp, app, clear, unit, values=None, indexes=None, shots=".", time
     """
     if unit.kind == "hand" and isinstance(unit.step, Enter) and len(unit.steps) == 1:
         return None
-    flow, _ = emit_flow(mp, unit.steps, app, clear, None, timeout, unit.start, launch=unit.launch,
-                        values=values, indexes=indexes, shots=shots, head=unit.kind == "flow")
-    return flow
+    return emit_flow(mp, unit.steps, app, clear, unit.start, launch=unit.launch,
+                     values=values, indexes=indexes, shots=shots, head=unit.kind == "flow")
 
 
-def plan_rows(plan, timeout=10000):
+def plan_rows(plan):
     """manifest.py の仕事。テストケースごとに組めるかを確かめ、項目ごとの行を返す。
     (項目の名前 → 行, テストケースの題 → 後始末)。フローは書かない。
 
@@ -722,8 +720,7 @@ def plan_rows(plan, timeout=10000):
     `reset` の画面まで繋げなければ、そこで起動し直す。
     """
     mp = load_map(plan.get("repo"))
-    app, clear = plan.get("app"), bool(plan.get("clear_state"))
-    if not app:
+    if not plan.get("app"):
         sys.exit("plan に app（bundle id）が要る（xcrun simctl listapps <UDID> で調べる）")
     rows, afters, problems, shown = {}, {}, [], []
     for case in flow_cases(plan):
@@ -735,7 +732,7 @@ def plan_rows(plan, timeout=10000):
         afters[case["title"]] = after
         steps = build.steps[1:] if build.steps and isinstance(build.steps[0], Restart) else build.steps
         shown.append("■ {}\n{}".format(case["title"], emit_path(mp, steps, build.notes)))
-        for r in render_case(mp, app, clear, Cursor.fresh(mp), build, timeout)[0]:
+        for r in render_case(mp, Cursor.fresh(mp), build)[0]:
             r.pop("units")
             rows[r["name"]] = r
     if problems:

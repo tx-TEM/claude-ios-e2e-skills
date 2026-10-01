@@ -76,7 +76,6 @@ class Screen:
     """1つの画面。screens/<画面>.yaml を読んだもの。"""
 
     def __init__(self, sid, raw):
-        self.id = sid
         self.raw = raw                      # yaml を読んだまま（check.py が形を確かめる）
         r = raw if isinstance(raw, dict) else {}
         self.anchor = r.get("anchor")       # この画面に居ることを確かめる ID

@@ -66,7 +66,7 @@ class ScreenMap:
         n = 0
         while heap:
             hops, other, _, cur = heapq.heappop(heap)
-            if (hops, other) > best.get(cur, (hops, other)):
+            if (hops, other) > best[cur]:
                 continue
             if cur == goal:
                 out, at = [], goal

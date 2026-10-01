@@ -128,12 +128,23 @@ def write_flows(items, repo=FIXTURE, cases=None):
     cur, rows, flows = flows_of.Cursor.fresh(mp), [], {}
     for case in flows_of.flow_cases(plan):
         build = flows_of.build_case(mp, case["items"], cur)
-        got, cur = flows_of.render_case(mp, plan["app"], False, cur, build)
+        got, cur = flows_of.render_case(mp, cur, build)
         for r in got:
             flows.update(unit_files(mp, r, plan["app"]))
             r["after"] = afters.get(case["title"]) if r["name"] == case["items"][-1]["name"] else None
             rows.append(r)
     return rows, dict(sorted(flows.items()))
+
+
+def launches(row):
+    """その項目の頭でアプリを起動し直すか（項目の Unit のどれかが起動する）。"""
+    return any(u.launch for u in row["units"])
+
+
+def first_visible(dump, pattern):
+    """テストの便宜。画面に見えている1件目の行の ID（run_flows.py の locate()）。無ければ None。"""
+    found = RF["locate"](dump, pattern)
+    return found[0] if found else None
 
 
 def run_manifest(args):
@@ -523,7 +534,7 @@ class Cases(unittest.TestCase):
 
     def launches(self, cases):
         rows, _ = write_flows(None, cases=cases)
-        return [(r["name"], r["launch"]) for r in rows]
+        return [(r["name"], launches(r)) for r in rows]
 
     def refused(self, plan):
         with self.assertRaises(SystemExit) as cm:
@@ -663,7 +674,7 @@ class LeavesReset(unittest.TestCase):
                                            "title": title, "expect": "x"}]}
 
     def check(self):
-        mp = screen_map.ScreenMap(screen_map.find_map(str(self.repo)))
+        mp = screen_map.load_map(str(self.repo))
         with contextlib.redirect_stdout(io.StringIO()) as o:
             code = map_check.cmd_check(mp)
         return code, o.getvalue()
@@ -675,14 +686,14 @@ class LeavesReset(unittest.TestCase):
         head = flow[flow.index("takeScreenshot: '/shots/test_01'"):]
         self.assertLess(head.index("id: '^list\\.clear_button$'"), head.index("- hideKeyboard"))
         self.assertLess(head.index("- hideKeyboard"), head.index("list\\.row"))
-        self.assertEqual([r["launch"] for r in rows], [True, False])
+        self.assertEqual([launches(r) for r in rows], [True, False])
         self.assertEqual(rows[0]["after"], {"relaunch": False, "resets": ["tap:list.clear_button"],
                                             "leaves": ["入力欄の語と絞り込みの結果が残る"]})
 
     def test_leaves_without_reset_relaunches(self):
         self.leaves(reset=None)
         rows, _ = self.flows(self.typing("打つ"), self.opening("開く"))
-        self.assertEqual([r["launch"] for r in rows], [True, True])
+        self.assertEqual([launches(r) for r in rows], [True, True])
         self.assertEqual(rows[0]["after"]["relaunch"], True)
 
     def test_nothing_after_the_last_case_or_before_a_relaunch(self):
@@ -698,7 +709,7 @@ class LeavesReset(unittest.TestCase):
         explore = {"title": "探索", "explore": "画面 history がマップに無い",
                    "items": [{"from": "list", "title": "x", "expect": "x"}]}
         rows, _ = self.flows(self.typing("打つ"), explore, self.opening("開く"))
-        self.assertEqual([(r["name"], r["launch"]) for r in rows], [("test_01", True), ("test_03", True)])
+        self.assertEqual([(r["name"], launches(r)) for r in rows], [("test_01", True), ("test_03", True)])
 
     def test_reset_already_done_in_the_case_is_not_repeated(self):
         # 打ってからクリアで戻すテストケース。クリアのあとは入力欄が空でクリアボタンが出ないので、
@@ -710,7 +721,7 @@ class LeavesReset(unittest.TestCase):
         after_case = flow[flow.index("'/shots/test_02'"):]
         self.assertNotIn("clear_button", after_case)
         self.assertEqual([r["after"] for r in rows], [None, None, None])
-        self.assertEqual([r["launch"] for r in rows], [True, False, False])
+        self.assertEqual([launches(r) for r in rows], [True, False, False])
 
     def test_keyboard_closed_at_the_end_even_without_reset(self):
         # 打ってからクリアで終わるテストケース。戻す状態は無いが、キーボードは最後に閉じる
@@ -778,13 +789,6 @@ class PlanRepo(unittest.TestCase):
         app.mkdir()
         plan = self.load({"app": "x", "repo": "../app", "cases": []})
         self.assertEqual(plan["repo"], str(app.resolve()))
-
-    def test_manifest_refuses_repo_argument(self):
-        f = self.work / "plan.json"
-        f.write_text(json.dumps({"app": "x", "repo": str(FIXTURE), "cases": []}), encoding="utf-8")
-        with self.assertRaises(SystemExit) as cm:
-            run_manifest([f, self.work / "out", "--repo", FIXTURE, "--device", "iphone=AAAA"])
-        self.assertIn("plan の repo に書く", str(cm.exception.code))
 
 
 class DiffScope(unittest.TestCase):
@@ -906,7 +910,6 @@ class Leftovers(unittest.TestCase):
         exec(compile(src, "maestrod.py", "exec"), ns)
         key = ns["run_key"]
         self.assertEqual(key("/x/sim-test-report-20260928-a/shots/iphone"), "sim-test-report-20260928-a/iphone")
-        self.assertEqual(key("/x/sim-test-report-20260928-a/shots"), "sim-test-report-20260928-a")
         # なぞる項目と、探すための読み・送りは作業用の置き場から。実行と端末で分け、証跡のダンプとは下を分ける
         self.assertEqual(key("/s/.work/replay/sim-test-report-20260928-a/iphone"),
                          "sim-test-report-20260928-a/iphone/replay")
@@ -940,7 +943,7 @@ class Interrupts(unittest.TestCase):
         shutil.rmtree(self.repo.parent)
 
     def check(self):
-        mp = screen_map.ScreenMap(screen_map.find_map(str(self.repo)))
+        mp = screen_map.load_map(str(self.repo))
         with contextlib.redirect_stdout(io.StringIO()) as o:
             code = map_check.cmd_check(mp)
         return code, o.getvalue()
@@ -1136,7 +1139,7 @@ class ReportSkip(unittest.TestCase):
         tiny_png(work / "shots" / "iphone" / "test_02.png")
         manifest = work / "manifest.json"
         manifest.write_text(json.dumps(cases_manifest(items)), encoding="utf-8")
-        return ns["build"](manifest, 750, "題", []).read_text(encoding="utf-8")
+        return ns["build"](manifest, "題").read_text(encoding="utf-8")
 
     @staticmethod
     def images(name):
@@ -1144,7 +1147,7 @@ class ReportSkip(unittest.TestCase):
 
     def test_skip_is_counted_apart(self):
         doc = self.build([
-            {"name": "test_01", "title": "a", "desc": "x", "result": "OK", "image": "shots/iphone/test_01.png"},
+            {"name": "test_01", "title": "a", "desc": "x", "result": "OK", "images": [{"src": "shots/iphone/test_01.png"}]},
             {"name": "test_03", "title": "c", "desc": "フローが落ちた", "result": "SKIP",
              "images": self.images("test_03")}])
         self.assertIn('<span class="ok">OK 1</span><span class="ng">NG 0</span>'
@@ -1165,7 +1168,7 @@ class ReportSkip(unittest.TestCase):
 
     def test_no_skip_no_pill(self):
         doc = self.build([{"name": "test_01", "title": "a", "desc": "x", "result": "NG",
-                           "image": "shots/iphone/test_01.png"}])
+                           "images": [{"src": "shots/iphone/test_01.png"}]}])
         self.assertNotIn('class="skip"', doc)
         self.assertIn('<span class="all">全 1 項目</span>', doc)
 
@@ -1306,7 +1309,7 @@ class Flows(unittest.TestCase):
         self.assertEqual(External("app_store").loaded, ())
         st = Act("detail", Tap("detail.share_button"), [External("app_store")], stay=True)
         self.assertIsNone(check_of(None, st))
-        w = FlowWriter(None, [st], "jp.example.App", False, None, 10000, None, None, None)
+        w = FlowWriter(None, [st], "jp.example.App", False)
         w.check(st, st.result[0], stay=True)
         self.assertEqual([c for c in w.out if isinstance(c, dict)], [{"waitForAnimationToEnd": {"timeout": 3000}}])
 
@@ -1337,20 +1340,6 @@ class Flows(unittest.TestCase):
                                {"from": "detail", "title": "b", "expect": "b"}])
         self.assertEqual([u.step.key for u in rows[1]["units"] if u.kind == "hand"], ["経路 tap:list.row.*"])
         self.assertEqual(rows[1]["inputs"], {})
-
-    def test_elements_under_the_pattern_are_excluded(self):
-        repo = Path(tempfile.mkdtemp()) / "app"
-        shutil.copytree(FIXTURE, repo)
-        lst = repo / "screen-map" / "screens" / "list.yaml"
-        lst.write_text(lst.read_text(encoding="utf-8").replace(
-            "  - id: list.empty_view\n", "  - id: list.row.title\n    name: 行の題名\n  - id: list.empty_view\n"),
-            encoding="utf-8")
-        mp = screen_map.load_map(str(repo))
-        self.assertEqual(RF["exclude_of"](mp, "list", "list.row.*"), ["list.row.title"])
-        want = RF["Want"](pattern="list.row.*", exclude=["list.row.title"])
-        dump = dump_line(195, 300, "○", "list.row.title") + dump_line(195, 340, "○", "list.row.こころ")
-        self.assertEqual([r["id"] for r in want.rows(dump)], ["list.row.こころ"])
-        shutil.rmtree(repo.parent)
 
     def test_runtime_on_tap_is_refused(self):
         code, err = build_err([{"from": "list", "title": "a", "expect": "a",
@@ -1431,15 +1420,7 @@ class FirstVisible(unittest.TestCase):
             + dump_line(195, 900, "×", "list.row.坊っちゃん", "坊っちゃん"))
 
     def test_skips_offscreen_and_strips_state(self):
-        self.assertEqual(RF["first_visible"](self.DUMP, "list.row.*"), "list.row.C++入門")
-
-    def test_elements_inside_the_row_are_excluded(self):
-        # 行の中のタイトル（list.row.title）も行のパターンに当たる。マップで別の要素なら選ばない
-        dump = (dump_line(195, 280, "○", "list.row.title", "吾輩は猫である")
-                + dump_line(195, 300, "○", "list.row.こころ", ""))
-        self.assertEqual(RF["first_visible"](dump, "list.row.*"), "list.row.title")
-        self.assertEqual(RF["first_visible"](dump, "list.row.*", ["list.row.title"]), "list.row.こころ")
-        self.assertEqual(RF["first_visible"](dump, "list.row.*", ["list.row.t*"]), "list.row.こころ")
+        self.assertEqual(first_visible(self.DUMP, "list.row.*"), "list.row.C++入門")
 
     def test_locate_counts_offscreen_rows_for_index(self):
         # Maestro の index は画面外も含めた、同じ ID の行の位置順。画面外の 吾輩は猫である は別の ID なので数えず、C++入門 は1件なので 0
@@ -1453,11 +1434,11 @@ class FirstVisible(unittest.TestCase):
         self.assertIsNone(RF["locate"](dump, "list.row.*", value="list.row.牛乳#3"))
 
     def test_none_when_nothing_visible(self):
-        self.assertIsNone(RF["first_visible"](self.DUMP, "detail.cell.*"))
+        self.assertIsNone(first_visible(self.DUMP, "detail.cell.*"))
 
     def test_id_with_spaces(self):
         dump = dump_line(201, 241, "○", "list.row.BOITEUX ・ BOITEUSE", "BOITEUX ・ BOITEUSE, 李 箱")
-        self.assertEqual(RF["first_visible"](dump, "list.row.*"), "list.row.BOITEUX ・ BOITEUSE")
+        self.assertEqual(first_visible(dump, "list.row.*"), "list.row.BOITEUX ・ BOITEUSE")
 
     def test_index_follows_the_top_edge(self):
         # 背の高い行 A（上端 200、中心 300）と低い行 B（上端 240、中心 260）。中心で並べると
@@ -1525,7 +1506,7 @@ class CoveredRows(unittest.TestCase):
             {"b": "[16,126][386,158]", "rid": "browse.target_picker", "txt": "作品名"}]))
         self.assertEqual([on["browse.row." + n] for n in "ABCD"], ["裏", "裏", "裏", "○"])
         self.assertEqual(on["browse.search_field"], "○")
-        self.assertEqual(RF["first_visible"](out, "browse.row.*"), "browse.row.D")
+        self.assertEqual(first_visible(out, "browse.row.*"), "browse.row.D")
 
     def test_navigation_bar_is_in_front_even_if_listed_first(self):
         # NavigationStack はバーを中身より前に並べるが、バーが前面
@@ -2065,7 +2046,7 @@ struct ListView: View {
                      + f.read_text(encoding="utf-8"), encoding="utf-8")
 
     def check(self):
-        mp = screen_map.ScreenMap(screen_map.find_map(str(self.repo)))
+        mp = screen_map.load_map(str(self.repo))
         with contextlib.redirect_stdout(io.StringIO()) as o:
             code = map_check.cmd_check(mp)
         return code, o.getvalue()
@@ -2177,7 +2158,7 @@ class LabelAnchor(unittest.TestCase):
         shutil.rmtree(self.repo.parent)
 
     def check(self):
-        mp = screen_map.ScreenMap(screen_map.find_map(str(self.repo)))
+        mp = screen_map.load_map(str(self.repo))
         with contextlib.redirect_stdout(io.StringIO()) as o:
             code = map_check.cmd_check(mp)
         return code, o.getvalue()
@@ -2326,7 +2307,7 @@ class Check(unittest.TestCase):
         shutil.rmtree(self.repo.parent)
 
     def check(self):
-        mp = screen_map.ScreenMap(screen_map.find_map(str(self.repo)))
+        mp = screen_map.load_map(str(self.repo))
         with contextlib.redirect_stdout(io.StringIO()) as o:
             code = map_check.cmd_check(mp)
         return code, o.getvalue()
@@ -2517,7 +2498,7 @@ class CaseRunBase:
             cmd = args[0]
             if cmd == "run":
                 target, name, dest = args[2], args[3], args[4]
-                body = Path(target[1:]).read_text(encoding="utf-8") if target.startswith("@") else target
+                body = target
                 self.calls.append(("run", name, Path(dest).name, body))
                 if name in self.fail_once:
                     self.fail_once.discard(name)

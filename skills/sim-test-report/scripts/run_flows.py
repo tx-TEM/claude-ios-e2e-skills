@@ -213,7 +213,7 @@ def retake_runs(cases, names):
 
 
 def dump_rows(dump):
-    """elements.py の出力を [{"cx", "cy", "on", "top", "id", "text", "state"}] で。
+    """elements.py の出力を [{"cx", "cy", "on", "where", "top", "id", "text"}] で。
 
     行はタブ区切り（tap / 画面内 / 上端 / id / テキスト / 状態）。**id に空白が入っても
     1回で取れる**（`browse.book_row.BOITEUX ・ BOITEUSE`）。1行目の画面と2行目の欄名は飛ばす。
@@ -225,7 +225,7 @@ def dump_rows(dump):
         if not m or len(cols) < 6 or not cols[2].lstrip("-").isdigit():
             continue
         out.append({"cx": int(m.group(1)), "cy": int(m.group(2)), "on": cols[1] == "○", "where": cols[1],
-                    "top": int(cols[2]), "id": cols[3], "text": cols[4], "state": cols[5]})
+                    "top": int(cols[2]), "id": cols[3], "text": cols[4]})
     return out
 
 
@@ -244,12 +244,12 @@ def shown(dump):
 
 
 def children_of(n):
-    return n.get("c") or n.get("children") or []
+    return n.get("c") or []
 
 
 def node_of(raw, rid):
     """生のダンプ（maestrod.py が置く JSON）で、その ID の要素。同じ ID の要素が複数あれば、ツリーで先のもの。
-    無ければ None。生のダンプは、略号の形（b / rid / a11y / c）と属性の形のどちらもある。"""
+    無ければ None。生のダンプは Maestro の MCP の形（属性名が略号: b / rid / a11y / c）。"""
     try:
         d = json.loads(raw)
     except ValueError:
@@ -259,8 +259,7 @@ def node_of(raw, rid):
         n = stack.pop(0)
         if not isinstance(n, dict):
             continue
-        a = n.get("attributes") or {}
-        if (n.get("rid") or a.get("resource-id")) == rid:
+        if n.get("rid") == rid:
             return n
         stack[0:0] = children_of(n)
     return None
@@ -275,8 +274,7 @@ def box_of(raw, rid):
     n = node_of(raw, rid)
     if n is None:
         return None
-    a = n.get("attributes") or {}
-    m = re.match(r"^\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]$", n.get("b") or a.get("bounds") or "")
+    m = re.match(r"^\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]$", n.get("b") or "")
     return tuple(map(int, m.groups())) if m else None
 
 
@@ -292,25 +290,19 @@ def inner_texts(raw, rid):
         c = stack.pop(0)
         if not isinstance(c, dict):
             continue
-        a = c.get("attributes") or {}
-        text = (c.get("a11y") or c.get("txt") or c.get("val")
-                or a.get("accessibilityText") or a.get("text") or "").strip()
+        text = (c.get("a11y") or c.get("txt") or c.get("val") or "").strip()
         if text:
             out.append(text)
         stack[0:0] = children_of(c)
     return list(dict.fromkeys(out))
 
 
-def pattern_rows(dump, pattern, exclude=(), box=None):
+def pattern_rows(dump, pattern, box=None):
     """ダンプのうちパターンに当たる行を、Maestro の index と同じ順で [(ID, 画面内か)]。
 
     ID はアクセシビリティ ID そのもの（ダンプの id の欄）。**順は上端の y、次に x**（Maestro の Filters.index が
     当たった要素を並べる INDEX_COMPARATOR と同じ基準。x は中心で代える — 同じ ID の行は
     幅がそろう）。**画面外の行も返す** — Maestro の index はそれも数える。
-
-    `exclude` はマップで別の要素として定義されている ID（行の中のタイトルなど）。
-    パターン（`item_list.cell.*`）の前方一致には当たるが、行ではないので数えない。
-    パターンになっているもの（`item_list.cell.badge.*`）は前方一致で外す。
 
     `box` を渡すと、中心がその枠の中にある行だけ（子の要素を、選んだ親の中から選ぶとき）。
     """
@@ -318,8 +310,6 @@ def pattern_rows(dump, pattern, exclude=(), box=None):
     rows = []
     for r in dump_rows(dump):
         rid = r["id"]
-        if any(rid == x or (x.endswith("*") and rid.startswith(x[:-1])) for x in exclude):
-            continue
         if box and not (box[0] <= r["cx"] <= box[2] and box[1] <= r["cy"] <= box[3]):
             continue
         if rid.startswith(prefix) and len(rid) > len(prefix):
@@ -327,7 +317,7 @@ def pattern_rows(dump, pattern, exclude=(), box=None):
     return [(v, on) for _, _, v, on in sorted(rows, key=lambda x: (x[0], x[1]))]
 
 
-def locate(dump, pattern, exclude=(), value=None, box=None):
+def locate(dump, pattern, value=None, box=None):
     """押す行を決める。(ID, Maestro の index, 同じ ID の行の数)。決められなければ None。
 
     `value` が None なら**画面に見えている1件目**。**Maestro のツリー順の0番目ではない** —
@@ -342,7 +332,7 @@ def locate(dump, pattern, exclude=(), value=None, box=None):
     index は、同じ ID の行を位置順（上端の y、次に x）に並べたときの番号（画面外も数える）。
     Maestro の `index` がその順で数えるため（Filters.index の INDEX_COMPARATOR）。
     """
-    rows = pattern_rows(dump, pattern, exclude, box)
+    rows = pattern_rows(dump, pattern, box)
     if value is None:
         chosen = next((r for r in rows if r[1]), None)
         nth = 1
@@ -358,12 +348,6 @@ def locate(dump, pattern, exclude=(), value=None, box=None):
     same = [i for i, r in enumerate(rows) if r[0] == chosen[0]]
     visible_same = [i for i in same if rows[i][1]]
     return chosen[0], same.index(visible_same[nth - 1]), len(same)
-
-
-def first_visible(dump, pattern, exclude=()):
-    """画面に見えている1件目の ID。無ければ None。"""
-    found = locate(dump, pattern, exclude)
-    return found[0] if found else None
 
 
 def read_screen(udid, name, where):
@@ -391,12 +375,10 @@ def read_dump(udid, name, where):
 
 class Want:
     """ダンプの中で探すもの。ID そのもの（`exact`）、パターン（`pattern`。`word` を含む行だけ）、
-    ラベルの文言（`label`）のどれか。`exclude` はパターンに当たっても行ではない ID
-    （pattern_rows() の説明）。"""
+    ラベルの文言（`label`）のどれか。"""
 
-    def __init__(self, exact=None, pattern=None, word=None, label=None, exclude=()):
+    def __init__(self, exact=None, pattern=None, word=None, label=None):
         self.exact, self.pattern, self.word, self.label = exact, pattern, word, label
-        self.exclude = tuple(exclude)
 
     def rows(self, dump, box=None):
         """当たる行を、Maestro の index と同じ順（上端の y、次に x）で。`box` の中だけ。"""
@@ -411,8 +393,7 @@ class Want:
             elif self.label is not None:
                 hit = self.label in r["text"]
             else:
-                hit = rid.startswith(prefix) and len(rid) > len(prefix) and not any(
-                    rid == x or (x.endswith("*") and rid.startswith(x[:-1])) for x in self.exclude)
+                hit = rid.startswith(prefix) and len(rid) > len(prefix)
                 if hit and self.word is not None:
                     hit = self.word in rid[len(prefix):]
             if hit:
@@ -427,25 +408,17 @@ class Want:
         return self.pattern + ("（「{}」を含む行）".format(self.word) if self.word is not None else "")
 
 
-def exclude_of(mp, screen, pattern):
-    """同じ画面で別の要素として定義されている、パターンの前方一致に当たる ID（行の中のタイトルなど）。"""
-    prefix = pattern_prefix(pattern)
-    scr = mp.screens.get(screen)
-    return sorted(str(el.get("id")) for el in (scr.elements if scr else [])
-                  if el.get("id") != pattern and str(el.get("id") or "").startswith(prefix))
-
-
-def target_of(mp, st):
+def target_of(st):
     """ステップの対象を探す Want。探せない（要素の無い操作、マップに無い文言）なら None。"""
     if isinstance(st, Enter):
-        return Want(pattern=st.target, exclude=exclude_of(mp, st.screen, st.target))
+        return Want(pattern=st.target)
     if isinstance(st, See):
         if st.text:
             return None
         if st.by_label:
             return Want(label=st.target)
         if is_pattern(st.target):
-            return Want(pattern=st.target, word=st.contains, exclude=exclude_of(mp, st.screen, st.target))
+            return Want(pattern=st.target, word=st.contains)
         return Want(exact=st.target)
     if isinstance(st, Act):
         a = st.action
@@ -454,14 +427,14 @@ def target_of(mp, st):
         if a.by_label:
             return Want(label=a.target)
         if is_pattern(a.target):
-            return Want(pattern=a.target, exclude=exclude_of(mp, st.screen, a.target))
+            return Want(pattern=a.target)
         return Want(exact=a.target)
     return None
 
 
 def chain_of(st, values):
     """子の要素の親の並び（外から順）。[(具体的な ID, 横に送るか)]。"""
-    within = st.outer if isinstance(st, Enter) else getattr(st, "within", None) or []
+    within = st.outer if isinstance(st, Enter) else st.within
     return [(w.value if w.enter is None else values[w.enter.key], bool(w.scroll)) for w in within]
 
 
@@ -491,8 +464,7 @@ class Record:
         """前に書いた記録の続きから書く（止まった項目を再開したとき）。無ければ何もしない。"""
         if path.exists():
             body = path.read_text(encoding="utf-8").split("\n---\n", 1)
-            if len(body) == 2:
-                self.lines = body[1].rstrip("\n").split("\n") + ["# ここから再開"]
+            self.lines = body[1].rstrip("\n").split("\n") + ["# ここから再開"]
 
     def write(self, path):
         path.write_text("appId: {}\n---\n{}\n".format(self.app, "\n".join(self.lines)), encoding="utf-8")
@@ -519,7 +491,7 @@ class Seeker:
         self.dump, self.raw = read_screen(self.dv.udid, f"{self.name}.seek{self.k}", self.dv.scratch)
         return self.dump is not None
 
-    def run(self, body, what):
+    def run(self, body):
         """探すために1回送る。流したものは記録に残す。"""
         self.record.commands(body)
         return sh(["run", self.dv.udid, "appId: {}\n---\n{}".format(self.dv.app, body),
@@ -573,7 +545,7 @@ class Seeker:
         before = self.seen(parent)
         for direction in directions:
             for _ in range(SEEK_SWIPES):
-                if not self.run(scroll_body(direction, parent), direction):
+                if not self.run(scroll_body(direction, parent)):
                     return "探すために送るフローが落ちた"
                 if not self.read():
                     return "画面を読めない"
@@ -602,7 +574,7 @@ class Seeker:
         画面の中に見えている ID が送る前と同じなら端（hunt() と同じ）。"""
         before = self.seen(parent)
         for _ in range(SEEK_SWIPES):
-            if not self.run(scroll_body("back" if parent is not None else "up", parent), "rewind"):
+            if not self.run(scroll_body("back" if parent is not None else "up", parent)):
                 return "先頭まで戻すフローが落ちた"
             if not self.read():
                 return "画面を読めない"
@@ -615,7 +587,7 @@ class Seeker:
     def advance(self, parent=None):
         """1画面だけ先へ送る。送れれば None、送っても見えている ID が変わらなければ "端"、だめなら理由の文。"""
         before = self.seen(parent)
-        if not self.run(scroll_body("next" if parent is not None else "down", parent), "advance"):
+        if not self.run(scroll_body("next" if parent is not None else "down", parent)):
             return "送るフローが落ちた"
         if not self.read():
             return "画面を読めない"
@@ -632,7 +604,7 @@ class Seeker:
             # 送る親を縦に寄せる。画面の下端にかかったカルーセルの上からスワイプすると、タブバーを叩く
             body = ("- scrollUntilVisible:\n    element:\n      id: '{}'\n    direction: DOWN\n"
                     "    centerElement: true\n    timeout: 10000\n").format(exact(chain[0][0]).replace("'", "''"))
-            if not self.run(body, "center"):
+            if not self.run(body):
                 return "親を寄せるフローが落ちた"
         for i, (parent, scroll) in enumerate(chain):
             nxt = Want(exact=chain[i + 1][0]) if i + 1 < len(chain) else want
@@ -670,7 +642,7 @@ def pick_of(st):
     return st.pick if isinstance(st, (Enter, See)) else st.action.pick
 
 
-def candidates(dump, raw, pattern, exclude=(), box=None):
+def candidates(dump, raw, pattern, box=None):
     """いま画面に見えている、パターンの行（選ぶ候補）。[(値, 行の表示テキスト, 行の中の文字の並び)]。
 
     値は `inputs` にそのまま書けるもの。同じ ID の行が複数見えていれば、2件目からは `<ID>#2`
@@ -678,7 +650,7 @@ def candidates(dump, raw, pattern, exclude=(), box=None):
     """
     rows = {r["id"]: r for r in dump_rows(dump)}
     out, counts = [], {}
-    for rid, on in pattern_rows(dump, pattern, exclude, box):
+    for rid, on in pattern_rows(dump, pattern, box):
         if not on:
             continue
         counts[rid] = counts.get(rid, 0) + 1
@@ -704,7 +676,7 @@ class Hand:
     流してよく、("failed", 理由) / ("stopped", 何手目か) なら流さない。"""
 
     def __init__(self, dv, sec, k, st, values, indexes, notes, record, replay):
-        self.dv, self.sec, self.k, self.st = dv, sec, k, st
+        self.dv, self.k, self.st = dv, k, st
         self.values, self.indexes, self.notes = values, indexes, notes
         self.record, self.replay = record, replay
         self.dev = sec["devices"][dv.device]
@@ -770,7 +742,7 @@ class Hand:
                 return self.stop(f"{key} の {given} が {pattern} に当たらない",
                                  f"{key} の値 {given} が {pattern} に当たらない。ダンプの id の欄"
                                  f"（{prefix}…）をまるごと、{self.answer('ID')}。")
-        want = target_of(mp, st)
+        want = target_of(st)
         if want is None:
             if caller and not given:
                 return self.missing(key)
@@ -789,7 +761,7 @@ class Hand:
         if picks:
             # どの行を押す・見るか（どの親の中でするか）を決め、同じ ID の行のうち何番目か（Maestro の index）を
             # 数える。条件が無ければ画面に見えている1件目（モデルに訊かない）
-            found = locate(seeker.dump, want.pattern, want.exclude, given if caller else None, seeker.box)
+            found = locate(seeker.dump, want.pattern, given if caller else None, seeker.box)
             if found is None:
                 what = f"{given} が" if caller else f"{want.pattern} が"
                 return self.fail(f"{what}画面に見えていない")
@@ -846,7 +818,7 @@ class Hand:
                 return self.not_found(seeker, cond, f"{where}の端まで見た")
         if why:
             return self.fail(why)
-        found = candidates(seeker.dump, seeker.raw, want.pattern, want.exclude,
+        found = candidates(seeker.dump, seeker.raw, want.pattern,
                            seeker.boxed(chain[-1][0]) if chain else None)
         if not found:
             return self.fail(f"{want.pattern} が画面に見えていない")
@@ -860,7 +832,7 @@ class Hand:
         **最後に見た画面（端まで送ったところ）を、ふつうの項目と同じ名前で撮ってダンプを置く。** NG の証跡になる。
         """
         shot = str((self.dv.shots / self.name).resolve()).replace("'", "''")
-        seeker.run(f"- takeScreenshot: '{shot}'\n", "shot")
+        seeker.run(f"- takeScreenshot: '{shot}'\n")
         sh(["inspect", self.dv.udid, self.name, str(self.dv.shots)])   # 出力は捨てる
         self.dv.logline(f"{self.name} 撮影済み 条件「{cond}」に合う要素が無い（{how_far}）。最後に見た画面を撮った")
         print(f"{self.name} 条件「{cond}」に合う要素が無い（{how_far}）", file=sys.stderr)
@@ -877,7 +849,7 @@ def run_item(dv, sec, row, replay, first=0):
     name = sec["name"]
     dest = dv.scratch if replay else dv.shots
     dev = sec["devices"][device]
-    dev["picked"] = {} if first == 0 else dev.get("picked") or {}
+    dev["picked"] = {} if first == 0 else dev["picked"]
     # 前の手で決めた値。再開のときは、止まる前に決めたもの（picked）と撮影する側が決めたもの
     values = dict(dev["picked"], **{k: v for k, v in (dev.get("inputs") or {}).items() if v})
     notes = {}   # 同じ名前の行があったときの、何件目を押したか
@@ -933,8 +905,7 @@ def forget(shots, sec):
 class DeviceRun:
     """1台ぶんを撮るときの置き場。run_item() に渡す。"""
 
-    def __init__(self, device, udid, shots, scratch, fdir, log, app=None, mp=None, clear=False, retake=False,
-                 ask=None):
+    def __init__(self, device, udid, shots, scratch, fdir, log, app, mp, clear, retake, ask=None):
         self.device, self.udid, self.app, self.mp, self.clear = device, udid, app, mp, clear
         self.retake = retake                          # 撮り直し中か（止まったときの案内が変わる）
         # 止まったときの問答。next: --next で叩き直された（まだ使っていない）。paged: 条件つきの選択で
@@ -1032,7 +1003,7 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, retake=N
             got = flows_of.build_case(mp, case["items"], start)
         if got.problems:
             return got, None, None, start
-        rows, end = flows_of.render_case(mp, plan["app"], plan["clear_state"], start, got)
+        rows, end = flows_of.render_case(mp, start, got)
         return got, {r["name"]: r for r in rows}, end, start
 
     def unexpected(sec, kind, reason=""):
@@ -1082,11 +1053,9 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, retake=N
                     if failed_why == "落ちた":
                         missed.append(f"{device} {name}")
                     logline(f"{name} 撮影できず 同じテストケースの {failed_at} が{failed_why}ので飛ばした")
-                    if replay:
-                        pass
-                    elif failed_why == "落ちた":
+                    if not replay and failed_why == "落ちた":
                         unexpected(sec, "skipped", f"同じテストケースの {failed_at} が落ちた")
-                    else:
+                    elif not replay:
                         # 前提の要素が無かった巻き添え。撮る側の失敗ではないので、撮り直しに拾わせない
                         sec["devices"][device]["not_found"] = {
                             "after": failed_at, "reason": f"同じテストケースの {failed_at} で条件に合う要素が無かった"}
@@ -1275,7 +1244,7 @@ def main():
     skipped = [it.get("name") for _, it in manifest_items.walk(manifest) if not it.get("flow")]
     print(f"\nこの実行で {total}件を撮った")
     if skipped:
-        print(f"飛ばした（フローが無い。探索で撮る）: {', '.join(x or '?' for x in skipped)}")
+        print(f"飛ばした（フローが無い。探索で撮る）: {', '.join(skipped)}")
     if lost_all:
         print(f"\n撮れなかった {len(lost_all)}件:", file=sys.stderr)
         for line in lost_all:

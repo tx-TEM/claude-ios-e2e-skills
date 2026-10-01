@@ -16,12 +16,8 @@ usage: elements.py <dump.json>
 行は中心の y、次に x の順（上から）。**上端** は要素の上端の y で、Maestro の `index` が
 当たった要素を並べる基準（上端の y、次に x）と同じものを数えるために出す。
 
-入力は2種類を自動判別する。
-
-  MCP の inspect_screen   {"ui_schema": {...}, "elements": [...]}
-      属性名が略号（b/txt/rid/a11y）で、既定値のものは省かれている
-  maestro hierarchy       {"attributes": {...}, "children": [...]}
-      生の形。MCPが使えないときの退避路
+入力は Maestro の MCP の inspect_screen（{"ui_schema": {...}, "elements": [...]}）。属性名が略号
+（b/txt/rid/a11y）で、既定値のものは省かれている。
 """
 import json, re, sys
 
@@ -47,31 +43,16 @@ def labeled(label, value):
         return label
     return f"{label} = {value}"
 
-def norm(n, compact):
-    """どちらの形式も同じ辞書に均す。"""
-    if compact:
-        return {
-            "bounds": n.get("b", ""),
-            "text": labeled(n.get("a11y"), n.get("txt") or n.get("val")),
-            "rid": n.get("rid", ""),
-            # 既定値は省かれているので、無ければ既定
-            "selected": n.get("selected", False) is True,
-            "enabled": n.get("enabled", True) is not False,
-            "checked": n.get("checked", False) is True,
-            "children": n.get("c") or [],
-        }
-    a = n.get("attributes", {})
-    def flag(k, default):
-        v = a.get(k, n.get(k, default))
-        return str(v).lower() == "true"
+def norm(n):
+    """要素を、ここで使う辞書に均す。既定値は省かれているので、無ければ既定。"""
     return {
-        "bounds": a.get("bounds", ""),
-        "text": labeled(a.get("accessibilityText"), a.get("text")),
-        "rid": a.get("resource-id", ""),
-        "selected": flag("selected", False),
-        "enabled": not (str(a.get("enabled", n.get("enabled", "true"))).lower() == "false"),
-        "checked": flag("checked", False),
-        "children": n.get("children") or [],
+        "bounds": n.get("b", ""),
+        "text": labeled(n.get("a11y"), n.get("txt") or n.get("val")),
+        "rid": n.get("rid", ""),
+        "selected": n.get("selected", False) is True,
+        "enabled": n.get("enabled", True) is not False,
+        "checked": n.get("checked", False) is True,
+        "children": n.get("c") or [],
     }
 
 rows = []
@@ -97,9 +78,8 @@ explicit = []
 # ツリーの全ノード（行を持たないものも）。重なりの判定に使う（covered()）
 nodes = []
 
-def walk(node, compact, parent=None, win=(0, 0)):
-    global screen
-    d = norm(node, compact)
+def walk(node, parent=None, win=(0, 0)):
+    d = norm(node)
     t = d["text"].strip().replace("\n", " ").replace("\t", " ")   # タブは欄の区切り
     r = d["rid"].strip()
     m = B.match(d["bounds"] or "")
@@ -131,7 +111,7 @@ def walk(node, compact, parent=None, win=(0, 0)):
             rows.append(row)
     for j, c in enumerate(d["children"]):
         # アプリのルートの子が窓（アプリ本体、キーボード）。後ろの窓ほど前面
-        walk(c, compact, me, (win[0], j + 1) if parent is None else win)
+        walk(c, me, (win[0], j + 1) if parent is None else win)
     me["end"] = len(nodes)
 
 
@@ -233,15 +213,16 @@ def same(n, o):
     return o["win"] == n["win"] and not o["text"]
 
 d = json.load(open(sys.argv[1]))
-compact = isinstance(d, dict) and "ui_schema" in d and "elements" in d
-roots = d["elements"] if compact else [d[0] if isinstance(d, list) else d]
+if not (isinstance(d, dict) and "ui_schema" in d and "elements" in d):
+    sys.exit("Maestro の MCP の inspect_screen の形ではない（ui_schema と elements が要る）")
+roots = d["elements"]
 
 # 寸法はアプリのルート（先頭）から取り、無いときだけほかのルートの最大にする。
 # ディスプレイを複数持つ端末（iPhone Duo）では、別のディスプレイの窓がアプリより
 # 大きなルートとして並ぶ。その寸法で測ると、アプリいっぱいの入れ物が「画面の半分
 # 未満」になって被さる側に数えられ、全要素が裏になった（実測）。
 for root in roots:
-    m = B.search((root.get("b") if compact else root.get("attributes", {}).get("bounds")) or "")
+    m = B.search(root.get("b") or "")
     if m:
         x0, y0, x1, y1 = map(int, m.groups())
         W, H = max(W or 0, x1), max(H or 0, y1)
@@ -252,7 +233,7 @@ if W is None:
 
 for k, root in enumerate(roots):
     # 2つ目からのルートはアプリの外の窓（ステータスバー）。アプリの上に被さる
-    walk(root, compact, win=(k, 0))
+    walk(root, win=(k, 0))
 
 for n in nodes:
     if n["row"] and n["row"][2] == "○" and covered(n):

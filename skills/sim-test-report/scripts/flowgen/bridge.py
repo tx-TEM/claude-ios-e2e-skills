@@ -13,7 +13,6 @@ flow.py が plan の項目を順にフローにするとき、前の項目が終
 条件つきの要素や枝（マップの `when`）も、前提に同じ文言が無ければ通さず、
 「条件つき」と理由にする。
 """
-import os
 import sys
 
 from .results import Closed, External, Hidden, Selected, Value, Visible, resolve_result
@@ -48,10 +47,10 @@ class Route:
     落ちたとき、落ちた地点の画面にそのとき積まれていた履歴を引くのに使う。
     """
 
-    def __init__(self, mp, start=None, stack=None):
+    def __init__(self, mp, start, stack):
         self.mp = mp
-        self.at = start or mp.start
-        self.stack = list(stack) if stack else [self.at]
+        self.at = start
+        self.stack = list(stack)
         self.notes = []
         self.trail = []
         self.mark()
@@ -228,7 +227,7 @@ class Route:
         raise Unroutable(out)
 
 
-def emit_path(mp, steps, notes, start=None):
+def emit_path(mp, steps, notes):
     """人が読む経路。**どこに自動確認があり、どこが証跡頼みかを明示する。**
 
     フローを見せてレビューを受けるとき、いちばん知りたいのは「この確認は
@@ -236,14 +235,10 @@ def emit_path(mp, steps, notes, start=None):
     が assert になるが、**`expect` を持たない操作は何も確かめていない**。
     そこは証跡のPNGだけが根拠になるので、黙って並べない。
     """
-    at = start or mp.start
+    at = mp.start
     chain = [at]
     for st in steps:
-        if isinstance(st, Restart):
-            at = mp.start
-            chain.append("（起動し直す）")
-            chain.append(at)
-        elif st.to:
+        if st.to:
             at = st.to
             chain.append(at)
     out = [" → ".join(chain), ""]
@@ -269,17 +264,12 @@ def emit_path(mp, steps, notes, start=None):
             return "✓ {} に着いたことを確認{}".format(sid, "（「{}」の文言で待つ）".format(a) if label else "")
         return "✓ 「{}」が出ている（文言で待つ）".format(a) if label else "✓ {} が出ている".format(a)
 
-    row("  {}  {}".format(chain[0].ljust(w), "起点" if chain[0] == mp.start else "続き"),
-        anchor_cell(chain[0], "anchor が無い"))
+    row("  {}  起点".format(chain[0].ljust(w)), anchor_cell(chain[0], "anchor が無い"))
 
     for n, st in enumerate(steps):
-        if isinstance(st, Restart):
-            row("  {}  アプリを起動し直す".format("".ljust(w)), None)
-            row("  {}  起点".format(mp.start.ljust(w)), anchor_cell(mp.start, "anchor が無い"))
-            continue
         if isinstance(st, Shot):
             # 撮影行は右カラムを持たないので、桁揃えの計算から外す
-            row("  {}  撮影 {}".format("".ljust(w), os.path.basename(st.name)), None)
+            row("  {}  撮影 {}".format("".ljust(w), st.name), None)
             continue
         if isinstance(st, Await):
             row("  {}  自動表示 {} を待つ".format(st.screen.ljust(w), st.to),

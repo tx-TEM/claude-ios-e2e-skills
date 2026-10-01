@@ -46,7 +46,7 @@ def staleness(mp):
         files = mp.screens[sid].files
         y = last_commit(repo, [str(mp.root / "screens" / (sid + ".yaml"))])
         f = last_commit(repo, [str(repo / str(x)) for x in files])
-        if y is None or f is None or not files:
+        if y is None or f is None:
             continue
         if f > y:
             out.append((sid, y, f))
@@ -144,7 +144,7 @@ def unknown_keys(d, allowed):
 def check_screen(mp, sid, ids):
     """1画面ぶんの (bad, breaks, todo)。"""
     scr = mp.screens[sid]
-    s = scr.raw or {}
+    s = scr.raw
     f = Findings()
     if not isinstance(s, dict):
         return ["{}: 画面の中身が辞書になっていない".format(sid)], [], []

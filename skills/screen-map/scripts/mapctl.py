@@ -94,7 +94,6 @@ def cmd_which(mp, paths):
         print("\n共有コンポーネント、モデル、API層は `files` に載せない決まりなので、"
               "ここに出る。\nまだマップに無い画面のファイルもここに出る。"
               "**当たらなかったことを「無関係」と読まない。**")
-    return 0
 
 
 def main():
@@ -129,7 +128,7 @@ def main():
         paths = rest
         if rest == ["-"]:
             paths = [l.strip() for l in sys.stdin.read().splitlines() if l.strip()]
-        sys.exit(cmd_which(mp, paths))
+        cmd_which(mp, paths)
     if cmd == "check":
         sys.exit(cmd_check(mp))
     sys.exit(__doc__)

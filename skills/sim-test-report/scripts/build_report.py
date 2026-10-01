@@ -2,7 +2,7 @@
 """スクリーンショット付き動作確認レポート（単一HTML）を生成する。
 
 使い方:
-    python3 build_report.py <manifest.json> [--title <題>] [--width=<px>] [--no-png]
+    python3 build_report.py <manifest.json> [--title <題>]
     python3 build_report.py <manifest.json> --check     形だけ確かめる（レポートは作らない）
 
 **`--check` は判定を書き終えた側（evidence-judge）が叩く。** 判定の欄は LLM が書くので、
@@ -44,15 +44,12 @@
       ]
     }
   ],
-  "footer": "実行全体の補足（確認していない項目、一時コード、作成したテストデータなど）",
-  "output": "verification_report.html"
+  "footer": "実行全体の補足（確認していない項目、一時コード、作成したテストデータなど）"
 }
 
 - **「実施日」だけは件数の行の右端に出す。** 他の項目（確認環境）は何で確かめたかで、
   いつの結果かはそれと性格が違う。他の項目は件数の行の下に1行ずつ並ぶ
 - 1項目に複数の画像を並べられる。同じ確認項目をiPhoneとiPadで撮った場合など
-- images の要素は {"src": ..., "label": ...} か、ラベル不要なら文字列だけでもよい
-- 画像が1枚なら "image": "shots/01_foo.png" と書いてもよい（images 1件と等価）
 - 複数端末を撮った項目は、全ての端末で確認できたときだけ result を "OK" にする
 - **result の `SKIP` は「撮れなかった。成否を確かめていない」。** OK でも NG でもないので、
   どちらにも数えず「撮れなかった」として別に数える。マニフェストから外して footer に書くと、
@@ -77,10 +74,10 @@
   手順0で作って工程ごとに埋めていくので、screen / flow なども載っている
 - 項目を引くのは manifest_items.py（`walk()`）
 - src はマニフェストからの相対パスまたは絶対パス
-- 画像は sips があれば --width（デフォルト750px）に縮小してから埋め込む
-- output 省略時は manifest と同じディレクトリに verification_report.html を出力
-- HTMLと同時に、PRコメント貼り付け用の1枚画像（<output>.png）も生成する
-  （headless Chromeを使用。--no-png で抑止、Chrome不在時はスキップ）
+- 画像は sips があれば750px幅に縮小してから埋め込む
+- manifest と同じディレクトリに verification_report.html を出力する
+- HTMLと同時に、PRコメント貼り付け用の1枚画像（verification_report.png）も生成する
+  （headless Chromeを使用。Chrome不在時はスキップ）
 """
 
 from __future__ import annotations
@@ -101,7 +98,7 @@ from datetime import date
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from manifest_items import walk   # noqa: E402  項目を並び順に引く
 
-DEFAULT_WIDTH = 750
+SHOT_WIDTH = 750   # 埋め込む画像の幅（px）
 PNG_PAGE_WIDTH = 900
 # PRコメントで拡大しても文字が読めるよう、等倍より大きく描画する。
 # 上限を超えたら順に落とす。GitHubの画像添付は10MBまでで、超えると貼れない
@@ -154,13 +151,13 @@ def run_chrome(args: list[str], stdout=subprocess.DEVNULL, done=None) -> None:
             proc.wait()
 
 
-def load_image_b64(path: pathlib.Path, width: int) -> str:
+def load_image_b64(path: pathlib.Path) -> str:
     """画像を必要なら縮小してbase64文字列にする。sipsが無ければ原寸で埋め込む。"""
     try:
         with tempfile.TemporaryDirectory() as tmp:
             resized = pathlib.Path(tmp) / path.name
             subprocess.run(
-                ["sips", "--resampleWidth", str(width), str(path), "--out", str(resized)],
+                ["sips", "--resampleWidth", str(SHOT_WIDTH), str(path), "--out", str(resized)],
                 check=True,
                 capture_output=True,
             )
@@ -171,18 +168,13 @@ def load_image_b64(path: pathlib.Path, width: int) -> str:
 
 
 def section_images(section: dict, base_dir: pathlib.Path) -> list[tuple[pathlib.Path, str]]:
-    """images / image のどちらの書き方でも (パス, ラベル) の一覧にして返す。
+    """images を (パス, ラベル) の一覧にして返す。
 
     `SKIP` の項目は、撮れたぶん（ファイルがあるもの）だけ。撮れなかった端末の証跡は無い。
     """
     skip = section.get("result") == "SKIP"
-    raw = section.get("images")
-    if not raw:
-        raw = [section["image"]] if section.get("image") or not skip else []
     items = []
-    for item in raw:
-        if isinstance(item, str):
-            item = {"src": item}
+    for item in section.get("images") or []:
         path = pathlib.Path(item["src"])
         if not path.is_absolute():
             path = base_dir / path
@@ -190,16 +182,6 @@ def section_images(section: dict, base_dir: pathlib.Path) -> list[tuple[pathlib.
             continue
         items.append((path, item.get("label", "")))
     return items
-
-
-def meta_items(meta: list[str]) -> list[tuple[str, str]]:
-    """meta の行を (ラベル, 値) にする。「／」で区切った行は複数の項目に分ける。"""
-    items = []
-    for line in meta:
-        for part in re.split(r"\s*／\s*", line.strip()):
-            m = re.match(r"([^:：]+?)\s*[:：]\s*(.+)", part)
-            items.append((m.group(1), m.group(2)) if m else ("", part))
-    return [(k, v) for k, v in items if v]
 
 
 def case_heads(cases: list) -> dict:
@@ -266,7 +248,7 @@ def shape_problems(manifest: dict) -> list:
     return out
 
 
-def build(manifest_path: pathlib.Path, width: int, title: str, meta: list) -> pathlib.Path:
+def build(manifest_path: pathlib.Path, title: str, env: str = "", day: str = "") -> pathlib.Path:
     manifest = json.loads(manifest_path.read_text())
     base_dir = manifest_path.parent
     # 形の崩れはここでも止める（--check を通さずに叩かれたとき）。result の未判定は下で見る
@@ -292,7 +274,7 @@ def build(manifest_path: pathlib.Path, width: int, title: str, meta: list) -> pa
         for path, label in section_images(section, base_dir):
             caption = f'<figcaption>{html.escape(label)}</figcaption>' if label else ""
             shots += (f'<figure>{caption}<img src="data:image/png;base64,'
-                      f'{load_image_b64(path, width)}" alt="{html.escape(label) or f"screenshot {i}"}" /></figure>')
+                      f'{load_image_b64(path)}" alt="{html.escape(label) or f"screenshot {i}"}" /></figure>')
         multi = " multi" if len(section_images(section, base_dir)) > 1 else ""
         top, note = section_rows(section)
         # 期待と結果は別の帯にする。1つの枠に並べると、どこまでが期待か読み分けにくい
@@ -316,18 +298,13 @@ def build(manifest_path: pathlib.Path, width: int, title: str, meta: list) -> pa
       {rows_html}
     </section>'''
 
-    items = meta_items(meta)
-    dates = [v for k, v in items if k == "実施日"]
-    meta_lines = "".join(
-        f'<p>{f"<span>{html.escape(k)}</span>" if k else ""}{html.escape(v)}</p>'
-        for k, v in items if k != "実施日")
-    meta_lines = f'<div class="meta">{meta_lines}</div>' if meta_lines else ""
+    meta_lines = (f'<div class="meta"><p><span>確認環境</span>{html.escape(env)}</p></div>' if env else "")
     summary = (f'<div class="summary"><span class="ok">OK {counts["OK"]}</span>'
                f'<span class="ng">NG {counts["NG"]}</span>'
                # 撮れなかった項目が無い回は出さない。OK と NG は0件でも出す（0件であることが結果）
                + (f'<span class="skip">撮れなかった {counts["SKIP"]}</span>' if counts["SKIP"] else "")
                + f'<span class="all">全 {sum(counts.values())} 項目</span>'
-               + "".join(f'<span class="date">実施日 {html.escape(d)}</span>' for d in dates)
+               + (f'<span class="date">実施日 {html.escape(day)}</span>' if day else "")
                + '</div>')
     footer = manifest.get("footer", "")
     footer_html = (f'<footer class="card"><h2>補足</h2><p>{html.escape(footer)}</p></footer>'
@@ -416,10 +393,7 @@ def build(manifest_path: pathlib.Path, width: int, title: str, meta: list) -> pa
 </body>
 </html>'''
 
-    out = manifest.get("output", "verification_report.html")
-    out_path = pathlib.Path(out)
-    if not out_path.is_absolute():
-        out_path = base_dir / out_path
+    out_path = base_dir / "verification_report.html"
     out_path.write_text(doc)
     return out_path
 
@@ -482,17 +456,13 @@ def render_png(html_path: pathlib.Path) -> pathlib.Path | None:
 
 def main() -> None:
     argv = sys.argv[1:]
-    args, width, make_png, check = [], DEFAULT_WIDTH, True, False
+    args, check = [], False
     title = "動作確認レポート"
     i = 0
     while i < len(argv):
         a = argv[i]
         if a == "--title":
             title = argv[i + 1]; i += 2
-        elif a.startswith("--width="):
-            width = int(a.split("=", 1)[1]); i += 1
-        elif a == "--no-png":
-            make_png = False; i += 1
         elif a == "--check":
             check = True; i += 1
         elif a.startswith("--"):
@@ -513,15 +483,13 @@ def main() -> None:
         print("形は揃っている")
         return
     devices = json.loads(manifest_path.read_text()).get("devices") or {}
-    envs = "、".join(f"{v['model']} シミュレーター ({v['os']})" for v in devices.values())
-    meta = ([f"確認環境: {envs}"] if envs else []) + [f"実施日: {date.today().isoformat()}"]
-    out_path = build(manifest_path, width, title, meta)
+    env = "、".join(f"{v['model']} シミュレーター ({v['os']})" for v in devices.values())
+    out_path = build(manifest_path, title, env, date.today().isoformat())
     size = out_path.stat().st_size
     print(f"{out_path} ({size / 1024 / 1024:.2f} MB)")
-    if make_png:
-        png_path = render_png(out_path)
-        if png_path is not None:
-            print(f"{png_path} ({png_path.stat().st_size / 1024 / 1024:.2f} MB)")
+    png_path = render_png(out_path)
+    if png_path is not None:
+        print(f"{png_path} ({png_path.stat().st_size / 1024 / 1024:.2f} MB)")
 
 
 if __name__ == "__main__":

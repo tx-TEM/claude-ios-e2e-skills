@@ -12,14 +12,14 @@
         "共有コンポーネント（SearchBar）には、まず呼び出し側の modifier で ID を振っている。届かないと予測してコンポーネントに ID の引数を先回りで足していない",
         "ErrorView の中の再読み込みボタンに ID を渡す必要があるなら、それは実測で届かなかった場合の手段として扱っている（または呼び出し側 modifier で振って実測で確かめる旨）。ID の引数を足すなら String? で、空文字のデフォルトを置いていない",
         "一覧の行の ID は表示テキスト（book.title）で補間している。book.id や index を ID に入れていない",
-        "yaml では一覧の行をパターンの要素（browse.book_row.* のように末尾 *）で書いている。どの行を押すか（何番目か、どの作品か）をマップに書いていない（select / index / capture を持たせていない）",
+        "yaml では一覧の行をパターンの要素（browse.book_row.* のように末尾 *）で書いている。どの行を押すか（何番目か、どの作品か）をマップに書いていない",
         "行のタップは expect: {screen: book_detail, via: push} で、book_detail を stub として置く（anchor と、そこから出る操作。push で入るので戻る操作 expect: {screen: back, via: back} は書いてよい）ことに触れている",
         "入力（browse.search_field 要素の text）と送信キー（Search 要素の tap）を別の要素・アクションにしている。Search は OS 提供の ID で、lint の例外として報告する旨がある",
         "text の値（打つ文字）をマップに書いていない",
         "expect は操作で変わるものを指している。絞り込みの expect に一覧の行（元からあるもの）を置いていない。全エントリが同じ expect になっていない",
         "files に共有コンポーネント（Shared/SearchBar.swift, Shared/ErrorView.swift）を入れていない。ID を振った画面専用のファイル（BrowseView.swift、行に振ったなら BookRow.swift）は入れている",
         "names（呼び名）と summary（できること1行）を分けて書いている。画面に id フィールドを持たせていない",
-        "エラー表示の状態を when つきの見るだけの要素（または再読み込みボタンの要素に when）で書いている。画面に states を持たせていない"
+        "エラー表示の状態を when つきの見るだけの要素（または再読み込みボタンの要素に when）で書いている"
       ]
     },
     {
