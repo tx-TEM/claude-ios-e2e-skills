@@ -49,7 +49,7 @@
     {
       "id": 2,
       "prompt": "画面マップのあるアプリ（このリポジトリの tests/fixtures/app）で、一覧画面の検索を変えた。入力が止まると絞り込みが走り、検索キーを押すと確定してキーボードが閉じる。これを確認したい。テストケースを test-case-builder に作らせ、plan.json と manifest.json ができてレビューに出せる状態にする。撮る端末は起動中の iPhone 1台。",
-      "expected_output": "test-case-builder が書いた plan.json（テストケースの集合）と、manifest.py がそこから作った manifest.json とフロー。項目は一覧画面の検索に噛み合っていて、打つ語は撮影時に決める形で残っている。準備の操作は do に並び、準備のためだけの項目は無い。",
+      "expected_output": "test-case-builder が書いた plan.json（テストケースの集合）と、manifest.py がそこから作った manifest.json。項目は一覧画面の検索に噛み合っていて、打つ語は撮影時に決める形で残っている。準備の操作は do に並び、準備のためだけの項目は無い。",
       "files": [
         "tests/fixtures/app/screen-map/"
       ],
@@ -64,13 +64,13 @@
         "検索欄に語やキーボードが残ることについて、マップの list.search_field の text に leaves が無いので、報告の「マップに足す候補」に挙げている（leaves と、既定に戻す操作があれば reset）",
         "期待は値ではなく関係で書かれている（「入力欄に出ている語を含む行だけが並ぶ」のように）。データソース（API・DB）を引いて期待を作っていない",
         "manifest.py が経路を組めて manifest.json を書いている。manifest.json の cases が plan と同じテストケースの入れ子で、各テストケースの items の数が plan と一致し、項目に中身（title / expect など）がある。runtime の項目の inputs が空のまま残っている",
-        "manifest.json とフローを手で書き換えていない。直すなら plan.json を直して manifest.py を叩き直している"
+        "manifest.json を手で書き換えていない。直すなら plan.json を直して manifest.py を叩き直している"
       ]
     },
     {
       "id": 3,
       "prompt": "画面マップのあるアプリ（このリポジトリの tests/fixtures/app）で、2つ変えた。詳細画面の共有ボタンを押すと、Safari で作品のページが開くようにした。一覧から詳細を開いて戻ったとき、開いた行が見える位置に一覧が戻るようにした（前は一覧の先頭に戻っていた）。これを確認したい。テストケースを test-case-builder に作らせ、plan.json と manifest.json ができてレビューに出せる状態にする。撮る端末は起動中の iPhone 1台。",
-      "expected_output": "test-case-builder が書いた plan.json と、manifest.py が作った manifest.json とフロー。共有は詳細から始める1項目、戻る位置は一覧から来た経路を固定した項目になっていて、準備のためだけの項目や、同じ項目の繰り返しが無い。",
+      "expected_output": "test-case-builder が書いた plan.json と、manifest.py が作った manifest.json。共有は詳細から始める1項目、戻る位置は一覧から来た経路を固定した項目になっていて、準備のためだけの項目や、同じ項目の繰り返しが無い。",
       "files": [
         "tests/fixtures/app/screen-map/"
       ],
@@ -82,8 +82,8 @@
         "戻る位置の期待は、タップした行との関係で書いている（「タップした行が一覧に見えている」）。1つのテストケースに複数の項目をまとめたなら、後ろの項目の期待が前の項目を {id} で指していて、テストケースの題にまとめた理由が読める",
         "同じ操作・同じ期待の項目（「一覧の行をタップすると詳細に移る」など）を、テストケースをまたいで繰り返していない",
         "変更に関わらない、アカウントに残る操作（お気に入り、フォロー）を押す項目を立てていない",
-        "manifest.py が経路を組めて manifest.json を書いている。共有の項目は checked が空（アプリの外は確かめない）で、外に居るまま撮る形になっている",
-        "manifest.json とフローを手で書き換えていない。直すなら plan.json を直して manifest.py を叩き直している"
+        "manifest.py が経路を組めて manifest.json を書いている。共有の項目は checked が ReloadButton（Safari のページの読み込みが終わるのを待つ）で、外に居るまま撮る形になっている",
+        "manifest.json を手で書き換えていない。直すなら plan.json を直して manifest.py を叩き直している"
       ]
     }
   ]

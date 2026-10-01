@@ -12,7 +12,7 @@
   テストケースを考える（sim-test-report の test-case-builder）
       which で差分から対象の画面を引き、screens で機能名から画面を探す。check の鮮度で、
       その画面のマップを信用してよいか（ソースを読むべきか）を決める
-  マップを作ったあとの検査（screen-map スキルの手順5、migrate_map.py のあと）
+  マップを作ったあとの検査（screen-map スキルの手順5）
       check で、書いたマップが経路として成り立つかを確かめる。テストケースとは関係ない
 
   フローを作って走らせる流れ（manifest.py → run_flows.py）はこれを通らない。
@@ -94,7 +94,6 @@ def cmd_which(mp, paths):
         print("\n共有コンポーネント、モデル、API層は `files` に載せない決まりなので、"
               "ここに出る。\nまだマップに無い画面のファイルもここに出る。"
               "**当たらなかったことを「無関係」と読まない。**")
-    return 0
 
 
 def main():
@@ -129,7 +128,7 @@ def main():
         paths = rest
         if rest == ["-"]:
             paths = [l.strip() for l in sys.stdin.read().splitlines() if l.strip()]
-        sys.exit(cmd_which(mp, paths))
+        cmd_which(mp, paths)
     if cmd == "check":
         sys.exit(cmd_check(mp))
     sys.exit(__doc__)

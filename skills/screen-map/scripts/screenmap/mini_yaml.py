@@ -65,12 +65,10 @@ def _scalar(s):
         return out
     if len(s) >= 2 and s[0] == s[-1] and s[0] in "\"'":
         return s[1:-1]
-    if s in ("true", "True"):
+    if s == "true":
         return True
-    if s in ("false", "False"):
+    if s == "false":
         return False
-    if re.match(r"^-?\d+$", s):
-        return int(s)
     return s
 
 

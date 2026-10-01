@@ -152,8 +152,7 @@ plan.json の形。**plan はテストケースの集合で、項目は必ずど
 **写さない。** 証跡の名前・撮った画面・自動確認のIDは経路を計算した結果から、
 `title` / `expect` / `from` は plan から、どちらもスクリプトが1行にする。
 
-**ヘッダの題と meta（ブランチ・確認環境・実施日）は持たない。** レポートを組むときに
-`build_report.py` へ直に渡す。確認環境は撮影する端末を決めるまで決まらない。
+**レポートの題は持たない。** レポートを組むときに `build_report.py` に `--title` で渡す。
 
 **手順を組んだ結果（1手ずつの分け方、押す行の選び方）はマニフェストに載せない。**
 run_flows.py が撮るときに組み、その場で使う。
@@ -239,8 +238,7 @@ build_report.py が result の無い項目を拒むため（判定していな�
 **実行時に決めた値（`inputs`）も、同じ鍵のものは引き継ぐ。** 撮り直し
 （`RETAKE` の項目）は手前の項目をなぞるので、前に撮ったときの値が要る。
 消すと、手前の項目の判断を撮り直しのたびにやり直すことになる。plan を直して
-鍵が変わった（別の入力欄になった）ものは空に戻し、引き継がなかった値として出力に出す
-（鍵の形が古いマニフェスト — `LIST_ROW` のような変数名 — の値もこれ）。引き継いだものも出力に出す
+鍵が変わった（別の入力欄になった）ものは空に戻し、引き継がなかった値として出力に出す。引き継いだものも出力に出す
 — データが変わっていれば古い値で走るので、見て直せるように。
 """
 import json
@@ -268,15 +266,13 @@ def main():
     devices = []
     i = 2
     while i < len(argv):
-        if argv[i] == "--repo":
-            sys.exit("--repo は渡さない。アプリのリポジトリは plan の repo に書く")
-        elif argv[i] == "--device":
+        if argv[i] == "--device":
             name, _, udid = argv[i + 1].partition("=")
             if not udid:
                 sys.exit(f"--device は <端末>=<UDID> で渡す: {argv[i + 1]}")
             devices.append((name, udid)); i += 2
         else:
-            sys.exit("知らない引数: " + argv[i] + "（題と meta は build_report.py に渡す）")
+            sys.exit("知らない引数: " + argv[i])
     if not devices:
         sys.exit("--device <端末>=<UDID> が要る（iphone / ipad。複数の端末で撮るなら並べる）")
     names = [n for n, _ in devices]
@@ -308,11 +304,8 @@ def main():
     if out.exists():
         try:
             old = json.loads(out.read_text(encoding="utf-8"))
-            # 古い形（項目が名前だけ）のものは引き継がない
-            kept = {it.get("name"): it for _, it in manifest_items.walk(old)
-                    if isinstance(it, dict) and it.get("name")}
-            top = {k: v for k, v in old.items()
-                   if k not in ("sections", "cases", "title", "meta", "resume", "app", "clear_state")}
+            kept = {it.get("name"): it for _, it in manifest_items.walk(old) if it.get("name")}
+            top = {k: v for k, v in old.items() if k != "resume"}
         except Exception:
             pass
 
@@ -369,12 +362,12 @@ def main():
             if kept_inputs:
                 carried.append("{} {}: {}".format(
                     it["name"], d, ", ".join(f"{k}={v}" for k, v in kept_inputs.items())))
-    # 鍵が変わって引き継がなかった値（plan を直した、鍵の形が古い）
+    # 鍵が変わって引き継がなかった値（plan を直した）
     dropped = []
     for name, prev in kept.items():
         now = next((it for it in items if it["name"] == name), None)
         for d, pdev in (prev.get("devices") or {}).items():
-            have = (now or {}).get("devices", {}).get(d, {}).get("inputs", {}) if now else {}
+            have = now["devices"].get(d, {}).get("inputs", {}) if now else {}
             lost = {k: v for k, v in (pdev.get("inputs") or {}).items() if v and k not in have}
             if lost:
                 dropped.append("{} {}: {}".format(name, d, ", ".join(f"{k}={v}" for k, v in lost.items())))

@@ -43,11 +43,6 @@ echo "リポジトリ: $REPO_DIR"
 link() {
   local src="$1" dest="$2" label="$3"
 
-  if [ ! -e "$src" ]; then
-    echo "    リンク元が無い: $label"
-    return
-  fi
-
   if [ -L "$dest" ]; then
     if [ "$(readlink "$dest")" = "$src" ]; then
       echo "    設定済み: $label"

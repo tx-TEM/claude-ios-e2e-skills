@@ -4,7 +4,6 @@ import subprocess
 from .screen import (ACTION_KEYS, BACKWARD, ELEMENT_KEYS, EXPECT_KEYS, FORWARD, GESTURE_KEYS,
                         GESTURES, KINDS, OPS, SCREEN_KEYS, SCROLLS, SYSTEM_IDS, closes_then_opens,
                         expect_kind, is_pattern, pattern_prefix)
-from .map import old_schema
 
 
 def last_commit(repo, paths):
@@ -47,7 +46,7 @@ def staleness(mp):
         files = mp.screens[sid].files
         y = last_commit(repo, [str(mp.root / "screens" / (sid + ".yaml"))])
         f = last_commit(repo, [str(repo / str(x)) for x in files])
-        if y is None or f is None or not files:
+        if y is None or f is None:
             continue
         if f > y:
             out.append((sid, y, f))
@@ -145,7 +144,7 @@ def unknown_keys(d, allowed):
 def check_screen(mp, sid, ids):
     """1画面ぶんの (bad, breaks, todo)。"""
     scr = mp.screens[sid]
-    s = scr.raw or {}
+    s = scr.raw
     f = Findings()
     if not isinstance(s, dict):
         return ["{}: 画面の中身が辞書になっていない".format(sid)], [], []
@@ -376,11 +375,6 @@ def check_auto_shows(mp, sid, f):
 
 def cmd_check(mp):
     bad = []
-    old = old_schema(mp)
-    if old:
-        print("古い形（actions / states を画面に持つ）のマップ: {}".format(" ".join(old)))
-        print("migrate_map.py で要素中心の形に移す（screen-map スキルの reference/schema.md）")
-        return 1
     if mp.start not in mp.screens:
         bad.append("起点 {} のファイルが無い".format(mp.start))
     reach = mp.reachable()

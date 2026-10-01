@@ -6,15 +6,13 @@
 **実行時に決める値は、書くときに直接埋める**（`values`。鍵はステップの `key`、steps.py の KEYS）。
 フローは run_flows.py が流す直前に1本ずつ書くので、`env` に未定のまま置く必要が無い。
 """
-import os
 import re
 from dataclasses import dataclass
-from typing import Optional
 
 from screenmap.screen import BACKWARD, is_pattern, pattern_prefix
 from .actions import HideKeyboard, Input, InputLater, Scroll, Tap
 from .results import Arrive, Closed, External, Hidden, Selected, Value, Visible
-from .steps import Act, Await, Enter, Restart, See, Shot, goes_out, stays_out, waits_text
+from .steps import Act, Await, Enter, Restart, See, Shot, goes_out, waits_text
 
 from .flowyaml import Comment, Raw, render
 
@@ -27,7 +25,6 @@ class Reveal:
     読んで探し、見えてから流す（add_reveals が飛ばす）。
     """
     act: Act
-    item: Optional[str] = None
     up: bool = False          # 下で見つからなければ上も探すか（add_reveals が決める）
     to = None
 
@@ -39,7 +36,6 @@ FRESH = ("push", "modal")   # 新しく開く画面。上端から始まる
 class Return:
     """アプリの外から、`screen` に戻す。外に出たまま撮った次のフローの頭に置く（add_returns）。"""
     screen: str
-    item: Optional[str] = None
     to = None
 
 
@@ -48,14 +44,12 @@ class Return:
 def add_returns(steps):
     """アプリの外に出る操作のすぐ後で撮るなら、撮ったあとに Return を挟む。(ステップ列, 外に居る画面)。
 
-    **外に出たこと自体を確かめる項目は、外に出たまま撮る。** 外に出る操作は確かめようが
-    無いので、フローはすぐアプリに戻していた。それでは項目の `do` が外に出る操作で
-    終わると、証跡にアプリに戻った画面が写る。撮るまでは外に居て、戻すのは
-    次のフローの頭に回す。フローは撮る地点で切れるので、Return は次のフローの
-    1つ目になる。
+    **外に出たこと自体を確かめる項目は、外に出たまま撮る。** その場でアプリに戻すと、証跡に
+    アプリに戻った画面が写る。撮るまでは外に居て、戻すのは次のフローの頭に回す。フローは
+    撮る地点で切れるので、Return は次のフローの1つ目になる。
 
     次の項目が起動し直す（Restart）なら挟まない。起動し直しで戻る。項目の途中で外に
-    出るなら、今までどおりその場で戻す（FlowWriter.check）。
+    出るなら、その場で戻す（FlowWriter.check）。
 
     **テストケースの最後の撮影のあとに何も無ければ、外に居るまま終わる。** そのときは
     戻す画面を2つ目に返す。次のテストケースを組むときに、その頭に Return を置く
@@ -67,7 +61,7 @@ def add_returns(steps):
         prev = next((p for p in reversed(steps[:k]) if not isinstance(p, Reveal) and not waits_text(p)), None)
         nxt = steps[k + 1] if k + 1 < len(steps) else None
         if isinstance(st, Shot) and goes_out(prev) and nxt is not None and not isinstance(nxt, Restart):
-            out.append(Return(prev.to or prev.screen, prev.item))
+            out.append(Return(prev.to or prev.screen))
     prev = next((p for p in reversed(steps[:-1]) if not isinstance(p, Reveal) and not waits_text(p)), None)
     # 外に出た操作で居た画面が閉じたなら（メニューの選択肢）、戻すのは閉じて残る画面
     left_out = (prev.to or prev.screen) if steps and isinstance(steps[-1], Shot) and goes_out(prev) else None
@@ -114,8 +108,7 @@ class ScrollState:
 
     @classmethod
     def from_json(cls, d):
-        d = d or {}
-        return cls(bool(d.get("unknown")), d.get("scrolled") or (), d.get("fresh") or ())
+        return cls(d["unknown"], d["scrolled"], d["fresh"])
 
 
 def add_reveals(steps, state=None):
@@ -141,7 +134,7 @@ def add_reveals(steps, state=None):
             state.mark(st.screen)
         elif isinstance(st, Act):
             if st.key is None and not isinstance(st.action, (Scroll, HideKeyboard)):
-                out.append(Reveal(st, st.item, state.is_scrolled(st.screen)))
+                out.append(Reveal(st, state.is_scrolled(st.screen)))
             state.mark(st.screen)
             if st.arrive and st.arrive.via in FRESH:
                 state.forget(st.to)
@@ -214,7 +207,7 @@ def element_sel(target, by_label=False, value=None):
 def parent_sel(w, values=None):
     """親1つの id のセレクタの値。走らせるときに決めた親は、その ID で。"""
     if w.enter is not None:
-        return exact((values or {})[w.enter.key])
+        return exact(values[w.enter.key])
     return sel_id(w.value)
 
 
@@ -241,7 +234,6 @@ def scope(within, values=None):
 
 def step_sel(st, values=None):
     """ステップが指す要素のセレクタ（See は見る要素、Act は操作の要素）。"""
-    values = values or {}
     if isinstance(st, See):
         if st.contains is not None:
             # その語を含む行。語は正規表現としてエスケープする
@@ -252,6 +244,7 @@ def step_sel(st, values=None):
     return element_sel(a.target, a.by_label, value)
 
 
+WAIT_TIMEOUT = 10000     # 要素が出るのを待つ上限
 SCROLL_TIMEOUT = 60000   # 経路の scrollUntilVisible の上限。理由は reveal()
 SETTLE_TIMEOUT = 3000    # 着いたあとの落ち着き待ちの上限
 
@@ -279,9 +272,8 @@ def reveal(key, value, up=False):
     いる ID が変わらなくなったら端として諦める。確かめたい要素が無いときにこの上限を払わない。
     経路の要素はマップに載っていて基本的に必ずあるので、ここで困らない。
 
-    **下を先にする。** 画面は上端から始まるので、`up` の付かない画面と同じく、下にある
-    要素はこれまでどおりの速さで見つかる。待ちが増えるのは上にある要素（`up` が無いと
-    届かなかったもの）だけ。
+    **下を先にする。** 画面は上端から始まるので、下にある要素は `up` の付かない画面と同じ
+    速さで見つかる。待ちが増えるのは上にある要素（`up` が無いと届かなかったもの）だけ。
 
     `when: notVisible` で上向きを飛ばすことはしない。画面外でもツリーに残っている要素は
     visible と判定されることがあり、条件に使えない。
@@ -412,9 +404,9 @@ def step_comment(st):
     return Comment(head)
 
 
-def emit_flow(mp, steps, app, clear_state, notes=None, timeout=10000,
-              start=None, launch=True, values=None, indexes=None, shots=None, head=True):
-    """ステップ列から Maestro のフローを1本書く。(フローの中身, 補足) を返す。
+def emit_flow(mp, steps, app, clear_state, start, launch=True, values=None, indexes=None, shots=None,
+              head=True):
+    """ステップ列から Maestro のフローを1本書く。補足はフローの頭にコメントで入る。
 
     `launch=False` はアプリを起動し直さない。続きのフローを出すため。
     `values` / `indexes` は実行時に決めた値と、同じ ID の行のうち何番目か（鍵はステップの `key`）。
@@ -424,8 +416,7 @@ def emit_flow(mp, steps, app, clear_state, notes=None, timeout=10000,
 
     **補足はこのフローのステップに関係するものだけ。**
     """
-    return FlowWriter(mp, steps, app, clear_state, notes, timeout, values, indexes, shots).write(
-        start or mp.start, launch, head)
+    return FlowWriter(mp, steps, app, clear_state, values, indexes, shots).write(start, launch, head)
 
 
 class FlowWriter:
@@ -435,12 +426,12 @@ class FlowWriter:
     flowyaml.render() が最後に1回だけする。
     """
 
-    def __init__(self, mp, steps, app, clear_state, notes, timeout, values=None, indexes=None, shots=None):
+    def __init__(self, mp, steps, app, clear_state, values=None, indexes=None, shots=None):
         self.mp, self.steps, self.app = mp, steps, app
         self.values, self.indexes = values or {}, indexes or {}
         self.shots = shots or "."
-        self.clear_state, self.timeout = clear_state, timeout
-        self.notes = list(notes or [])
+        self.clear_state, self.timeout = clear_state, WAIT_TIMEOUT
+        self.notes = []
         self.out, self.at = [], None
 
     def write(self, start, launch, head=True):
@@ -454,8 +445,8 @@ class FlowWriter:
             self.wait_anchor(start)
         for i, st in enumerate(self.steps):
             self.step(i, st)
-        notes = list(dict.fromkeys(self.notes))   # 同じ画面の anchor 無しなどが重ならないように
-        return render(self.app, self.out, notes), notes
+        # 同じ画面の anchor 無しなどが重ならないように
+        return render(self.app, self.out, list(dict.fromkeys(self.notes)))
 
     # ---- 着く ----
 
@@ -497,11 +488,7 @@ class FlowWriter:
     # ---- ステップの種類ごと ----
 
     def step(self, i, st):
-        if isinstance(st, Restart):
-            self.out.append(Comment("ここで起動し直す（前の状態から次の前提に行けないため）"))
-            self.relaunch(self.mp.start, i + 1)
-            self.at = self.mp.start
-        elif isinstance(st, Await):
+        if isinstance(st, Await):
             # 自動表示を確かめる項目。閉じずに、出るまで待つ（出なければ落ちる）
             summary = self.mp.screens[st.to].summary
             self.out.append(Comment("{}: 自動表示 {} を待つ{}".format(
@@ -592,10 +579,9 @@ class FlowWriter:
             self.at = st.to      # 閉じてアプリの外に出た。アプリに戻したら、閉じて残る画面に居る
         # すぐ後で撮るなら（間に文言を待つだけなら）、外に出たまま撮る（add_returns）。1手ずつ書くと
         # 撮影は別の本にあるので、組んだときに項目の並び全体で決めたもの（st.stay）を使う
-        stay = st.stay if st.stay is not None else stays_out(self.steps, i, skip=(Reveal,))
         for r in st.result:
             if not isinstance(r, Arrive):
-                self.check(st, r, stay)
+                self.check(st, r, st.stay)
         if not st.result and not isinstance(a, HideKeyboard):
             self.notes.append("「{}」の結果を確かめる expect がマップに無い".format(a.label()))
 
@@ -679,9 +665,8 @@ class FlowWriter:
 
 def check_of(mp, st):
     """そのステップで最後に自動で確かめる ID。確かめないなら None。"""
-    if isinstance(st, (Await, Restart)):
-        sid = st.to if isinstance(st, Await) else mp.start
-        return mp.anchor(sid)
+    if isinstance(st, Await):
+        return mp.anchor(st.to)
     if isinstance(st, See):
         return st.target
     checked = None
@@ -707,15 +692,13 @@ def shot_context(mp, seg_start, seg_steps):
     for st in seg_steps:
         if isinstance(st, (Shot, Reveal, Return, Enter)):
             continue
-        if isinstance(st, Restart):
-            at = mp.start
-        elif st.to:
+        if st.to:
             at = st.to
         checked = check_of(mp, st)
     return at, checked
 
 
-def split_at_shots(mp, steps, start, launch_first=True):
+def split_at_shots(mp, steps, start):
     """項目（撮影）ごとにステップを切り、(その項目の起点, ステップ列, 撮る名前, 起動し直すか) で返す。
 
     **1項目＝1枚＝1ダンプにするため。** ダンプはフローの途中では取れないので、撮る地点で
@@ -723,12 +706,12 @@ def split_at_shots(mp, steps, start, launch_first=True):
     2つ目以降の項目は前の項目の続きになるので、歩き直しは起きない。
 
     返す4つ目は**その項目の頭でアプリを起動し直すか。** 起動し直すテストケースの頭の項目
-    （ステップの頭に Restart がある）と、`launch_first` のときの1つ目がそう。units_of はそれを
+    （ステップの頭に Restart がある）がそう。units_of はそれを
     項目の最初の経路のフローに付ける。走らせる側は、
     その項目の頭でアプリを起動し直したことをマニフェストに残す（判定が証跡を読むため）。
     """
-    out, cur, at = [], [], start or mp.start
-    seg_start, launch = at, launch_first
+    out, cur, at = [], [], start
+    seg_start, launch = at, False
     for st in steps:
         if isinstance(st, Restart):
             # build が直前の撮影を保証しているので、cur は空
@@ -737,10 +720,8 @@ def split_at_shots(mp, steps, start, launch_first=True):
             continue
         cur.append(st)
         if isinstance(st, Shot):
-            out.append((seg_start, cur, os.path.basename(st.name), launch))
+            out.append((seg_start, cur, st.name, launch))
             cur, seg_start, launch = [], at, False
         elif st.to:
             at = st.to
-    if cur:
-        out.append((seg_start, cur, None, launch))
     return out

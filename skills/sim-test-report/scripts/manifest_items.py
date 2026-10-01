@@ -38,8 +38,6 @@ def main():
         print(__doc__)
         sys.exit(0 if argv else 1)
     manifest = json.loads(Path(argv[0]).read_text(encoding="utf-8"))
-    if "sections" in manifest:
-        sys.exit("古いマニフェスト（sections が平らに並んでいる）。manifest.py で作り直す")
     if len(argv) == 1:
         for case, item in walk(manifest):
             print("\t".join([item.get("name", ""), case.get("title", ""), item.get("title", "")]))

@@ -3,7 +3,7 @@
 
   maestrod.py inspect <UDID> <名前> [保存先]                    画面を読む
                       （保存先を渡すと <保存先>/<名前>.txt にも置く）
-  maestrod.py run     <UDID> <flow yaml|@ファイル> [名前 保存先]  操作する
+  maestrod.py run     <UDID> <flow yaml> [名前 保存先]          操作する
                       （落ちたら、落ちた地点の画面を出す）
   maestrod.py tap     <UDID> <x> <y> <名前> [bundle]            タップ→確認
   maestrod.py stop    [UDID]                                    止める（省くと全部）
@@ -207,7 +207,7 @@ def serve(udid):
 
 # ---------- クライアント ----------
 
-def call(udid, tool, args, autostart=True):
+def call(udid, tool, args):
     SOCK = sock_for(udid)
     for attempt in (1, 2):
         try:
@@ -223,7 +223,7 @@ def call(udid, tool, args, autostart=True):
             s.close()
             return json.loads(buf.decode())
         except (FileNotFoundError, ConnectionRefusedError):
-            if not autostart or attempt == 2:
+            if attempt == 2:
                 raise
             spawn(udid)
     raise RuntimeError("接続できない")
@@ -290,7 +290,6 @@ def run_key(save_to):
     - `.work/replay/<出力先の名前>/<端末>`（run_flows.py がなぞる項目を撮る先と、`do` の要素を
       探すために画面を読む・送るときの置き場） → `<出力先の名前>/<端末>/replay`。撮った証跡の
       ダンプと名前がぶつからないように下を分ける
-    - `<出力先>/shots` → `<出力先の名前>`
     - 出力先が無い（探索の下見など） → `_probe/<日付>`
     """
     if save_to:
@@ -299,7 +298,7 @@ def run_key(save_to):
             return "{}/{}".format(d.parent.parent.name or "misc", d.name)
         if d.parent.parent.name == "replay":
             return "{}/{}/replay".format(d.parent.name, d.name)
-        return (d.parent.name if d.name == "shots" else d.name) or "misc"
+        return d.name or "misc"
     return "_probe/" + time.strftime("%Y-%m-%d")
 
 
@@ -324,8 +323,6 @@ def cmd_inspect(udid, name, save_to=None):
     # タップ時に「その座標に何があったか」「画面が変わったか」を見るために、
     # 端末ごとの直近ぶんを固定名で置く。名前は毎回変わるので追えないため。
     #
-    # マーカーはデバイスごとに分ける。iPhoneとiPadを並行で走らせると
-    # 共有マーカーを奪い合い、片方が「変わっていない」と誤判定する。
     STATE.mkdir(parents=True, exist_ok=True)
     (STATE / f"last_dump_{udid}.txt").write_text(out.stdout)
     # 生のほうも置く。run_flows.py が、親（カルーセルなど）の枠の中の行だけから選ぶのに使う
@@ -386,13 +383,7 @@ def cmd_tap(udid, x, y, name, bundle):
     print(f"\nタップ ({x},{y})" + (f" 「{on}」" if on else "") + moved)
 
 def cmd_run(udid, yaml, name="failed", save_to=None):
-    """フローを走らせる。落ちたら、落ちた地点の画面まで出す。
-
-    `yaml` が `@` で始まればファイルから読む。組み立てた側が書いたものを、
-    引数に貼り直さずに走らせるため。
-    """
-    if yaml.startswith("@"):
-        yaml = Path(yaml[1:]).expanduser().read_text(encoding="utf-8")
+    """フローを走らせる。落ちたら、落ちた地点の画面まで出す。"""
     r = call(udid, "run", {"device_id": udid, "yaml": yaml})
     # JSON-RPCが成功でも、ツールの本文が失敗を伝えていることがある。
     # 両方見ないと、落ちた操作を成功として報告してしまう。
@@ -423,13 +414,6 @@ def cmd_sweep(days):
     """
     cut = time.time() - days * 86400
     n = freed = 0
-    for d in (WORK / "maestro",):        # Maestro 自身の出力。実行ごとのディレクトリ
-        if d.exists():
-            for sub in d.iterdir():
-                if sub.is_dir() and sub.stat().st_mtime < cut:
-                    freed += sum(f.stat().st_size for f in sub.rglob("*") if f.is_file())
-                    shutil.rmtree(sub)
-                    n += 1
     # dumps は生だけ消す。flows（流したものの記録）は判定と撮り直しが済めば要らないので全部消す。
     # どちらも実行ごとのディレクトリに入っているので、空になれば下で畳まれる
     targets = [(DUMPS, (".json",)), (FLOWS, None)]

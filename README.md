@@ -13,7 +13,7 @@ iOSアプリの動作確認を、テストケースのレビューからシミ�
 | 名前 | 種類 | 概要 |
 | --- | --- | --- |
 | `sim-test-report` | Skill | iOSシミュレーターでの動作確認を、テストケースのレビュー → 実施 → 証跡レポートまで通して進める。成果物は画像をbase64で埋め込んだ単一HTMLと、PRコメント貼り付け用の1枚PNG |
-| `screen-map` | Skill | iOSアプリの画面マップを画面単位で作る。ソースを読んで画面ごとの要素と、操作するとどうなるか（遷移も結果の1つ）を特定し、`accessibilityIdentifier` を実装に振って `screen-map/screens/*.yaml` に落とす。マップを引く・確かめる `scripts/mapctl.py`（check / screens / which / path）と、古い形からの移行 `scripts/migrate_map.py` もここにある。`sim-test-report` はこのマップから目的の画面までの経路を組み、動作確認のフローにする |
+| `screen-map` | Skill | iOSアプリの画面マップを画面単位で作る。ソースを読んで画面ごとの要素と、操作するとどうなるか（遷移も結果の1つ）を特定し、`accessibilityIdentifier` を実装に振って `screen-map/screens/*.yaml` に落とす。マップを引く・確かめる `scripts/mapctl.py`（check / screens / which / path）もここにある。`sim-test-report` はこのマップから目的の画面までの経路を組み、動作確認のフローにする |
 | `test-case-builder` | Agent | コードの差分から確認項目を立て、画面マップがあれば実行できるフローまで組んで返す。レビューを受けるのも実施も判定もしない。`sim-test-report` から呼ばれる |
 | `sim-driver` | Agent | シミュレーターを操作して証跡スクリーンショットを撮る。判定はせず観測した事実だけ返す。`sim-test-report` から呼ばれる |
 | `evidence-judge` | Agent | 証跡を読んでOK/NGを判定し、定義ファイルに書き込む。撮影もレポート生成もしない。`sim-test-report` から呼ばれる |
@@ -31,7 +31,7 @@ clone したディレクトリで `./install.sh` を実行する。`~/.claude/` 
 - Google Chrome — 1枚PNGの描画に使う。無い場合はHTMLのみ生成される
 - Homebrew — `install.sh` が Maestro と openjdk を入れるのに使う。無い場合、`install.sh` はリンクを張ったあと失敗して止まる
 - Maestro — ビュー階層のダンプとスクロールに使う。`install.sh` が mobile-dev-inc のタップから入れる（素の `brew install maestro` は別物が入るので注意）
-- Java 17以上 — Maestro が使う。`install.sh` が openjdk も入れる。**Homebrew の openjdk は keg-only でシステムからは見えない**が、`maestrod.py` と `dump.sh` が `/usr/libexec/java_home` → `brew --prefix openjdk` の順で探して補うので、通常は手当て不要。どちらでも見つからない場所に JDK がある場合だけ `JAVA_HOME` を自分で設定する（未設定のままだと `Unable to locate a Java Runtime` で maestro が起動しない）
+- Java 17以上 — Maestro が使う。`install.sh` が openjdk も入れる。**Homebrew の openjdk は keg-only でシステムからは見えない**が、`maestrod.py` が `/usr/libexec/java_home` → `brew --prefix openjdk` の順で探して補うので、通常は手当て不要。どちらでも見つからない場所に JDK がある場合だけ `JAVA_HOME` を自分で設定する（未設定のままだと `Unable to locate a Java Runtime` で maestro が起動しない）
 
 ## 流れ
 
@@ -88,14 +88,14 @@ python3 ~/.claude/skills/sim-test-report/scripts/manifest.py \
 
 経路は `scripts/flowgen/` が計算する（画面マップは screen-map の部品で読む）。plan の各項目について、前の項目が終わった画面から `from` までの経路を画面マップから計算し、`do` の操作と撮影を繋いで、項目ごとの手順にする。画面に着いたら anchor → 読み込み完了の目印（`ready`）→ アニメーションの落ち着きの順に待つ。テストケースの境目では、画面マップの `leaves`（後に残る状態）に `reset`（既定に戻す操作）があればそれを叩き、無ければアプリを起動し直す。`launch` の付いたテストケースも起動し直してから始める。
 
-**1項目は「経路のフロー」と「`do` の1手ずつ」に分けて流す。** 経路（`from` まで）は1本の Maestro のフローで、押す前には見えるまでスクロールする（`scrollUntilVisible`）。経路の要素は画面マップに載っていて基本的に必ずあるので、それで困らない。
+**1項目は「経路のフロー」と「`do` の1手ずつ」に分けて流す。** 経路（`from` まで）は1本の Maestro のフローで、押す前には見えるまでスクロールする（`scrollUntilVisible`）。経路の要素は画面マップに載っていて基本的に必ずあるので、それで困らない。経路の途中で一覧の行や親を選ぶ手だけは、`do` と同じく1手ずつ流す。
 
 `do` の要素は、`run_flows.py` がダンプを読みながら探し、見つかってから1手ぶんのフロー（操作と、着いた確認）を流す。`from` に着いても、画面が意図した状態になっていない（ログインしていない、データが無い、絞り込みの結果が空）と、確かめたい要素がそもそも無い。Maestro の `scrollUntilVisible` はスクロールの端を検知しないので、無い要素では上限の60秒をまるごと払ってしまう。ダンプなら、1回送って読み直し、見えている ID が送る前と同じなら端と分かる。下の端 → 上の端まで探して無ければ、少し読み直してから（遅れて出るものを取りこぼさないように）その項目は撮れなかったとして次に進む。横スクロールの中の要素は、親を縦に寄せてから、親の枠の中を同じやり方で横に探す。
 
 どの語を打つか、どの行を押す・見るかは、そのときの画面を見ないと決まらない。値はその手を流す直前に決め、フローに直接書く。値を決めるのは次のどちらか。
 
 - **条件の無い行の選択**（画面に見えている1件目）は、`run_flows.py` がその場で画面を読んで決め、止まらずに続ける
-- **打つ語と、条件つきで選ぶ行**は、`run_flows.py` がそこで止まって LLM に返す。LLM が値を決め、`--value '<値>'` を付けて叩き直すと、`run_flows.py` が値を定義ファイルに書いて、止まった手から続く。条件つきで選ぶ行は、いま画面に見えている行が候補として並ぶので、その中から選ぶ。無ければ `--next` を付けて叩き直すと、1画面送って候補を出し直す（「無い」は値ではないので、定義ファイルには残らない）。定義ファイルは LLM が手で書き換えない値の鍵は plan の `do` に書いた操作そのもの（`text:list.search_field`）
+- **打つ語と、条件つきで選ぶ行**は、`run_flows.py` がそこで止まって LLM に返す。LLM が値を決め、`--value '<値>'` を付けて叩き直すと、`run_flows.py` が値を定義ファイルに書いて、止まった手から続く。条件つきで選ぶ行は、いま画面に見えている行が候補として並ぶので、その中から選ぶ。無ければ `--next` を付けて叩き直すと、1画面送って候補を出し直す（「無い」は値ではないので、定義ファイルには残らない）。定義ファイルは LLM が手で書き換えない。値の鍵は plan の `do` に書いた操作そのもの（`text:list.search_field`）
 
 流したものは、項目ごとに1本の記録（Maestro のフロー）として残る。
 
@@ -141,7 +141,7 @@ python3 ~/.claude/skills/sim-test-report/scripts/build_report.py <出力先>/man
 
 ## テスト
 
-スクリプト（screen-map の `mapctl.py` / `migrate_map.py`、sim-test-report の `manifest.py` / `run_flows.py`）のテストは `tests/` にある。
+スクリプト（screen-map の `mapctl.py`、sim-test-report の `manifest.py` / `run_flows.py`）のテストは `tests/` にある。
 
 ```bash
 python3 -m unittest discover tests

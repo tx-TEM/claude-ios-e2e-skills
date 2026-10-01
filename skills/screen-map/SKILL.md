@@ -142,8 +142,6 @@ python3 ~/.claude/skills/screen-map/scripts/mapctl.py check --repo <アプリの
 
 不整合（遷移先が無い、`anchor` が無い、指したIDが定義されていない、IDが実装に見つからない、`via` の値や `when` の混在が違う）が出たら直す。**「書き足すもの」（`name` / `summary` / `expect` の無い要素・操作）は不整合ではない** が、書けるものは書く。`expect` を置けないなら手順6で報告する。**「経路が切れる／弱い箇所」に出たもの（`in_tree: false`、`stub`、条件つきの要素、`auto_shows`）は直す対象ではない**。事実として出ているだけなので、手順6の報告に使う。
 
-**古い形（画面に `actions` / `states` を持つ）のマップは `check` が読まずに止まる。** `migrate_map.py` で移してから通す（`reference/schema.md` の「古い形からの移行」）。
-
 検証に使ったデーモンは止める。
 
 ```bash
