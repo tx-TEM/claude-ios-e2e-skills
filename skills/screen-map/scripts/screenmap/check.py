@@ -2,8 +2,8 @@
 import subprocess
 
 from .screen import (ACTION_KEYS, BACKWARD, ELEMENT_KEYS, EXPECT_KEYS, FORWARD, GESTURE_KEYS,
-                        GESTURES, KINDS, OPS, SCREEN_KEYS, SCROLLS, SYSTEM_IDS, expect_kind,
-                        is_pattern, pattern_prefix)
+                        GESTURES, KINDS, OPS, SCREEN_KEYS, SCROLLS, SYSTEM_IDS, closes_then_opens,
+                        expect_kind, is_pattern, pattern_prefix)
 from .map import old_schema
 
 
@@ -56,7 +56,7 @@ def staleness(mp):
 
 def screen_ids(scr):
     """その画面が持つ、ソースに書いてあるはずの ID。anchor と要素の id（ラベル指定は除く）。"""
-    out = [str(scr.anchor)] if scr.anchor and not scr.anchor_by_label else []
+    out = [str(scr.id_anchor)] if scr.id_anchor else []
     out += [str(el["id"]) for el in scr.elements if el.get("id") and el.get("by") != "label"]
     return list(dict.fromkeys(out))
 
@@ -113,8 +113,8 @@ def defined_ids(mp):
     """どこかの画面に要素として定義されている ID と、画面の anchor（ラベルで書いたものは除く。ID ではない）。"""
     ids = set()
     for sid in mp.screens:
-        a = mp.screens[sid].anchor
-        if a and not mp.screens[sid].anchor_by_label:
+        a = mp.screens[sid].id_anchor
+        if a:
             ids.add(str(a))
         ids.update(str(el.get("id")) for el in mp.screens[sid].elements if el.get("id"))
     return ids
@@ -279,7 +279,7 @@ def check_action(mp, sid, a, ids, f):
                      "（分かれるなら全部に when を書く）".format(where))
     screens = sum(check_expect(mp, a, where, e, ids, f) for e in items)
     # 戻ってから進む（メニューの選択肢で、メニューが閉じてダイアログが出る）は、back と進む先の2つ
-    closes = a.closes_then_opens() and screens <= 2
+    closes = closes_then_opens(a.expects) and screens <= 2
     if screens > 1 and not any(whens) and not closes:
         f.bad.append("{} に移る先が2つある（状態で分かれるなら when を書く。"
                      "居る画面が閉じてから進むなら screen: back と進む先の2つにする）".format(where))

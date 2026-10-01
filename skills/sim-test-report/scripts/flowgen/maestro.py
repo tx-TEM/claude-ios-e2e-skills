@@ -334,8 +334,8 @@ def auto_checks(mp, sid, keep=None, via=None, came=None):
         found = mp.screens[iid].auto_close() if iid in mp.screens else None
         if found is None:
             continue            # 書き間違いは check が出す
-        anchor, close = found
-        at_key, at_val = element_sel(str(anchor), mp.screens[iid].anchor_by_label)
+        _, close = found
+        at_key, at_val = anchor_sel(mp, iid)
         key, dismiss = element_sel(close.target, close.element.get("by") == "label")
         summary = mp.screens[iid].summary
         when = "（{} から戻ったとき）".format(came) if back else ""
@@ -364,16 +364,21 @@ def settle():
     return {"waitForAnimationToEnd": {"timeout": SETTLE_TIMEOUT}}
 
 
-def anchor_of(mp, sid, notes):
-    """その画面の anchor のセレクタ (キー, 値)。無ければ None。
+def anchor_sel(mp, sid):
+    """その画面の anchor のセレクタ (キー, 値)。anchor が無ければ None。
 
     `anchor_by: label` の画面（ID を付けられない OS の部品）は、表示テキストで待つ。
     """
     a = mp.anchor(sid)
-    if not a:
+    return element_sel(str(a), mp.screens[sid].anchor_by_label) if a else None
+
+
+def anchor_of(mp, sid, notes):
+    """anchor_sel()。anchor が無ければ、着いたことを確かめられないと補足に残す。"""
+    sel = anchor_sel(mp, sid)
+    if sel is None:
         notes.append("{} に anchor が無いので、着いたことを確かめられない".format(sid))
-        return None
-    return element_sel(str(a), mp.screens[sid].anchor_by_label)
+    return sel
 
 
 def result_sel(st, r, values=None):
@@ -397,9 +402,9 @@ def step_comment(st):
         head += " in " + " > ".join(w.label() for w in st.within)
     if a.summary:
         head += " — " + str(a.summary)
-    out = next((r for r in getattr(st, "result", []) if isinstance(r, External)), None)
-    if st.to and not st.arrive and out is not None:
+    if st.closed and not st.arrive:
         # 居た画面が閉じてアプリの外に出る。to は着く画面ではなく、アプリに戻したときに居る画面
+        out = next(r for r in st.result if isinstance(r, External))
         head += " → アプリの外（{}）。戻すと {}".format(out.name, st.to)
     elif st.to:
         head += " → " + st.to

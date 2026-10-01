@@ -217,23 +217,18 @@ def dump_rows(dump):
     return out
 
 
-def shown_ids(dump):
-    """ダンプのうち、画面の中にある（`×` でない）要素の ID。居る画面を決めるのに使う。"""
-    return shown_cols(dump, 3)
-
-
-def shown_texts(dump):
-    """ダンプのうち、画面の中にある要素の表示テキスト。anchor をラベルで書いた画面を決めるのに使う。"""
-    return shown_cols(dump, 4)
-
-
-def shown_cols(dump, n):
-    out = []
+def shown(dump):
+    """ダンプのうち、画面の中にある（`×` でない）要素の (ID の並び, 表示テキストの並び)。
+    居る画面を決めるのに使う。表示テキストは、anchor をラベルで書いた画面のため。"""
+    ids, texts = [], []
     for line in dump.splitlines():
         cols = line.split("\t")
-        if len(cols) >= 6 and re.match(r"^\((-?\d+),(-?\d+)\)$", cols[0]) and cols[1] != "×" and cols[n]:
-            out.append(cols[n])
-    return out
+        if len(cols) >= 6 and re.match(r"^\((-?\d+),(-?\d+)\)$", cols[0]) and cols[1] != "×":
+            if cols[3]:
+                ids.append(cols[3])
+            if cols[4]:
+                texts.append(cols[4])
+    return ids, texts
 
 
 def box_of(raw, rid):
@@ -857,7 +852,7 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, retake=N
         if retake or case["next"] is None or case["next"]["restart"]:
             return flows_of.Cursor.fresh(mp)          # 次が無いか、次はどのみち起動し直す
         dump = read_dump(udid, f"{name}.where", scratch)
-        screen, hits = flows_of.screen_at(mp, shown_ids(dump or ""), shown_texts(dump or ""))
+        screen, hits = flows_of.screen_at(mp, *shown(dump or ""))
         nxt = case["next"]["name"]
         if screen is None:
             why = ("どの画面の anchor も見えていない" if not hits

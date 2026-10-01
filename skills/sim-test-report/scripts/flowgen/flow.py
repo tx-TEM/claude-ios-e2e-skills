@@ -38,7 +38,7 @@ from typing import Optional
 from .maestro import (Return, Reveal, ScrollState, add_returns, add_reveals, caller_keys, emit_flow,
                       needs_value, shot_context, split_at_shots)
 from screenmap.map import load_map
-from screenmap.screen import DO_OPS, GESTURES, is_pattern, pattern_prefix
+from screenmap.screen import DO_OPS, GESTURES, closes_then_opens, is_pattern, pattern_prefix
 from .actions import HideKeyboard, resolve_action
 from .bridge import Route, Unroutable, emit_path, report_problems
 from .results import resolve_result
@@ -474,8 +474,8 @@ def screen_at(mp, ids, texts=()):
         anchor = str(scr.anchor)
         if scr.anchor_by_label:
             return any(anchor in t for t in texts)
-        if anchor.endswith("*"):
-            return any(i.startswith(anchor[:-1]) for i in ids)
+        if is_pattern(anchor):
+            return any(i.startswith(pattern_prefix(anchor)) for i in ids)
         return anchor in ids
     hits = sorted(sid for sid, scr in mp.screens.items() if scr.anchor and hit(scr))
     return (hits[0] if len(hits) == 1 else None), hits
@@ -585,11 +585,12 @@ def do_step(mp, route, op, how, given):
         return enters + [st], wrong
     # 結果が分かれるなら、確認項目の前提（when）に合う枝だけ
     expects = [found.branches[branch_of(found, at, given)]] if found.branches else found.expects
-    st = Act(at, action, resolve_result(found, expects), within=within)
-    if st.arrive is None and st.closed is not None:
-        return enters + [route.close(st)], wrong      # 閉じてアプリの外に出る
+    # 居る画面を閉じて進むなら、閉じて残る画面も履歴で決める
+    under = route.under(found.label(), closing=True) if closes_then_opens(expects) else None
+    st = Act(at, action, resolve_result(found, expects, back_to=under), within=within)
     if st.arrive is None:
-        return enters + [st], wrong
+        # 閉じてアプリの外に出るなら、履歴は閉じた画面を降ろす
+        return enters + [route.close(st, under) if st.closed else st], wrong
     if st.to not in mp.screens:
         raise Unroutable([("map", "{} の「{}」の遷移先 {} のファイルが無い"
                                   .format(at, found.label(), st.to))])

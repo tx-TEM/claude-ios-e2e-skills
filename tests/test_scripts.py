@@ -2230,10 +2230,9 @@ class LabelAnchor(unittest.TestCase):
         self.assertEqual(flows_of.screen_at(mp, ["detail"], ["共有する"])[0], None)
 
     def test_dump_texts_are_read(self):
-        dump = ("画面\nhead\n"
-                "(10,20)\t○\t10\t\t共有する\t\n"
-                "(10,90)\t×\t900\t\t画面外\t\n")
-        self.assertEqual(RF["shown_texts"](dump), ["共有する"])
+        dump = (DUMP_HEAD + dump_line(10, 20, "○", "", "共有する") + dump_line(10, 900, "×", "", "画面外")
+                + dump_line(10, 60, "○", "detail"))
+        self.assertEqual(RF["shown"](dump), (["detail"], ["共有する"]))
 
 
 class Check(unittest.TestCase):
