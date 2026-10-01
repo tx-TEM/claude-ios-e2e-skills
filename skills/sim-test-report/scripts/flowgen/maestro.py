@@ -13,7 +13,7 @@ from typing import Optional
 
 from screenmap.screen import BACKWARD, is_pattern, pattern_prefix
 from .actions import HideKeyboard, Input, InputLater, Scroll, Tap
-from .results import Arrive, External, Hidden, Selected, Value, Visible
+from .results import Arrive, Closed, External, Hidden, Selected, Value, Visible
 from .steps import Act, Await, Enter, Restart, See, Shot, goes_out, stays_out, waits_text
 
 from .flowyaml import Comment, Raw, render
@@ -67,9 +67,10 @@ def add_returns(steps):
         prev = next((p for p in reversed(steps[:k]) if not isinstance(p, Reveal) and not waits_text(p)), None)
         nxt = steps[k + 1] if k + 1 < len(steps) else None
         if isinstance(st, Shot) and goes_out(prev) and nxt is not None and not isinstance(nxt, Restart):
-            out.append(Return(prev.screen, prev.item))
+            out.append(Return(prev.to or prev.screen, prev.item))
     prev = next((p for p in reversed(steps[:-1]) if not isinstance(p, Reveal) and not waits_text(p)), None)
-    left_out = prev.screen if steps and isinstance(steps[-1], Shot) and goes_out(prev) else None
+    # 外に出た操作で居た画面が閉じたなら（メニューの選択肢）、戻すのは閉じて残る画面
+    left_out = (prev.to or prev.screen) if steps and isinstance(steps[-1], Shot) and goes_out(prev) else None
     return out, left_out
 
 
@@ -396,7 +397,11 @@ def step_comment(st):
         head += " in " + " > ".join(w.label() for w in st.within)
     if a.summary:
         head += " — " + str(a.summary)
-    if st.to:
+    out = next((r for r in getattr(st, "result", []) if isinstance(r, External)), None)
+    if st.to and not st.arrive and out is not None:
+        # 居た画面が閉じてアプリの外に出る。to は着く画面ではなく、アプリに戻したときに居る画面
+        head += " → アプリの外（{}）。戻すと {}".format(out.name, st.to)
+    elif st.to:
         head += " → " + st.to
     return Comment(head)
 
@@ -574,6 +579,8 @@ class FlowWriter:
         if st.arrive:
             self.arrive(st.to, i + 1, st.arrive.via, st.screen)
             self.at = st.to
+        elif st.to:
+            self.at = st.to      # 閉じてアプリの外に出た。アプリに戻したら、閉じて残る画面に居る
         # すぐ後で撮るなら（間に文言を待つだけなら）、外に出たまま撮る（add_returns）。1手ずつ書くと
         # 撮影は別の本にあるので、組んだときに項目の並び全体で決めたもの（st.stay）を使う
         stay = st.stay if st.stay is not None else stays_out(self.steps, i, skip=(Reveal,))
@@ -630,7 +637,13 @@ class FlowWriter:
 
     def check(self, st, r, stay=False):
         """着く以外の結果を1つ確かめる。`stay` なら、外に出る操作のあとアプリに戻さない。"""
-        if isinstance(r, (Visible, Value)):
+        if isinstance(r, Closed):
+            # 居た画面（メニューなど）が閉じた。戻った先は進んだ先が被さって隠れるので待たない
+            a = anchor_of(self.mp, r.screen, self.notes)
+            if a:
+                self.out.append(Comment("{} が閉じた".format(r.screen)))
+                self.out.append(wait_gone(*a, timeout=self.timeout))
+        elif isinstance(r, (Visible, Value)):
             self.out.append(wait_for(*result_sel(st, r, self.values), timeout=self.timeout,
                                      extra=self.result_scope(st, r) or None))
         elif isinstance(r, Selected):
@@ -663,7 +676,7 @@ def check_of(mp, st):
     if isinstance(st, See):
         return st.target
     checked = None
-    if st.to:
+    if st.arrive:
         checked = mp.anchor(st.to)
     for r in st.result:
         if isinstance(r, (Visible, Value, Selected, Hidden)):

@@ -16,7 +16,7 @@ flow.py が plan の項目を順にフローにするとき、前の項目が終
 import os
 import sys
 
-from .results import External, Hidden, Selected, Value, Visible, resolve_result
+from .results import Closed, External, Hidden, Selected, Value, Visible, resolve_result
 from .actions import Input, Tap, resolve_action
 from .steps import Act, Await, Enter, Restart, See, Shot, nest, stays_out
 
@@ -65,7 +65,16 @@ class Route:
     # ---- 居る画面と履歴を動かす ----
 
     def forward(self, step, dest):
-        """進むステップ。dest に移る。"""
+        """進むステップ。dest に移る。
+
+        居る画面が閉じてから進む操作（結果に Closed）なら、履歴の居る画面を dest に差し替える。
+        dest から戻った先は、閉じた画面ではなくその手前になる。
+        """
+        if any(isinstance(r, Closed) for r in getattr(step, "result", [])):
+            if len(self.stack) < 2:
+                self.fail("map", "起点 {} を閉じて {} に進む操作が書いてある。"
+                                 "起動直後の画面は閉じられない".format(self.at, dest))
+            self.stack.pop()
         self.stack.append(dest)
         self.at = dest
         self.mark()
@@ -82,6 +91,17 @@ class Route:
         step = Act(self.at, self.action_of(spec), resolve_result(spec, spec.expects, back_to=dest))
         self.stack.pop()
         self.at = dest
+        self.mark()
+        return step
+
+    def close(self, step):
+        """居る画面を閉じて、アプリの外に出るステップ（結果に Closed と External）。履歴で1つ前の画面に
+        残る。進む先の画面は無いので、残る画面は Closed の `to` に入れる。"""
+        if len(self.stack) < 2:
+            self.fail("map", "起点 {} を閉じる操作が書いてある。起動直後の画面は閉じられない".format(self.at))
+        self.stack.pop()
+        self.at = self.stack[-1]
+        step.closed.to = self.at
         self.mark()
         return step
 
@@ -290,13 +310,16 @@ def emit_path(mp, steps, notes, start=None):
         rights = []
         if st.to and isinstance(nxt, Await):
             rights.append("（{} が被さって隠れるので、次の自動表示で確かめる）".format(st.to))
-        elif st.to:
+        elif st.arrive:
             dest = mp.anchor(st.to)
             how = "（「{}」の文言で待つ）".format(dest) if dest and mp.screens[st.to].anchor_by_label else ""
             rights.append("✓ {} に着いたことを確認{}".format(st.to, how) if dest
                           else "— {} に anchor が無い".format(st.to))
         for r in st.result:
-            if isinstance(r, (Visible, Value)):
+            if isinstance(r, Closed):
+                rights.append("✓ {} が閉じた".format(r.screen) if mp.anchor(r.screen)
+                              else "— {} に anchor が無い".format(r.screen))
+            elif isinstance(r, (Visible, Value)):
                 rights.append("✓ {} が出ている{}".format(r.id, "（値は証跡で見る）" if isinstance(r, Value) else ""))
             elif isinstance(r, Selected):
                 rights.append("✓ {} が選択状態".format(r.id))

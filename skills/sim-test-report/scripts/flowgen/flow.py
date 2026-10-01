@@ -586,6 +586,8 @@ def do_step(mp, route, op, how, given):
     # 結果が分かれるなら、確認項目の前提（when）に合う枝だけ
     expects = [found.branches[branch_of(found, at, given)]] if found.branches else found.expects
     st = Act(at, action, resolve_result(found, expects), within=within)
+    if st.arrive is None and st.closed is not None:
+        return enters + [route.close(st)], wrong      # 閉じてアプリの外に出る
     if st.arrive is None:
         return enters + [st], wrong
     if st.to not in mp.screens:

@@ -54,6 +54,13 @@ def flatten(items, parents=()):
     return out, ps
 
 
+def closes_then_opens(expects):
+    """expect の並びが、居る画面を閉じてから別の画面かアプリの外に出るものか（ActionSpec.closes_then_opens）。"""
+    screens = [e.get("screen") for e in expects if isinstance(e, dict) and e.get("screen")]
+    out = any(isinstance(e, dict) and "external" in e for e in expects)
+    return "back" in screens and (out or any(x != "back" for x in screens))
+
+
 def expect_kind(e):
     """expect の1項目の種類（KINDS のどれか）。無ければ None。"""
     found = [k for k in KINDS if k in e]
@@ -200,7 +207,17 @@ class ActionSpec:
         return [(None, None, self.expects)]
 
     def is_back(self):
-        return any(e.get("screen") == "back" for e in self.expects)
+        """戻る操作か。戻ってから別の画面に進む操作（closes_then_opens）は含めない。"""
+        return any(e.get("screen") == "back" for e in self.expects) and not self.closes_then_opens()
+
+    def closes_then_opens(self):
+        """居る画面を閉じて、別の画面かアプリの外に出る操作か。`expect` に `screen: back` と、
+        進む先（`screen`）か `external` の両方がある。
+
+        メニューやアラートの選択肢は、押すと部品が閉じてから次の画面が出る。閉じたことを書かないと、
+        履歴に部品が残り、次の画面から戻った先（アプリの外から戻した先）が閉じた部品になる。
+        """
+        return closes_then_opens(self.expects)
 
     def in_tree(self):
         return not (self.element is not None and self.element.get("in_tree") is False)

@@ -187,15 +187,19 @@ elements:
     by: label
     actions:
       - tap:
-        summary: 共有シートを開く
-        expect: {screen: share_sheet, via: modal}
+        summary: メニューを閉じて、共有シートを開く
+        expect:
+          - {screen: back, via: dismiss}
+          - {screen: share_sheet, via: modal}
   - id: 削除する
     name: 削除する
     by: label
     actions:
       - tap:
-        summary: 削除の確認を出す
-        expect: {screen: item_delete_alert, via: modal}
+        summary: メニューを閉じて、削除の確認を出す
+        expect:
+          - {screen: back, via: dismiss}
+          - {screen: item_delete_alert, via: modal}
 ```
 
 - **ID を付けられるものには使わない。** `UIAlertController` は `alert.view.accessibilityIdentifier` で付けられるので ID で書く。要素の `by: label` と同じく、文言はローカライズで変わる
@@ -332,6 +336,20 @@ sim-test-report は、`leaves` のある操作を使ったテストケースを�
 - **1つの操作の結果を「確かめられる／られない」で割る。** 全か無かにしない。絞り込みなら「入力が入った」は入力欄の値で確かめられるが、「一覧が絞られた」は件数も空表示も無ければ確かめられない。**確かめられる方を `expect` に置き、確かめられない部分を手順6で報告する。** まとめて「置けない」と結論すると、置ける観測点まで落ちる
 - **全エントリが同じ `expect` になっていたら間違っている。** 操作ごとに結果が違うのだから、観測点も違うはず。指せる要素が無いなら、それは**確かめられない操作**なので `expect` を書かずに手順6で報告する
 - **アクションシート・アラートは画面として扱う。** 操作できるものの集合が変わる状態なので、開く操作から `expect: {screen: <シート>, via: modal}` を張り、選択肢はそのシートの画面の要素に書く。閉じる選択肢は `screen: back, via: dismiss`。別ファイルにすれば `anchor` / `elements` / 経路計算がそのまま使える。ID を付けられない部品（`UIMenu`、`.confirmationDialog`）は `anchor_by: label`（上の「anchor_by」）
+- **選択肢を押すとシートが閉じて、別の画面が出るなら、`screen: back` と進む先の両方を書く。** メニューの「削除する」で確認のアラートが出る、など。押した時点でメニューは閉じている。進む先だけを書くと、履歴にメニューが残り、アラートを閉じた戻り先が閉じたメニューになる（フローは出ないメニューを待って落ちる。AozoraReader で実測）
+
+  ```yaml
+  - id: 削除する
+    by: label
+    actions:
+      - tap:
+        expect:
+          - {screen: back, via: dismiss}            # メニューが閉じる
+          - {screen: item_delete_alert, via: modal}  # 確認のアラートが出る
+  ```
+
+  フローは、進んだ先の anchor と、閉じた画面の anchor が消えたことを待つ。**戻った先の画面（メニューの下の画面）は待たない** — アラートが被さって、ツリーから隠れている（実測）。アラートを閉じると、その画面に戻る。移る先が2つになるのは、この `back` と進む先の組だけ（ほかは `check` が止める）
+- **選択肢でアプリの外に出るときも同じ。** メニューの「Safari で開く」なら `screen: back` と `external` を書く。アプリに戻したとき、メニューではなくその下の画面に居ることになる
 - **シートの選択肢はIDで指せないことが多い。** `UIAlertAction` は `accessibilityIdentifier` を素直に持てず、SwiftUIの `.confirmationDialog` 内の Button もIDが提示後のシートに伝わるか分からない。**手順5で実測し、IDで叩けるならIDを、駄目なら `by: label` を使う**
 
 ## when

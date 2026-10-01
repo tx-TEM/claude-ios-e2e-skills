@@ -2073,8 +2073,19 @@ class LabelAnchor(unittest.TestCase):
             "    by: label\n"
             "    actions:\n"
             "      - tap:\n"
-            "        summary: Safari で作品のページを開く\n"
-            "        expect: {external: safari}\n"
+            "        summary: メニューが閉じて、Safari で作品のページを開く\n"
+            "        expect:\n"
+            "          - {screen: back, via: dismiss}\n"
+            "          - {external: safari}\n"
+            "  - id: レビューを書く\n"
+            "    name: レビューを書く\n"
+            "    by: label\n"
+            "    actions:\n"
+            "      - tap:\n"
+            "        summary: メニューが閉じて、ログインの案内が出る\n"
+            "        expect:\n"
+            "          - {screen: back, via: dismiss}\n"
+            "          - {screen: login_alert, via: modal}\n"
             "  - id: キャンセル\n"
             "    name: キャンセル\n"
             "    by: label\n"
@@ -2099,6 +2110,55 @@ class LabelAnchor(unittest.TestCase):
         self.assertLess(flow.index("id: '^detail\\.menu_button$'"), flow.index("text: '.*共有する.*'"))
         self.assertEqual(rows[0]["screen"], "item_menu")
 
+    def test_closing_the_menu_then_opening_an_alert(self):
+        # メニューの選択肢は、メニューが閉じてからアラートが出る。アラートを閉じると詳細に戻る
+        # （閉じたメニューには戻らない）
+        rows, flows = write_flows([
+            {"from": "login_alert", "title": "a", "expect": "a"},
+            {"from": "login_alert", "do": ["tap:login_alert.cancel_button"], "title": "b", "expect": "b"}],
+            self.repo)
+        flow = flows["test_01.yaml"]
+        tap = flow.index("text: '.*レビューを書く.*'")
+        arrive = flow.index("id: '^login_alert$'")
+        closed = flow.index("- extendedWaitUntil:\n    notVisible:\n      text: '.*共有する.*'")
+        self.assertLess(tap, arrive)
+        self.assertLess(arrive, closed)
+        # 戻った先（詳細）は、アラートが被さって隠れるので待たない
+        self.assertEqual(waits(flow[tap:]), ["^login_alert$"])
+        self.assertEqual(rows[1]["screen"], "detail")
+        self.assertEqual(waits(flows["test_02.yaml"])[0], "^detail$")
+
+    def test_closing_the_menu_then_leaving_the_app(self):
+        # メニューの選択肢で Safari に出る。メニューは閉じているので、アプリに戻した先は詳細
+        rows, flows = write_flows([
+            {"from": "item_menu", "do": ["tap:共有する"], "title": "a", "expect": "a"},
+            {"from": "detail", "do": ["see:detail.title"], "title": "b", "expect": "b"}], self.repo)
+        self.assertEqual(rows[0]["screen"], "detail")
+        self.assertIn("→ アプリの外（safari）。戻すと detail\n", flows["test_01.yaml"])
+        nxt = flows["test_02.1.yaml"] if "test_02.1.yaml" in flows else flows["test_02.yaml"]
+        self.assertIn("# アプリの外から detail に戻す", nxt)
+        self.assertEqual(waits(nxt)[0], "^detail$")
+        self.assertNotIn("共有する", nxt)
+
+    def test_closing_is_not_a_back_action(self):
+        mp = screen_map.load_map(str(self.repo))
+        self.assertEqual(mp.screens["item_menu"].back_action().target, "キャンセル")
+        self.assertIn("item_menu", [d for _, _, d, _, _ in mp.edges("detail")])
+        self.assertIn("login_alert", [d for _, _, d, _, _ in mp.edges("item_menu")])
+
+    def test_route_says_the_menu_closed(self):
+        out = write_flows_path([{"from": "login_alert", "title": "a", "expect": "a"}], self.repo)
+        self.assertIn("✓ login_alert に着いたことを確認", out)
+        self.assertIn("✓ item_menu が閉じた", out)
+
+    def test_two_forward_screens_are_still_refused(self):
+        self.menu.write_text(self.menu.read_text(encoding="utf-8").replace(
+            "          - {screen: back, via: dismiss}\n          - {screen: login_alert",
+            "          - {screen: detail, via: push}\n          - {screen: login_alert"), encoding="utf-8")
+        code, out = self.check()
+        self.assertEqual(code, 1)
+        self.assertIn("item_menu: 「tap レビューを書く [ラベル]」 に移る先が2つある", out)
+
     def test_route_says_it_waits_by_label(self):
         out = write_flows_path([{"from": "item_menu", "title": "a", "expect": "a"}], self.repo)
         self.assertIn("✓ item_menu に着いたことを確認（「共有する」の文言で待つ）", out)
@@ -2108,6 +2168,7 @@ class LabelAnchor(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertIn("到達できない: なし", out)
         self.assertNotIn("共有する が実装に見つからない", out)
+        self.assertNotIn("移る先が2つある", out)
 
     def test_label_anchor_is_not_an_id_to_point_at(self):
         # 表示テキストは ID ではないので、ほかの画面の expect / ready からは指せない
@@ -2117,7 +2178,8 @@ class LabelAnchor(unittest.TestCase):
             "  - id: 共有する\n", ""), encoding="utf-8")
         self.menu.write_text(self.menu.read_text(encoding="utf-8").replace(
             "  - id: 共有する\n    name: 共有する\n    by: label\n    actions:\n      - tap:\n"
-            "        summary: Safari で作品のページを開く\n        expect: {external: safari}\n", ""),
+            "        summary: メニューが閉じて、Safari で作品のページを開く\n        expect:\n"
+            "          - {screen: back, via: dismiss}\n          - {external: safari}\n", ""),
             encoding="utf-8")
         code, out = self.check()
         self.assertEqual(code, 1)

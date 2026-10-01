@@ -278,8 +278,14 @@ def check_action(mp, sid, a, ids, f):
         f.bad.append("{} の expect で when のある項目と無い項目が混ざっている"
                      "（分かれるなら全部に when を書く）".format(where))
     screens = sum(check_expect(mp, a, where, e, ids, f) for e in items)
-    if screens > 1 and not any(whens):
-        f.bad.append("{} に移る先が2つある（状態で分かれるなら when を書く）".format(where))
+    # 戻ってから進む（メニューの選択肢で、メニューが閉じてダイアログが出る）は、back と進む先の2つ
+    closes = a.closes_then_opens() and screens <= 2
+    if screens > 1 and not any(whens) and not closes:
+        f.bad.append("{} に移る先が2つある（状態で分かれるなら when を書く。"
+                     "居る画面が閉じてから進むなら screen: back と進む先の2つにする）".format(where))
+    if closes and not mp.anchor(sid):
+        f.bad.append("{} は居る画面を閉じて進むが、{} に anchor が無い（閉じたことを確かめられない）"
+                     .format(where, sid))
 
 
 def check_leaves(mp, sid, a, where, f):
