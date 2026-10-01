@@ -1638,13 +1638,14 @@ class ItemRunBase:
     def given(self, key, value):
         self.sec["devices"]["iphone"]["inputs"][key] = value
 
-    def run_item(self, first=0):
-        """(結果, 標準出力)。結果は ("done", None) / ("failed", 理由) / ("stopped", 何手目か)。"""
+    def run_item(self, first=0, retake=False):
+        """(結果, 標準出力)。結果は ("done", None) / ("failed", 理由) / ("stopped", 何手目か)。
+        `retake` なら撮り直し中として流す（止まったあとはテストケースの頭からなぞり直す）。"""
         shots = self.out / "shots" / "iphone"
         shots.mkdir(parents=True, exist_ok=True)
         dv = RF["DeviceRun"]("iphone", "AAAA", shots, self.tmp / "replay", self.flows,
                              self.out / "progress_iphone.log", "jp.example.App",
-                             screen_map.load_map(str(FIXTURE)), False)
+                             screen_map.load_map(str(FIXTURE)), False, retake)
         with contextlib.redirect_stdout(io.StringIO()) as o, contextlib.redirect_stderr(io.StringIO()):
             got = RF["run_item"](dv, self.sec, self.row, False, first)
         return got, o.getvalue()
@@ -1925,6 +1926,34 @@ class SeePickRun(ItemRunBase, unittest.TestCase):
         got, out = self.run_item()
         self.assertIn("  - list.row.C++入門 ｜ C++入門 ｜ 中: C++入門 / 山田 太郎、鈴木 花子\n", out)
         self.assertNotIn("scroll bar", out)
+
+    def test_next_is_counted_and_stops_at_the_limit(self):
+        # 伸び続ける一覧は端に着かない。「次」で送るのは SEEK_SWIPES 回まで
+        self.given("see:list.row.*", "次")
+        self.dumps = [FirstVisible.DUMP, self.BELOW]
+        self.run_item(first=1)
+        self.assertEqual(self.sec["devices"]["iphone"]["paged"], {"see:list.row.*": 1})
+        self.calls = []
+        self.sec["devices"]["iphone"]["paged"]["see:list.row.*"] = RF["SEEK_SWIPES"]
+        got, out = self.run_item(first=1)
+        self.assertEqual(got[0], "failed")
+        self.assertIn("（上下に{}画面送っても端に着かない）".format(RF["SEEK_SWIPES"]), got[1])
+        self.assertEqual(self.swipes(), [])               # 上限なら送らずに落とす
+
+    def test_retake_sends_again_from_the_top(self):
+        # 撮り直しは頭からなぞり直すので、画面は先頭に戻っている。送った回数ぶん送り直してから1画面進める
+        self.given("see:list.row.*", "次")
+        self.sec["devices"]["iphone"]["paged"] = {"see:list.row.*": 2}
+        self.dumps = [FirstVisible.DUMP, FirstVisible.DUMP, self.BELOW, FirstVisible.DUMP, self.BELOW]
+        got, out = self.run_item(retake=True)
+        self.assertEqual(got, ("stopped", 1))
+        self.assertEqual(self.swipes(), ["up", "down", "down", "down"])
+        self.assertEqual(self.sec["devices"]["iphone"]["paged"], {"see:list.row.*": 3})
+
+    def test_count_starts_over_when_shown_from_the_top(self):
+        self.sec["devices"]["iphone"]["paged"] = {"see:list.row.*": 5}
+        self.run_item(first=1)
+        self.assertEqual(self.sec["devices"]["iphone"]["paged"], {"see:list.row.*": 0})
 
     def test_id_of_another_pattern_stops(self):
         self.given("see:list.row.*", "detail.title")
