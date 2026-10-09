@@ -373,6 +373,16 @@ def read_dump(udid, name, where):
 
 # ---------- 探すもの ----------
 
+def in_box(r, box):
+    return box[0] <= r["cx"] <= box[2] and box[1] <= r["cy"] <= box[3]
+
+
+def says(text, label):
+    """行の表示テキストが、その文言そのものか。ラベルと値が食い違う行は「ラベル = 値」（elements.py）
+    なので、どちらかが文言そのものなら。"""
+    return text == label or label in text.split(" = ", 1)
+
+
 class Want:
     """ダンプの中で探すもの。ID そのもの（`exact`）、パターン（`pattern`。`word` を含む行だけ）、
     ラベルの文言（`label`）のどれか。"""
@@ -381,17 +391,25 @@ class Want:
         self.exact, self.pattern, self.word, self.label = exact, pattern, word, label
 
     def rows(self, dump, box=None):
-        """当たる行を、Maestro の index と同じ順（上端の y、次に x）で。`box` の中だけ。"""
+        """当たる行を、Maestro の index と同じ順（上端の y、次に x）で。`box` の中だけ。
+
+        **ラベルは、文言そのものの行があればそれだけ、無ければ文言を含む行。** フローが押す順
+        （maestro.py の tap_on）と同じ。含む行で探すと、ほかの選択肢や本文（「許可」に対する
+        「許可しない」）が画面に見えただけで見つかったことになり、押す要素が画面外のまま送るのをやめる。
+        """
+        if self.label is not None:
+            rows = [r for r in dump_rows(dump) if not box or in_box(r, box)]
+            whole = [r for r in rows if says(r["text"], self.label)]
+            out = whole or [r for r in rows if self.label in r["text"]]
+            return sorted(out, key=lambda r: (r["top"], r["cx"]))
         out = []
         prefix = pattern_prefix(self.pattern) if self.pattern else None
         for r in dump_rows(dump):
-            if box and not (box[0] <= r["cx"] <= box[2] and box[1] <= r["cy"] <= box[3]):
+            if box and not in_box(r, box):
                 continue
             rid = r["id"]
             if self.exact is not None:
                 hit = rid == self.exact
-            elif self.label is not None:
-                hit = self.label in r["text"]
             else:
                 hit = rid.startswith(prefix) and len(rid) > len(prefix)
                 if hit and self.word is not None:
