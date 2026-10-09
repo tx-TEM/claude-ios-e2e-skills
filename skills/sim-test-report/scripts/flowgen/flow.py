@@ -557,7 +557,7 @@ def do_step(mp, route, op, how, given):
         st.within = within
         return enters + [st], wrong
     # 結果が分かれるなら、確認項目の前提（when）に合う枝だけ
-    expects = [found.branches[branch_of(found, at, given)]] if found.branches else found.expects
+    expects = found.expects_of(branch_of(found, at, given) if found.branches else None)
     # 居る画面を閉じて進むなら、閉じて残る画面も履歴で決める
     under = route.under(found.label(), closing=True) if closes_then_opens(expects) else None
     st = Act(at, action, resolve_result(found, expects, back_to=under), within=within)

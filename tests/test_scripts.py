@@ -1208,6 +1208,52 @@ class Routing(unittest.TestCase):
         hops = self.mp().path_from("home", "settings")
         self.assertEqual([e[0].target for _, e in hops], ["tab_bar.settings"])
 
+    def test_common_screen_with_branches_needs_no_when(self):
+        # when の無い行き先はどの枝でも着く。分岐の条件が付かないので、前提なしで経路に使える
+        repo = Path(tempfile.mkdtemp()) / "app"
+        self.addCleanup(shutil.rmtree, repo.parent)
+        shutil.copytree(FIXTURE, repo)
+        home = repo / "screen-map" / "screens" / "home.yaml"
+        home.write_text(home.read_text(encoding="utf-8").replace(
+            "        expect: {screen: list, via: push}\n",
+            "        expect:\n"
+            "          - {screen: list, via: push}\n"
+            "          - when: ログイン中\n"
+            "            hidden: self\n", 1), encoding="utf-8")
+        mp = self.mp(repo)
+        self.assertEqual([(d, conds) for a, _, d, _, conds in mp.edges("home") if a.target == "home.list"],
+                         [("list", [])])
+        hops = mp.path_from("home", "list")
+        self.assertEqual([e[0].target for _, e in hops], ["home.list"])
+        rows, _ = write_flows([{"from": "list", "title": "a", "expect": "a"}], repo)
+        self.assertEqual(rows[0]["screen"], "list")
+
+    def test_unconditional_route_is_preferred_even_if_longer(self):
+        # 前提に同じ文言があっても、条件なしで届くならそちらを通る（手数が増えても）
+        repo = Path(tempfile.mkdtemp()) / "app"
+        self.addCleanup(shutil.rmtree, repo.parent)
+        shutil.copytree(FIXTURE, repo)
+        home = repo / "screen-map" / "screens" / "home.yaml"
+        home.write_text(home.read_text(encoding="utf-8").replace(
+            "        expect: {screen: detail, via: push}\n",
+            "        expect:\n"
+            "          - when: ログイン中\n"
+            "            screen: detail\n"
+            "            via: push\n"
+            "          - when: 未ログイン\n"
+            "            screen: login_alert\n"
+            "            via: modal\n", 1), encoding="utf-8")
+        mp = self.mp(repo)
+        hops = mp.path_from("home", "detail", ("ログイン中",))
+        self.assertEqual(len(hops), 2)
+        self.assertNotIn("home.fav", [e[0].target for _, e in hops])
+        # 条件なしでは届かないなら、条件つきの辺を通る
+        hops = mp.path_from("home", "login_alert", ("未ログイン",))
+        self.assertEqual([e[0].target for _, e in hops], ["home.fav"])
+        rows, flows = write_flows([{"from": "detail", "when": ["ログイン中"], "title": "a", "expect": "a"}], repo)
+        self.assertEqual(rows[0]["screen"], "detail")
+        self.assertNotIn("home\\.fav", flows["test_01.yaml"])
+
     def test_conditional_edge_needs_when(self):
         code, err = build_err([{"from": "login_alert", "title": "a", "expect": "a"}])
         self.assertEqual(code, 2)
@@ -2219,6 +2265,57 @@ class LabelAnchor(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("item_menu: 「tap レビューを書く [ラベル]」 に移る先が2つある", out)
 
+    def branch_after_closing(self):
+        """「レビューを書く」を、メニューが閉じてから状態で行き先が分かれる形にする。"""
+        self.menu.write_text(self.menu.read_text(encoding="utf-8").replace(
+            "          - {screen: login_alert, via: modal}\n",
+            "          - when: ログイン中\n"
+            "            screen: review_editor\n"
+            "            via: modal\n"
+            "          - when: 未ログイン\n"
+            "            screen: login_alert\n"
+            "            via: modal\n"), encoding="utf-8")
+
+    def test_closing_then_branching_passes_check(self):
+        # when の無い back はどの枝でも起きる。移る先は枝ごとに back と進む先の2つ
+        self.branch_after_closing()
+        code, out = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("混ざっている", out)
+        self.assertNotIn("移る先が2つある", out)
+
+    def test_closing_then_branching_is_not_a_back_action(self):
+        self.branch_after_closing()
+        mp = screen_map.load_map(str(self.repo))
+        self.assertEqual(mp.screens["item_menu"].back_action().target, "キャンセル")
+        edges = [(d, conds) for a, _, d, _, conds in mp.edges("item_menu") if a.target == "レビューを書く"]
+        self.assertEqual(edges, [("review_editor", ["ログイン中"]), ("login_alert", ["未ログイン"])])
+
+    def test_closing_then_branching_drops_the_menu_on_each_branch(self):
+        # どちらの枝でもメニューは閉じる。進んだ先を閉じると詳細に戻る（閉じたメニューには戻らない）
+        self.branch_after_closing()
+        for when, dest, close in [("未ログイン", "login_alert", "login_alert.cancel_button"),
+                                  ("ログイン中", "review_editor", "review_editor.close_button")]:
+            with self.subTest(when=when):
+                rows, flows = write_flows([
+                    {"from": "item_menu", "when": [when], "do": ["tap:レビューを書く"],
+                     "title": "a", "expect": "a"},
+                    {"from": dest, "when": [when], "do": ["tap:" + close], "title": "b", "expect": "b"}],
+                    self.repo)
+                self.assertEqual(rows[0]["screen"], dest)
+                flow = flows["test_01.yaml"]
+                tap = flow.index("text: '.*レビューを書く.*'")
+                self.assertLess(tap, flow.index("id: '^{}$'".format(dest)))
+                self.assertIn("- extendedWaitUntil:\n    notVisible:\n      text: '.*共有する.*'", flow[tap:])
+                self.assertEqual(rows[1]["screen"], "detail")
+
+    def test_closing_then_branching_needs_when(self):
+        self.branch_after_closing()
+        code, err = build_err([{"from": "item_menu", "do": ["tap:レビューを書く"],
+                                "title": "a", "expect": "a"}], self.repo)
+        self.assertEqual(code, 2)
+        self.assertIn("結果が分かれる（ログイン中 / 未ログイン）", err)
+
     def test_route_says_it_waits_by_label(self):
         out = write_flows_path([{"from": "item_menu", "title": "a", "expect": "a"}], self.repo)
         self.assertIn("✓ item_menu に着いたことを確認（「共有する」の文言で待つ）", out)
@@ -2340,12 +2437,13 @@ class Check(unittest.TestCase):
         code, out = self.check()
         self.assertIn("ready の detail.body がどの画面の要素にも無い", out)
 
-    def test_bad_via_and_mixed_when(self):
+    def test_bad_via_and_two_forward_screens_on_a_branch(self):
+        # when の無い項目はどの枝でも起きる。進む先が枝にもあれば、その枝の移る先が2つになる
         self.edit("home.yaml", "expect: {screen: list, via: push}", "expect: {screen: list, via: back}")
         self.edit("detail.yaml", "          - when: 未ログイン\n", "          - ")
         code, out = self.check()
         self.assertIn("via は push / modal / tab（戻る操作は screen: back）", out)
-        self.assertIn("when のある項目と無い項目が混ざっている", out)
+        self.assertIn("detail: 「tap detail.review_button」 の「ログイン中」のとき に移る先が2つある", out)
 
 
 class NestingCheck(Check):

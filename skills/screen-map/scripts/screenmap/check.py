@@ -272,17 +272,19 @@ def check_action(mp, sid, a, ids, f):
     items = exp if isinstance(exp, list) else ([exp] if exp is not None else [])
     if not items:
         f.todo.append("{} に expect が無い（結果を自動で確かめられない）".format(where))
-    whens = [isinstance(e, dict) and bool(e.get("when")) for e in items]
-    if any(whens) and not all(whens):
-        f.bad.append("{} の expect で when のある項目と無い項目が混ざっている"
-                     "（分かれるなら全部に when を書く）".format(where))
-    screens = sum(check_expect(mp, a, where, e, ids, f) for e in items)
+    moves = {id(e): check_expect(mp, a, where, e, ids, f) for e in items}
+    # 移る先は枝ごとに数える（when の無い項目はどの枝でも起きるので、どの枝にも入る）。
     # 戻ってから進む（メニューの選択肢で、メニューが閉じてダイアログが出る）は、back と進む先の2つ
-    closes = closes_then_opens(a.expects) and screens <= 2
-    if screens > 1 and not any(whens) and not closes:
-        f.bad.append("{} に移る先が2つある（状態で分かれるなら when を書く。"
-                     "居る画面が閉じてから進むなら screen: back と進む先の2つにする）".format(where))
-    if closes and not mp.anchor(sid):
+    closing = False
+    for _, bwhen, exps in a.outcomes():
+        screens = sum(moves[id(e)] for e in exps)
+        closes = closes_then_opens(exps) and screens <= 2
+        closing = closing or closes
+        if screens > 1 and not closes:
+            f.bad.append("{}{} に移る先が2つある（状態で分かれるなら when を書く。"
+                         "居る画面が閉じてから進むなら screen: back と進む先の2つにする）"
+                         .format(where, " の「{}」のとき".format(bwhen) if bwhen else ""))
+    if closing and not mp.anchor(sid):
         f.bad.append("{} は居る画面を閉じて進むが、{} に anchor が無い（閉じたことを確かめられない）"
                      .format(where, sid))
 

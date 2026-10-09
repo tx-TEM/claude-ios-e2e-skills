@@ -119,12 +119,15 @@ class Screen:
         条件は要素の `when` と分岐の `when`。**条件つきの辺は、確認項目の前提
         （plan の `when`）に同じ文言があるときだけ往路に使う。** 出るかどうか、
         どちらに着くかが状態で決まるので、前提が無いまま通ると着く先が読めない。
+        分岐のある操作でも、`when` の無い項目の行き先はどの枝でも着くので、分岐の
+        条件を付けない（分岐の番号も None。どの枝かを決めずに通る）。
         """
         out = []
         for a in self.actions:
             if a.op not in OPS:
                 continue
-            for bi, bwhen, exps in a.outcomes():
+            for bi, bwhen, exps in ([(None, None, a.expects)]
+                                    + [(i, b.get("when"), [b]) for i, b in enumerate(a.branches or [])]):
                 for e in exps:
                     if e.get("screen") and e.get("screen") != "back" and e.get("via") in FORWARD:
                         conds = [c for c in (a.when(), bwhen) if c]
@@ -170,7 +173,8 @@ class ActionSpec:
 
     画面の yaml（screens/<画面>.yaml）を読んだときに1つだけ作る。何をすると何が起きるか
     （expect）は、書いてあるままで持つ。
-    `when` つきのリストなら結果が状態で分かれる（branches）。ステップが持つ操作と結果は、
+    `when` つきの項目があれば結果が状態で分かれる（branches）。`when` の無い項目（expects）は
+    どの枝でも起きる。ステップが持つ操作と結果は、
     ここから sim-test-report の flowgen/（actions.py / results.py）が作る。
     """
 
@@ -188,11 +192,10 @@ class ActionSpec:
         self.reset = self.raw.get("reset")
         exp = self.raw.get("expect")
         items = exp if isinstance(exp, list) else ([exp] if isinstance(exp, dict) else [])
-        # 全部に when があれば分岐。1つも無ければ全部を確かめる。混ざっていれば check が出す
-        if items and all(isinstance(e, dict) and e.get("when") for e in items):
-            self.expects, self.branches = [], items
-        else:
-            self.expects, self.branches = [e for e in items if isinstance(e, dict)], None
+        # when の無い項目はどの場合も起きる（expects）。when のある項目はそのうち1つ（branches）
+        items = [e for e in items if isinstance(e, dict)]
+        self.expects = [e for e in items if not e.get("when")]
+        self.branches = [e for e in items if e.get("when")] or None
 
     def label(self):
         if self.op is None:
@@ -209,12 +212,19 @@ class ActionSpec:
     def outcomes(self):
         """(分岐の番号, 分岐の when, expect の並び)。分岐が無ければ1つだけで番号は None。"""
         if self.branches:
-            return [(i, b.get("when"), [b]) for i, b in enumerate(self.branches)]
+            return [(i, b.get("when"), self.expects_of(i)) for i, b in enumerate(self.branches)]
         return [(None, None, self.expects)]
 
+    def expects_of(self, bi):
+        """分岐 bi を通ったときに確かめる expect の並び（どの枝でも起きる項目 + その枝）。
+        bi が None なら分岐の無い操作の expect。"""
+        return self.expects if bi is None else self.expects + [self.branches[bi]]
+
     def is_back(self):
-        """戻る操作か。閉じてから別の画面かアプリの外に出る操作（closes_then_opens）は含めない。"""
-        return any(e.get("screen") == "back" for e in self.expects) and not closes_then_opens(self.expects)
+        """戻る操作か。閉じてから別の画面かアプリの外に出る操作（closes_then_opens）と、
+        結果が分かれる操作は含めない。"""
+        return (not self.branches and any(e.get("screen") == "back" for e in self.expects)
+                and not closes_then_opens(self.expects))
 
     def in_tree(self):
         return not (self.element is not None and self.element.get("in_tree") is False)
