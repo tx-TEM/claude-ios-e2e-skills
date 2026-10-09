@@ -991,7 +991,11 @@ class Interrupts(unittest.TestCase):
             "  - id: review_dialog.later_button\n    name: 後で\n",
             "  - id: 後で\n    name: 後で\n    by: label\n"), encoding="utf-8")
         rows, flows = write_flows([{"from": "detail", "title": "a", "expect": "a"}], self.repo)
-        self.assertIn("tapOn:\n          text: '.*後で.*'", flows["test_01.yaml"])
+        flow = flows["test_01.yaml"]
+        # 文言そのものの要素を先に探し、無ければ文言を含む要素を押す
+        self.assertIn("tapOn:\n                text: '^後で$'", flow)
+        self.assertIn("tapOn:\n                text: '.*後で.*'", flow)
+        self.assertLess(flow.index("'^後で$'"), flow.index("'.*後で.*'"))
 
     def test_auto_show_as_target_waits_instead_of_closing(self):
         # 自動表示そのものを確かめる項目。被さる先（detail）に着いたら、閉じずに出るまで待つ
@@ -2383,8 +2387,40 @@ class LabelAnchor(unittest.TestCase):
         rows, flows = write_flows([{"from": "home", "title": "a", "expect": "a"}], self.repo)
         flow = flows["test_01.yaml"]
         self.assertIn("- runFlow:\n    when:\n      visible:\n        text: '.*トラッキングしないように要求.*'\n"
-                      "    commands:\n      - tapOn:\n          text: '.*Appにトラッキングしないように要求.*'", flow)
+                      "    commands:\n      - evalScript: '${output.whole = false}'\n", flow)
+        self.assertIn("            - tapOn:\n                text: '^Appにトラッキングしないように要求$'\n", flow)
+        self.assertIn("            - tapOn:\n                text: '.*Appにトラッキングしないように要求.*'\n", flow)
         self.assertLess(flow.index("runFlow"), flow.index("id: '^home$'"))
+
+    def test_label_tap_tries_the_whole_label_first(self):
+        # 「キャンセル」を含むほかの文言があっても、文言そのものの要素を押す。見えているかは1回だけ
+        # 確かめる（押して閉じたあとの画面で確かめ直すと、含む要素をもう1回押しうる）
+        rows, flows = write_flows([{"from": "item_menu", "do": ["tap:キャンセル"], "title": "a", "expect": "a"}],
+                                  self.repo)
+        flow = next(f for f in flows.values() if "キャンセル" in f)
+        tap = flow[flow.index("# item_menu: tap キャンセル"):]
+        self.assertEqual(re.findall(r"^- (\w+)", tap, re.M)[:4], ["evalScript", "runFlow", "runFlow", "runFlow"])
+        self.assertIn("when:\n      visible:\n        text: '^キャンセル$'\n"
+                      "    commands:\n      - evalScript: '${output.whole = true}'", tap)
+        self.assertIn("when:\n      true: '${output.whole}'\n"
+                      "    commands:\n      - tapOn:\n          text: '^キャンセル$'", tap)
+        self.assertIn("when:\n      true: '${!output.whole}'\n"
+                      "    commands:\n      - tapOn:\n          text: '.*キャンセル.*'", tap)
+        self.assertNotIn("notVisible:\n        text: '^キャンセル$'", tap)
+
+    def test_dump_prefers_the_whole_label(self):
+        # 「許可しない」と「許可」が並ぶ画面で「許可」を探すと、「許可」だけが当たる
+        dump = (DUMP_HEAD + dump_line(100, 400, "○", "", "許可しない") + dump_line(300, 400, "○", "", "許可")
+                + dump_line(200, 300, "○", "", "“App”は通知を送信します。許可しますか?"))
+        self.assertEqual([r["text"] for r in RF["Want"](label="許可").rows(dump)], ["許可"])
+        # ラベルと値が食い違う行（「ラベル = 値」）でも、どちらかが文言そのものなら当たる
+        dump2 = DUMP_HEAD + dump_line(100, 400, "○", "", "許可しない") + dump_line(300, 400, "○", "", "許可 = 1")
+        self.assertEqual([r["text"] for r in RF["Want"](label="許可").rows(dump2)], ["許可 = 1"])
+
+    def test_dump_falls_back_to_containing_the_label(self):
+        # 前後に不可視文字の付いた文言は、文言そのものの行が無いので、含む行で見つける
+        dump = DUMP_HEAD + dump_line(100, 400, "○", "", "\u200e許可\ufe0f") + dump_line(10, 60, "○", "detail")
+        self.assertEqual([r["text"] for r in RF["Want"](label="許可").rows(dump)], ["\u200e許可\ufe0f"])
 
     def test_screen_is_found_by_text(self):
         mp = screen_map.load_map(str(self.repo))

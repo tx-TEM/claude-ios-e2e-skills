@@ -195,6 +195,34 @@ def exact(value):
     return "^" + re.escape(value) + "$"
 
 
+def tap_on(target, label=None):
+    """`target`（tapOn に渡す dict）を押すコマンドの並び。`label` は `by: label` の要素の文言。
+
+    **文言で指す要素は、その文言そのものの要素を先に探し、無いときだけ文言を含む要素を押す。**
+    含む要素だけで探すと、ほかの文言に丸ごと含まれる短い文言（「許可」と「許可しない」）が
+    両方に当たり、Maestro はそのうち1つを押す。実測で、「あとで読む」を指して「あとで読むのは
+    やめる」を押した。含む要素で探すのをやめないのは、表示文言の前後に不可視文字が混ざることが
+    あるため（sel_text）。
+
+    **見えているかは1回だけ確かめ、結果を `output` に置いて分ける。** `when: visible` と
+    `when: notVisible` を並べると、2つ目は1つ目で押したあとの画面で確かめ直すことになる。
+    押して閉じたダイアログの文言はもう見えないので、2つ目も通って、含む要素をもう1回押しうる。
+
+    文言そのものの要素が無い回は、見えていないと決めるまで待つぶん遅い（実測8.5秒。ある回は1.9秒）。
+
+    見る・待つ（wait_for / wait_gone）は分けない。文言そのものの要素が見えていれば含む要素も
+    見えているので、先に探しても結果が変わらない。
+    """
+    if label is None:
+        return [{"tapOn": target}]
+    whole = dict(target, text=exact(label))
+    return [{"evalScript": "${output.whole = false}"},
+            {"runFlow": {"when": {"visible": whole},
+                         "commands": [{"evalScript": "${output.whole = true}"}]}},
+            {"runFlow": {"when": {"true": "${output.whole}"}, "commands": [{"tapOn": whole}]}},
+            {"runFlow": {"when": {"true": "${!output.whole}"}, "commands": [{"tapOn": target}]}}]
+
+
 def element_sel(target, by_label=False, value=None):
     """要素のセレクタ。(キー, 値)。パターンの要素は、実行時に決めた ID で1つに絞る。"""
     if by_label:
@@ -242,6 +270,11 @@ def step_sel(st, values=None):
     a = st.action
     value = values.get(st.key) if needs_value(st) and is_pattern(a.target) else None
     return element_sel(a.target, a.by_label, value)
+
+
+def label_of(st):
+    """操作の要素が `by: label` なら、その文言（tap_on が文言そのものの要素を先に探す）。"""
+    return st.action.target if st.action.by_label else None
 
 
 WAIT_TIMEOUT = 10000     # 要素が出るのを待つ上限
@@ -329,12 +362,13 @@ def auto_checks(mp, sid, keep=None, via=None, came=None):
             continue            # 書き間違いは check が出す
         _, close = found
         at_key, at_val = anchor_sel(mp, iid)
-        key, dismiss = element_sel(close.target, close.element.get("by") == "label")
+        by_label = close.element.get("by") == "label"
+        key, dismiss = element_sel(close.target, by_label)
         summary = mp.screens[iid].summary
         when = "（{} から戻ったとき）".format(came) if back else ""
         out.append(Comment("自動表示: {}{}{}（出ていたら閉じる）".format(iid, when, " — " + summary if summary else "")))
         out.append({"runFlow": {"when": {"visible": {at_key: at_val}},
-                                "commands": [{"tapOn": {key: dismiss}}]}})
+                                "commands": tap_on({key: dismiss}, close.target if by_label else None)}})
     return out
 
 
@@ -595,11 +629,11 @@ class FlowWriter:
             # 付けないとツリー順の先頭（押せるもの優先）になり、画面に見えているとは限らない。
             # ドキュメントには書かれていない挙動なので、Maestro を上げたら確かめ直す
             target["index"] = int(self.indexes[st.key])
-        self.out.append({"tapOn": target})
+        self.out.extend(tap_on(target, label_of(st)))
 
     def type_text(self, st):
         key, val = step_sel(st, self.values)
-        self.out.append({"tapOn": dict({key: val}, **scope(st.within, self.values))})
+        self.out.extend(tap_on(dict({key: val}, **scope(st.within, self.values)), label_of(st)))
         self.out.append("eraseText")         # 前の項目の文字が残ったまま打たない
         if isinstance(st.action, InputLater):
             self.out.append({"inputText": self.values[st.key]})   # 打つ文字そのもの。エスケープしない
