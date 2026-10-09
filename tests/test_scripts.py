@@ -1265,10 +1265,18 @@ class Routing(unittest.TestCase):
     def test_branch_in_do_needs_when(self):
         code, err = build_err([{"from": "detail", "title": "a", "expect": "a",
                                 "do": ["tap:detail.review_button"]}])
-        self.assertIn("結果が分かれる（ログイン中 / 未ログイン）", err)
+        self.assertIn("結果が分かれる（ログイン中 / 未ログイン）。項目の when にどれか1つを書く", err)
         rows, flows = write_flows([{"from": "detail", "when": ["ログイン中"], "title": "a",
                                     "expect": "a", "do": ["tap:detail.review_button"]}])
         self.assertEqual(rows[0]["screen"], "review_editor")
+
+    def test_branch_in_do_with_two_whens_says_so(self):
+        # 枝に2つ以上当たれば、どれかを優先せずに止まる。何も当たらないときとは言い分ける
+        code, err = build_err([{"from": "detail", "when": ["ログイン中", "未ログイン"], "title": "a",
+                                "expect": "a", "do": ["tap:detail.review_button"]}])
+        self.assertEqual(code, 2)
+        self.assertIn("枝のうち、項目の when が ログイン中 / 未ログイン に当たる。どれか1つに絞る", err)
+        self.assertNotIn("どれか1つを書く", err)
 
     def test_element_when_is_not_used_for_routing_but_ok_in_do(self):
         repo = Path(tempfile.mkdtemp()) / "app"

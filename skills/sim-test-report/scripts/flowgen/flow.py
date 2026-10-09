@@ -573,10 +573,16 @@ def do_step(mp, route, op, how, given):
 def branch_of(action, at, given):
     """結果が状態で分かれる操作の、確認項目の前提（when）に合う枝の番号。"""
     hit = [i for i, b in enumerate(action.branches) if b.get("when") in given]
-    if len(hit) != 1:
-        raise Unroutable([("call", "{} の「{}」は結果が分かれる（{}）。項目の when にどちらかを書く"
+    if not hit:
+        raise Unroutable([("call", "{} の「{}」は結果が分かれる（{}）。項目の when にどれか1つを書く"
                                    .format(at, action.label(),
                                            " / ".join(b.get("when") for b in action.branches)))])
+    if len(hit) > 1:
+        # 1つの項目が逆の状態を両方前提にすることはない。どれかを優先せずに止める
+        raise Unroutable([("call", "{} の「{}」の枝のうち、項目の when が {} に当たる。どれか1つに絞る"
+                                   "（どの状態でも確かめたいなら、前提ごとに項目を分ける）"
+                                   .format(at, action.label(),
+                                           " / ".join(action.branches[i].get("when") for i in hit)))])
     return hit[0]
 
 
