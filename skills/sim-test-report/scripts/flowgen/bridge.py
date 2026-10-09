@@ -189,15 +189,19 @@ class Route:
     def best_route(self, goal, given):
         """(戻る回数, そこから進む辺の並び)。いちばん短いもの。届かなければ None。
 
-        いま居る画面から前へ辿れるか、履歴を一段ずつ戻りながら探す。戻る回数と進む回数の
-        合計がいちばん小さいものを採る（同点なら戻らない方）。**「行き先が積まれているか」で
+        いま居る画面から前へ辿れるか、履歴を一段ずつ戻りながら探す。条件つきの辺（`when`）を
+        通る数がいちばん少ないもの、その中で戻る回数と進む回数の合計がいちばん小さいものを採る
+        （同点なら戻らない方。条件つきの辺を避ける理由は path_from）。**「行き先が積まれているか」で
         場合分けしない。** 戻ってから進む（一覧へ戻って別のタブへ、など）が普通に要るので、
         同じ探索に収める。
         """
+        def cost(pops, hops):
+            return sum(1 for _, e in hops if e[4]), pops + len(hops)
+
         best = None
         for pops in range(len(self.stack)):
             hops = self.mp.path_from(self.stack[len(self.stack) - 1 - pops], goal, given)
-            if hops is not None and (best is None or pops + len(hops) < best[0] + len(best[1])):
+            if hops is not None and (best is None or cost(pops, hops) < cost(*best)):
                 best = (pops, hops)
         return best
 

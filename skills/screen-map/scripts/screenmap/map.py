@@ -49,6 +49,10 @@ class ScreenMap:
     def path_from(self, src, goal, given=(), relaxed=False):
         """src から goal までの最短経路。[(画面id, 辺), ...] か None。
 
+        **条件つきの辺（`when`）は、条件なしでは届かないときだけ使う。** 前提に同じ文言が
+        あっても、条件なしの経路があればそちらを採る（長くても）。条件つきの辺は、状態が
+        前提とずれると出ない・別の先に着くので、通らずに済むなら通らない。
+
         **同じ長さなら、タブの切り替え（`via: tab`）を多く通るほうを採る。** タブバーは
         いつも同じ位置にあり、画面の下の方のカードを押すより確実。
 
@@ -60,13 +64,14 @@ class ScreenMap:
         """
         if src == goal:
             return []
-        best = {src: (0, 0)}
+        # 費用は (条件つきの辺の数, 手数, タブでない辺の数)
+        best = {src: (0, 0, 0)}
         prev = {src: None}
-        heap = [(0, 0, 0, src)]
+        heap = [((0, 0, 0), 0, src)]
         n = 0
         while heap:
-            hops, other, _, cur = heapq.heappop(heap)
-            if (hops, other) > best[cur]:
+            (conds, hops, other), _, cur = heapq.heappop(heap)
+            if (conds, hops, other) > best[cur]:
                 continue
             if cur == goal:
                 out, at = [], goal
@@ -78,12 +83,12 @@ class ScreenMap:
                 if self.blocked(edge, given) and not (relaxed and edge[2] in self.screens):
                     continue
                 nxt = edge[2]
-                cost = (hops + 1, other + (0 if edge[3] == "tab" else 1))
+                cost = (conds + (1 if edge[4] else 0), hops + 1, other + (0 if edge[3] == "tab" else 1))
                 if nxt not in best or cost < best[nxt]:
                     best[nxt] = cost
                     prev[nxt] = (cur, edge)
                     n += 1
-                    heapq.heappush(heap, (cost[0], cost[1], n, nxt))
+                    heapq.heappush(heap, (cost, n, nxt))
         return None
 
     def auto_hosts(self, sid):

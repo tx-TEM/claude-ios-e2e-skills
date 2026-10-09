@@ -1228,6 +1228,32 @@ class Routing(unittest.TestCase):
         rows, _ = write_flows([{"from": "list", "title": "a", "expect": "a"}], repo)
         self.assertEqual(rows[0]["screen"], "list")
 
+    def test_unconditional_route_is_preferred_even_if_longer(self):
+        # 前提に同じ文言があっても、条件なしで届くならそちらを通る（手数が増えても）
+        repo = Path(tempfile.mkdtemp()) / "app"
+        self.addCleanup(shutil.rmtree, repo.parent)
+        shutil.copytree(FIXTURE, repo)
+        home = repo / "screen-map" / "screens" / "home.yaml"
+        home.write_text(home.read_text(encoding="utf-8").replace(
+            "        expect: {screen: detail, via: push}\n",
+            "        expect:\n"
+            "          - when: ログイン中\n"
+            "            screen: detail\n"
+            "            via: push\n"
+            "          - when: 未ログイン\n"
+            "            screen: login_alert\n"
+            "            via: modal\n", 1), encoding="utf-8")
+        mp = self.mp(repo)
+        hops = mp.path_from("home", "detail", ("ログイン中",))
+        self.assertEqual(len(hops), 2)
+        self.assertNotIn("home.fav", [e[0].target for _, e in hops])
+        # 条件なしでは届かないなら、条件つきの辺を通る
+        hops = mp.path_from("home", "login_alert", ("未ログイン",))
+        self.assertEqual([e[0].target for _, e in hops], ["home.fav"])
+        rows, flows = write_flows([{"from": "detail", "when": ["ログイン中"], "title": "a", "expect": "a"}], repo)
+        self.assertEqual(rows[0]["screen"], "detail")
+        self.assertNotIn("home\\.fav", flows["test_01.yaml"])
+
     def test_conditional_edge_needs_when(self):
         code, err = build_err([{"from": "login_alert", "title": "a", "expect": "a"}])
         self.assertEqual(code, 2)
