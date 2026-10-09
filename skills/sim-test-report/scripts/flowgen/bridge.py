@@ -178,7 +178,7 @@ class Route:
                                  .format(self.at, goal))
             steps.append(self.back(a))
         for sid, (a, bi, dest, via, _) in hops:
-            expects = [a.branches[bi]] if bi is not None else a.expects
+            expects = a.expects_of(bi)
             # 子の要素なら、パターンの親は見えている1件目（どれを選ぶかを気にするなら do に書く）
             enters, within, _ = nest(sid, a.parents)
             steps += enters
