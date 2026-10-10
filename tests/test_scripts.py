@@ -38,6 +38,9 @@ from screenmap import check as map_check  # noqa: E402
 from screenmap import map as screen_map  # noqa: E402
 from flowgen import flow as flows_of  # noqa: E402
 from flowgen.actions import Tap  # noqa: E402
+from flowgen.maestro import add_reveals  # noqa: E402
+from flowgen.results import Arrive  # noqa: E402
+from flowgen.steps import Act, Await, See  # noqa: E402
 from flowgen.maestro import FlowWriter, check_of  # noqa: E402
 from flowgen.results import External  # noqa: E402
 from flowgen.steps import Act  # noqa: E402
@@ -303,6 +306,22 @@ class ScrollUp(unittest.TestCase):
             {"from": "list", "launch": True, "title": "b", "expect": "b"},
             {"from": "home", "title": "c", "expect": "c"}])
         self.assertEqual(ups(item_flow(flows, "test_03")), [])
+
+    def test_do_hands_skip_up_only_on_a_fresh_modal(self):
+        # 1手ずつ流す手で上へ探さないのは、modal で開いてまだスクロールしていない画面だけ。上端で下へ
+        # スワイプするとシートが閉じるので。push で開いた画面は上端とみなしても閉じないので、上下を探す
+        # （開くと下端にいる画面でも見つかる）
+        hand = lambda screen: See(screen, screen + ".close_button", key="see:" + screen)
+        sheet = [Act("detail", Tap("detail.review_button"), [Arrive("review_editor", "modal")]),
+                 hand("review_editor"), hand("review_editor")]
+        pushed = [Act("home", Tap("home.list"), [Arrive("list", "push")]), hand("list")]
+        shown = [Await("home", "notice_sheet"), hand("notice_sheet")]   # 自動表示も被さって出る
+        add_reveals(sheet)
+        add_reveals(pushed)
+        add_reveals(shown)
+        self.assertEqual([st.up for st in sheet[1:]], [False, True])   # 1手見たら、もう上端とは限らない
+        self.assertEqual(pushed[1].up, True)
+        self.assertEqual(shown[1].up, False)
 
 
 class SeeWaits(unittest.TestCase):
@@ -1721,6 +1740,15 @@ class ItemRunBase:
                     "devices": {"iphone": {"inputs": dict(self.row["inputs"]), "picked": {}}},
                     "desc": "", "note": "", "result": "PENDING"}
 
+    def opened_as_sheet(self):
+        """1手ずつ流すステップを、modal で開いてまだスクロールしていない画面でのものにする
+        （flowgen の add_reveals() が `up` を偽にする）。組んだままだと、起動し直して開いた一覧なので
+        上下を探す。"""
+        for u in self.row["units"]:
+            for st in u.steps:
+                if getattr(st, "key", None) is not None:
+                    st.up = False
+
     def tearDown(self):
         RF.update(self.saved)
         shutil.rmtree(self.tmp)
@@ -1808,6 +1836,29 @@ class SeekRun(ItemRunBase, unittest.TestCase):
         self.assertIn("test_01 撮影できず list.footer が画面に無い", self.log())
         reads = [n for c, n, _ in self.calls if c == "inspect"]
         self.assertEqual(len(reads), 1 + 4 + RF["SEEK_WAITS"])
+
+    def test_fresh_sheet_is_searched_only_down(self):
+        # modal で開いたままの画面では、下の端まで見れば全部見たことになる。
+        # 上へ戻すと、上端を確かめる1回でモーダルのシートが閉じる
+        self.opened_as_sheet()
+        self.dumps = [self.TOP, self.MID, self.MID]
+        got = self.run_item()[0]
+        self.assertEqual(got, ("failed", "list.footer が画面に無い（上端から下の端まで探した）"))
+        self.assertEqual(self.swipes(), ["down", "down"])
+
+    def test_leaving_the_screen_is_named(self):
+        # 送るうちにこの画面の anchor が消えて別の画面の anchor が出たら、離れたと理由に書く
+        home = DUMP_HEAD + dump_line(195, 60, "○", "home", "")
+        self.dumps = [self.TOP, self.MID, self.MID, home, home]
+        got = self.run_item()[0]
+        self.assertEqual(got[0], "failed")
+        self.assertIn("（上下の端まで探した）。送るうちに画面 list を離れ、いまは home に居る", got[1])
+
+    def test_anchor_scrolled_away_is_not_leaving(self):
+        # anchor が一覧と一緒に送られて見えなくなっただけなら、離れたとは言わない
+        self.dumps = [self.TOP, DUMP_HEAD + dump_line(195, 300, "○", "list.row.坊っちゃん", "")]
+        got = self.run_item()[0]
+        self.assertEqual(got, ("failed", "list.footer が画面に無い（上下の端まで探した）"))
 
     def test_below_the_screen_in_the_tree_scrolls_down(self):
         self.dumps = [self.MID + dump_line(195, 1400, "×", "list.footer", ""), self.FOOTER]
@@ -1970,6 +2021,24 @@ class AutoPickRun(ItemRunBase, unittest.TestCase):
         self.assertNotIn("坊っちゃん", out)              # 画面外の行は候補にしない
         self.assertIn("無ければ、同じコマンドに --next を付けて叩き直す", out)
         self.assertEqual(self.swipes(), ["up"])          # 並びの先頭まで戻してから出す
+
+    def test_conditional_pick_on_a_fresh_sheet_is_not_rewound(self):
+        # modal で開いたままの画面は上端にいる。戻さずに出す（戻すと上端でモーダルのシートが閉じる）
+        self.conditional()
+        self.opened_as_sheet()
+        got, out = self.run_item()
+        self.assertEqual(got, ("stopped", 1))
+        self.assertIn("  - list.row.C++入門 ｜ C++入門\n  - list.row.こころ\n", out)
+        self.assertEqual(self.swipes(), [])
+
+    def test_rewinding_off_the_screen_is_named(self):
+        # 先頭へ戻すスワイプでシートが閉じて、下の画面に出た。「行が見えていない」だけで終わらせない
+        self.conditional()
+        home = DUMP_HEAD + dump_line(195, 60, "○", "home", "")
+        self.dumps = [FirstVisible.DUMP, home]
+        got = self.run_item()[0]
+        self.assertEqual(got, ("failed", "list.row.* が画面に見えていない。送るうちに画面 list を離れ、"
+                                         "いまは home に居る（モーダルのシートなら、上端で下へスワイプして閉じたとみられる）"))
 
     def test_same_ids_are_numbered(self):
         self.conditional()

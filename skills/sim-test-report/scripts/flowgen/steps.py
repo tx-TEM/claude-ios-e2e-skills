@@ -40,6 +40,7 @@ class Enter:
     outer: list = field(default_factory=list)   # この親の外側の親（Within の並び）
     item: Optional[str] = None
     key: Optional[str] = None         # 決めた親の鍵（inputs / picked の鍵。KEYS の説明）
+    up: bool = True                   # 1手ずつ流すなら、上へも探すか。偽は modal で開いたまま（maestro.py の add_reveals() が決める）
     to = None
 
     def needs_value(self):
@@ -116,6 +117,7 @@ class Act:
     within: List[Within] = field(default_factory=list)   # 子の要素なら、その親（外から順）
     key: Optional[str] = None         # 項目の do の操作なら、その鍵（KEYS の説明）
     stay: Optional[bool] = None       # アプリの外に出るなら、外に居るまま撮るか（flow.py の render_case() が決める）
+    up: bool = True                   # 1手ずつ流すなら、上へも探すか。偽は modal で開いたまま（maestro.py の add_reveals() が決める）
 
     @property
     def arrive(self):
@@ -166,6 +168,7 @@ class See:
     pick: Optional[Pick] = None       # 見る行を撮るときに選ぶ条件（pick）
     within: List[Within] = field(default_factory=list)   # 子の要素なら、その親（外から順）
     key: Optional[str] = None         # 項目の do の操作なら、その鍵（KEYS の説明）
+    up: bool = True                   # 1手ずつ流すなら、上へも探すか。偽は modal で開いたまま（maestro.py の add_reveals() が決める）
     to = None
 
     def needs_value(self):

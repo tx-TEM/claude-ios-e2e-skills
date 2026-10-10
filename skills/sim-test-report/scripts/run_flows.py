@@ -535,11 +535,22 @@ def scroll_body(direction, parent=None):
 
 class Seeker:
     """1手の対象を、ダンプを読みながら探す。見つけたら `dump` / `raw` / `box` に
-    その画面と、対象を探した枠（子の要素なら親の枠）が残る。"""
+    その画面と、対象を探した枠（子の要素なら親の枠）が残る。
 
-    def __init__(self, dv, name, k, record):
+    **`top` は、画面が縦の上端にいると分かっているか**（ステップの `up` の逆。flowgen の
+    add_reveals() が経路を追って決める。modal で開いて、まだスクロールしていない画面だけ）。
+    上端にいれば、上へは送らない。上の端に着いたかは送っても変わらないことでしか分からないので、
+    上端でも1回は下へスワイプすることになり、モーダルのシートはそのスワイプでシートごと閉じる。
+    この手の中で1回でも送ったら（`moved`）、もう上端とは限らない。"""
+
+    def __init__(self, dv, name, k, record, top=False):
         self.dv, self.name, self.k, self.record = dv, name, k, record
         self.dump = self.raw = self.box = None
+        self.top, self.moved = top, False
+
+    def at_top(self):
+        """縦の上端にいると分かっているか。"""
+        return self.top and not self.moved
 
     def read(self):
         self.dump, self.raw = read_screen(self.dv.udid, f"{self.name}.seek{self.k}", self.dv.scratch)
@@ -547,6 +558,7 @@ class Seeker:
 
     def run(self, body):
         """探すために1回送る。流したものは記録に残す。"""
+        self.moved = True
         self.record.commands(body)
         return sh(["run", self.dv.udid, "appId: {}\n---\n{}".format(self.dv.app, body),
                    f"{self.name}.seek{self.k}", str(self.dv.scratch)]) == 0
@@ -577,7 +589,8 @@ class Seeker:
         - 今の画面に見えていれば送らない
         - 無ければ1回送っては読み直す。**画面の中に見えている ID が送る前と同じなら、その向きの端。**
           縦は下 → 上の順（ツリーに画面外で出ていれば、そちらから）。上にも必ず探す — 画面が
-          一番上なら1回送って端と分かる
+          一番上なら1回送って端と分かる。**上端にいると分かっていれば（`at_top()`）、下だけ探す。**
+          下の端まで見れば全部見たことになり、上へ戻すと上端でシートを閉じる
         - 横（親の中）は次の向き → 戻る向き。見比べるのは親の枠の中の ID
         - 読み込みで伸び続ける一覧では端に着かないので、1つの向きに SEEK_SWIPES 回で諦める。
           1回（送って読み直す）は実測で約3秒なので、20回で約60秒 — フローの上限と同じ時間で、
@@ -599,7 +612,7 @@ class Seeker:
             directions = ("next", "back")
         else:
             above = [r for r in self.hits(want) if r["cy"] < 0]
-            directions = ("up", "down") if above else ("down", "up")
+            directions = ("up", "down") if above else ("down",) if self.at_top() else ("down", "up")
         before = self.seen(parent)
         for direction in directions:
             for _ in range(SEEK_SWIPES):
@@ -624,7 +637,7 @@ class Seeker:
                     return None
         if any(r["where"] == "裏" for r in self.hits(want, parent)):
             return None                                   # 画面の中の、前面の要素の裏にある
-        where = f"{parent} の中の左右" if parent is not None else "上下"
+        where = f"{parent} の中の左右" if parent is not None else "上下" if "up" in directions else "上端から下"
         return f"{want} が画面に無い（{where}の端まで探した）"
 
     def rewind(self, parent=None):
@@ -745,6 +758,21 @@ class Hand:
         print(f"{self.name} {why}", file=sys.stderr)
         return ("failed", why)
 
+    def lost(self, seeker, why):
+        """探して見つからなかった理由に、送るうちに画面を離れたならそれを足す。
+
+        モーダルのシートは、上端で下へスワイプするとシートごと閉じる。閉じた後の画面には探すものが
+        無いので「見えていない」で落ちるが、それだけでは閉じたことが分からない。離れたと言うのは、
+        この手の画面の anchor が見えず、別の画面の anchor が見えているときだけ（anchor が一覧と
+        一緒に送られて見えなくなっただけのときに、離れたと言わない）。"""
+        if not seeker.moved or seeker.dump is None:
+            return why
+        _, hits = flows_of.screen_at(self.dv.mp, *shown(seeker.dump))
+        if not hits or self.st.screen in hits:
+            return why
+        return (f"{why}。送るうちに画面 {self.st.screen} を離れ、いまは {', '.join(hits)} に居る"
+                "（モーダルのシートなら、上端で下へスワイプして閉じたとみられる）")
+
     def answer(self, what):
         """値の返し方。値は空白や記号を含むので、引用符で囲んで渡させる。"""
         return (f"同じコマンドに --value '<{what}>' を付けて叩き直す（続きから走る。"
@@ -796,11 +824,11 @@ class Hand:
             if caller:
                 self.values[key] = given
             return None                                   # 探せないもの。フローで待つ
-        seeker = Seeker(self.dv, self.name, self.k, self.record)
+        seeker = Seeker(self.dv, self.name, self.k, self.record, top=not st.up)
         self.record.note(f"run_flows.py がダンプで探す: {want}")
         why = seeker.find(want, chain_of(st, self.values))
         if why:
-            return self.fail(why)
+            return self.fail(self.lost(seeker, why))
         if caller and picks and not given:
             return self.choose(seeker, want)
         if caller and not given:
@@ -826,7 +854,9 @@ class Hand:
     def choose(self, seeker, want):
         """条件つきの選択で、まだ値が決まっていない。いま見えている行を候補に出して止まる。
 
-        ふつうは並びの先頭まで戻してから出す。`--next` で叩き直されたら（`dv.ask["next"]`）1画面だけ
+        ふつうは並びの先頭まで戻してから出す。**縦の上端にいると分かっていて（`at_top()`）、`--next` で
+        送ってもいなければ、戻さずに出す。** 戻すと、上端を確かめる1回でモーダルのシートが閉じる。
+        `--next` で叩き直されたら（`dv.ask["next"]`）1画面だけ
         送ってから出し、送っても見えている行が変わらなければ、端まで見て無かったとする（not_found()）。
         送る並びは、いちばん内側の親が横に送るもの（`scroll`）ならその中、そうでなければ画面の縦。
 
@@ -841,8 +871,8 @@ class Hand:
         parent = chain[-1][0] if chain and chain[-1][1] else None
         forward, self.dv.ask["next"] = self.dv.ask["next"], False      # --next はこの1回だけに効く
         if not forward:
+            why = None if parent is None and seeker.at_top() and not paged.get(key) else seeker.rewind(parent)
             paged[key] = 0
-            why = seeker.rewind(parent)
         else:
             cond = pick_of(self.st).condition
             where = f"{parent} の中の左右" if parent is not None else "上下"
@@ -853,11 +883,11 @@ class Hand:
             if why == "端":
                 return self.not_found(seeker, cond, f"{where}の端まで見た")
         if why:
-            return self.fail(why)
+            return self.fail(self.lost(seeker, why))
         found = candidates(seeker.dump, seeker.raw, want.pattern,
                            seeker.boxed(chain[-1][0]) if chain else None)
         if not found:
-            return self.fail(f"{want.pattern} が画面に見えていない")
+            return self.fail(self.lost(seeker, f"{want.pattern} が画面に見えていない"))
         return self.missing(self.st.key, found)
 
     def not_found(self, seeker, cond, how_far):
