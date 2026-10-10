@@ -17,7 +17,7 @@ plan はテストケース（`cases`）の集合で、項目は必ずどれか�
 
 **1項目は「経路のフロー」と「`do` の1手ずつ」に分かれる**（Unit）。経路（`from` まで）は
 1本のフローで、要素は `scrollUntilVisible` で探す。ただし経路の途中の、値を決めるステップ
-（パターンの要素を押す）と子の要素（と親を決める Enter）は、`do` と同じく1手にする（route_keys）。`do` の要素は run_flows.py が
+（パターンの要素を押す）と子の要素（と親を決める Enter）と `by: label` の要素は、`do` と同じく1手にする（route_keys）。`do` の要素は run_flows.py が
 ダンプを読みながら探し、スクロールの端に着いたら諦め、見つかれば1手ぶんのフロー（操作と
 着いた確認）を流す。フローの `scrollUntilVisible` は端を検知しないので、無い要素では
 上限の60秒を払ってしまう。フローは流す直前に `render_unit()` で書き、値はそこで埋める。
@@ -595,7 +595,7 @@ class Unit:
     - `flow`: 経路。前の項目が終わった画面から `from` まで（起動し直し、後始末、アプリの外から
       戻す、も入る）。そのまま1本で流す。経路の途中に1手が挟まれば、その前後で分かれる
     - `hand`: 鍵を持つステップ1つ（`steps[0]`）。`do` の1手と、経路の途中で値を決めるステップ・
-      子の要素（route_keys）。run_flows.py がダンプを読んで対象を探し、値を決めてから流す。
+      子の要素・`by: label` の要素（route_keys）。run_flows.py がダンプを読んで対象を探し、値を決めてから流す。
       項目の最後の1手には撮影（Shot）が付く
 
     `start` は流し始める画面、`launch` はこの1本でアプリを起動し直すか。
@@ -616,12 +616,18 @@ def route_keys(steps):
     - 値を決めるステップ（パターンの要素を押す。見えている1件目）
     - 子の要素（カルーセルの中のカードなど）と、その親を決める Enter。親の中を横に送って探すのは
       run_flows.py の仕事で、経路のフローには書かない
+    - `by: label` の要素を操作するステップ。経路のフローの押す前のスクロール（maestro.py の
+      reveal）は文言を含む要素で探すので、同じ語を含むほかの文言（ダイアログの本文、ほかの
+      選択肢）が見えた時点で止まり、押す要素が画面外に残る。完全一致でスクロールすると、前後に
+      不可視文字が付いて完全一致の要素が無いときに上限の60秒を払う。run_flows.py は文言そのものの
+      行を先に探しながら送り（Want.rows）、端に着けば諦めるので、どちらも起きない
     """
     used = {}
     for st in steps:
         if getattr(st, "key", None) is not None:
             continue
-        if not (needs_value(st) or getattr(st, "within", None)):
+        by_label = isinstance(st, Act) and getattr(st.action, "by_label", False)
+        if not (needs_value(st) or getattr(st, "within", None) or by_label):
             continue
         if isinstance(st, Enter):
             base = "経路 in {}".format(st.target)
