@@ -976,9 +976,9 @@ class Leftovers(unittest.TestCase):
         exec(compile(src, "maestrod.py", "exec"), ns)
         key = ns["run_key"]
         self.assertEqual(key("/x/sim-test-report-20260928-a/shots/iphone"), "sim-test-report-20260928-a/iphone")
-        # なぞる項目と、探すための読み・送りは作業用の置き場から。実行と端末で分け、証跡のダンプとは下を分ける
-        self.assertEqual(key("/s/.work/replay/sim-test-report-20260928-a/iphone"),
-                         "sim-test-report-20260928-a/iphone/replay")
+        # 探すための読み・送りは作業用の置き場から。実行と端末で分け、証跡のダンプとは下を分ける
+        self.assertEqual(key("/s/.work/scratch/sim-test-report-20260928-a/iphone"),
+                         "sim-test-report-20260928-a/iphone/scratch")
         self.assertTrue(key(None).startswith("_probe/"))
 
 
@@ -1244,8 +1244,8 @@ class ReportSkip(unittest.TestCase):
 
 def reads_screen(args):
     """run_flows.py が画面を読む inspect か（撮った証跡の隣にダンプを置く inspect ではなく）。
-    読むときは作業用の置き場（`.work/replay/<出力先の名前>/<端末>`。テストでは `<tmp>/replay`）を渡す。"""
-    return len(args) == 3 or "replay" in Path(args[3]).parts
+    読むときは作業用の置き場（`.work/scratch/<出力先の名前>/<端末>`。テストでは `<tmp>/scratch`）を渡す。"""
+    return len(args) == 3 or "scratch" in Path(args[3]).parts
 
 
 def dump_line(cx, cy, on, rid, text="", state="", height=40):
@@ -1728,18 +1728,17 @@ class ItemRunBase:
     def given(self, key, value):
         self.sec["devices"]["iphone"]["inputs"][key] = value
 
-    def run_item(self, first=0, retake=False, ask=None):
+    def run_item(self, first=0, ask=None):
         """(結果, 標準出力)。結果は ("done", None) / ("failed", 理由) / ("stopped", 何手目か)。
-        `retake` なら撮り直し中として流す（止まったあとはテストケースの頭からなぞり直す）。
         `ask` は条件つきの選択の問答（--next と送った回数）。流したあとの問答は `self.dv.ask`。"""
         shots = self.out / "shots" / "iphone"
         shots.mkdir(parents=True, exist_ok=True)
-        dv = RF["DeviceRun"]("iphone", "AAAA", shots, self.tmp / "replay", self.flows,
+        dv = RF["DeviceRun"]("iphone", "AAAA", shots, self.tmp / "scratch", self.flows,
                              self.out / "progress_iphone.log", "jp.example.App",
-                             screen_map.load_map(str(self.repo)), False, retake, ask)
+                             screen_map.load_map(str(self.repo)), False, ask)
         self.dv = dv
         with contextlib.redirect_stdout(io.StringIO()) as o, contextlib.redirect_stderr(io.StringIO()):
-            got = RF["run_item"](dv, self.sec, self.row, False, first)
+            got = RF["run_item"](dv, self.sec, self.row, first)
         return got, o.getvalue()
 
     def swipes(self):
@@ -1796,7 +1795,7 @@ class SeekRun(ItemRunBase, unittest.TestCase):
         # 画面を読むときは作業用の置き場を渡す。maestrod.py がそこから実行ごと・端末ごとの置き場を決める
         reads = [where for c, n, where in self.calls if c == "inspect"]
         self.assertTrue(reads)
-        self.assertEqual(set(reads), {str(self.tmp / "replay")})
+        self.assertEqual(set(reads), {str(self.tmp / "scratch")})
         self.assertLess(record.index("- scroll\n"), record.index("takeScreenshot"))
 
     def test_gives_up_at_both_edges(self):
@@ -2088,14 +2087,6 @@ class SeePickRun(ItemRunBase, unittest.TestCase):
         self.assertEqual(got[0], "not_found")
         self.assertEqual(got[1]["reason"], "上下に{}画面送っても端に着かない".format(RF["SEEK_SWIPES"]))
         self.assertEqual(self.swipes(), [])               # 上限なら送らずに落とす
-
-    def test_retake_sends_again_from_the_top(self):
-        # 撮り直しは頭からなぞり直すので、画面は先頭に戻っている。送った回数ぶん送り直してから1画面進める
-        self.dumps = [FirstVisible.DUMP, FirstVisible.DUMP, self.BELOW, FirstVisible.DUMP, self.BELOW]
-        got, out = self.run_item(retake=True, ask={"next": True, "paged": {"see:list.row.*": 2}})
-        self.assertEqual(got, ("stopped", 1))
-        self.assertEqual(self.swipes(), ["up", "down", "down", "down"])
-        self.assertEqual(self.dv.ask["paged"], {"see:list.row.*": 3})
 
     def test_count_starts_over_when_shown_from_the_top(self):
         # --next が付いていなければ、先頭から出し直す
@@ -3008,23 +2999,23 @@ class RecoveryResets(CaseRunBase, unittest.TestCase):
 
 
 class RetakeRuns(unittest.TestCase):
-    """撮り直す項目だけを、そのテストケースの頭からなぞって撮る。撮り直す項目は判定の RETAKE で決まる。"""
+    """撮り直す項目のあるテストケースを、頭から全部撮る。撮り直す項目は判定の RETAKE で決まる。"""
 
     def runs(self, names):
         plan = {"app": "x", "repo": str(FIXTURE), "cases": CaseRunBase.CASES}
         cases = flows_of.flow_cases(plan)
-        return [[(it["name"], m) for it, m in its] for _, its in RF["retake_runs"](cases, names)]
+        return [[it["name"] for it in c["items"]] for c in RF["retake_runs"](cases, names)]
 
-    def test_head_item_runs_alone(self):
-        self.assertEqual(self.runs(["test_03"]), [[("test_03", "shot")]])
+    def test_head_item_takes_the_whole_case(self):
+        # 後ろの項目も、撮り直す項目を当てにしているので一緒に撮る
+        self.assertEqual(self.runs(["test_03"]), [["test_03", "test_04"]])
 
-    def test_item_in_a_case_replays_from_its_head(self):
-        self.assertEqual(self.runs(["test_04"]), [[("test_03", "replay"), ("test_04", "shot")]])
+    def test_item_in_a_case_takes_it_from_its_head(self):
+        self.assertEqual(self.runs(["test_04"]), [["test_03", "test_04"]])
 
     def test_case_runs_once_for_two_items(self):
         self.assertEqual(self.runs(["test_02", "test_01", "test_04"]),
-                         [[("test_01", "shot"), ("test_02", "shot")],
-                          [("test_03", "replay"), ("test_04", "shot")]])
+                         [["test_01", "test_02"], ["test_03", "test_04"]])
 
     def test_marked_items_are_retaken_and_explored_ones_go_to_sim_driver(self):
         manifest = {"cases": [{"title": "A", "items": [
@@ -3045,6 +3036,13 @@ class RetakeRuns(unittest.TestCase):
             {"name": "test_05", "flow": "test_05.yaml", "result": "RETAKE", "devices": {}}]}]}
         self.assertEqual(RF["to_retake"](manifest), (["test_02", "test_05"], []))
 
+    def test_settled_device_is_not_retaken_after_going_back_to_pending(self):
+        # 判定を付けて外した項目は、ほかの端末で撮り直すと PENDING に戻る。印のある端末の記録では拾わない
+        settled = {"iphone": {}, "ipad": {"unexpected": {"kind": "failed", "reason": "x", "settled": True}}}
+        manifest = {"cases": [{"title": "A", "items": [
+            {"name": "test_01", "flow": "test_01.yaml", "result": "PENDING", "devices": settled}]}]}
+        self.assertEqual(RF["to_retake"](manifest), ([], []))
+
 
 class RetakeRun(CaseRunBase, unittest.TestCase):
     """撮り直しが実際に何を走らせ、どこへ撮り、何を書き換えるか。"""
@@ -3054,59 +3052,74 @@ class RetakeRun(CaseRunBase, unittest.TestCase):
         for _, s in MI.walk(self.manifest):
             s.update(desc=f"{s['name']} の前の判定", result="OK")
 
-    def test_replays_case_head_and_shoots_only_target(self):
+    def test_takes_the_whole_case_from_its_head(self):
         stopped, done, lost = self.run_device(["test_04"])
-        self.assertEqual((stopped, done, lost), (None, 1, []))
+        self.assertEqual((stopped, done, lost), (None, 2, []))
         runs = [(c, n, d) for c, n, d, _ in self.calls]
-        # 手前の項目は作業用の置き場（replay の下の端末名）に撮り、ダンプは取らない。
-        # 行を押す手は、ダンプで行を探して選んでから流す
+        # 手前の項目も証跡の置き場に撮り、ダンプも取る。行を押す手は、ダンプで行を探して選んでから流す
         self.assertEqual(runs, [("run", "test_03.1", "iphone"), ("inspect", "test_03.seek1", ""),
-                                ("run", "test_03", "iphone"),
+                                ("run", "test_03", "iphone"), ("inspect", "test_03", ""),
                                 ("run", "test_04", "iphone"), ("inspect", "test_04", "")])
-        # テストケースの頭で起動し直す（前のテストケースはなぞらない）
+        # テストケースの頭で起動し直す（前のテストケースは撮らない）
         self.assertIn("stopApp", self.body("test_03.1"))
-        self.assertIn(str((self.tmp / ".work" / "replay" / "out" / "iphone").resolve()), self.body("test_03"))
-        self.assertNotIn(str((self.out / "shots").resolve()), self.body("test_03"))
-        # なぞった項目の判定はそのまま。撮った項目だけ PENDING
-        self.assertEqual(self.sec("test_03")["result"], "OK")
+        self.assertIn(str((self.out / "shots" / "iphone").resolve()), self.body("test_03"))
+        # テストケースの項目は全部 PENDING（判定し直す）。ほかのテストケースの判定はそのまま
+        self.assertEqual(self.sec("test_03")["result"], "PENDING")
         self.assertEqual(self.sec("test_04")["result"], "PENDING")
         self.assertEqual(self.sec("test_01")["result"], "OK")
         log = self.log()
-        self.assertIn("--- 撮り直し: test_04", log)
-        self.assertIn("test_03 なぞった", log)
+        self.assertIn("--- 撮り直し: test_04（テストケースの頭から全部）", log)
+        self.assertIn("test_03 撮影済み", log)
         self.assertIn("test_04 撮影済み", log)
-        # 記録は撮った項目だけ書く（なぞった項目の記録は前の回のまま）
+        self.assertTrue((self.flows / "iphone" / "test_03.yaml").exists())
         self.assertTrue((self.flows / "iphone" / "test_04.yaml").exists())
-        self.assertFalse((self.flows / "iphone" / "test_03.yaml").exists())
+
+    def test_items_after_the_target_are_taken_too(self):
+        # 後ろの項目は撮り直す項目を当てにしている。前の回のデータのまま残さない
+        self.run_device(["test_01"])
+        self.assertEqual(self.runs(), ["test_01", "test_02"])
+        self.assertEqual(self.sec("test_02")["result"], "PENDING")
 
     def test_other_cases_are_not_touched(self):
         self.run_device(["test_06"])
         self.assertEqual(self.runs(), ["test_06"])
         self.assertIn("stopApp", self.body("test_06"))
 
-    def test_failure_while_replaying_loses_target(self):
+    def test_failure_at_the_head_loses_the_rest(self):
         self.failing.add("test_03")
         stopped, done, lost = self.run_device(["test_04"])
         self.assertEqual(done, 0)
-        self.assertEqual(lost, ["iphone test_03（なぞる途中で落ちた）", "iphone test_04"])
+        self.assertEqual(lost, ["iphone test_03", "iphone test_04"])
         # 撮れていないので、前の回の判定は捨てて PENDING。前の回の証跡と OK が残っていると
         # レポートに出てしまう。PENDING なら build_report.py が止める
+        self.assertEqual(self.sec("test_03")["result"], "PENDING")
         self.assertEqual(self.sec("test_04")["result"], "PENDING")
+        self.assertEqual(self.sec("test_03")["devices"]["iphone"]["unexpected"]["kind"], "failed")
+        self.assertEqual(self.sec("test_04")["devices"]["iphone"]["unexpected"],
+                         {"kind": "skipped", "reason": "同じテストケースの test_03 が落ちた"})
         self.assertNotIn("test_04", self.runs())
 
-    def test_retake_clears_the_record_and_replay_failure_skips_target(self):
+    def test_retake_clears_the_record(self):
         self.failing.add("test_03")
         self.run_device()
         self.assertEqual(self.sec("test_04")["devices"]["iphone"]["unexpected"]["kind"], "skipped")
         self.failing.clear()
         self.run_device(["test_04"])
+        self.assertNotIn("unexpected", self.sec("test_03")["devices"]["iphone"])
         self.assertNotIn("unexpected", self.sec("test_04")["devices"]["iphone"])
-        # なぞる項目（test_03）の記録は、撮り直しでは触らない
-        self.assertEqual(self.sec("test_03")["devices"]["iphone"]["unexpected"]["kind"], "failed")
-        self.failing.add("test_03")
-        self.run_device(["test_04"])
+
+    def test_settled_item_is_not_run_and_the_rest_is_skipped(self):
+        # 撮れないと分かって判定を付けた項目は、その端末では流さない。証跡と判定にも触らない
+        self.sec("test_03")["devices"]["iphone"]["unexpected"] = {"kind": "failed", "reason": "x", "settled": True}
+        self.sec("test_03")["result"] = "SKIP"
+        stopped, done, lost = self.run_device(["test_04"])
+        self.assertEqual(self.runs(), [])
+        self.assertEqual(self.sec("test_03")["result"], "SKIP")
+        self.assertEqual(self.sec("test_03")["devices"]["iphone"]["unexpected"]["settled"], True)
         self.assertEqual(self.sec("test_04")["devices"]["iphone"]["unexpected"],
-                         {"kind": "skipped", "reason": "同じテストケースの test_03 が落ちた"})
+                         {"kind": "skipped", "reason": "同じテストケースの test_03 が撮れないと判定済みだった"})
+        self.assertEqual(lost, ["iphone test_04"])
+        self.assertIn("test_03 撮影せず 撮れないと判定済み", self.log())
 
     def test_retake_appends_to_the_log(self):
         log = self.out / "progress_iphone.log"
@@ -3183,7 +3196,7 @@ class MainAnswer(CaseRunBase, unittest.TestCase):
 
 
 class MainRetake(CaseRunBase, unittest.TestCase):
-    """run_flows.py はマニフェストを見て、RETAKE の項目があればそれだけを撮り直す。"""
+    """run_flows.py はマニフェストを見て、RETAKE の項目があればそのテストケースを撮り直す。"""
 
     CASES = [
         {"title": "A", "items": [{"from": "list", "title": "a1", "expect": "x"}]},
@@ -3197,7 +3210,7 @@ class MainRetake(CaseRunBase, unittest.TestCase):
         self.path = self.out / "manifest.json"
         self.saved["simulators"] = RF["simulators"]
         RF["simulators"] = type("Sims", (), {"lookup": staticmethod(lambda udid: {"booted": True})})
-        # 手前の項目の打つ文字は前の回に決めてある
+        # 後ろの項目の打つ文字は前の回に決めてある
         self.sec("test_03")["devices"]["iphone"]["inputs"]["text:list.search_field"] = "猫"
         for _, s in MI.walk(self.manifest):
             s["result"] = "OK"
@@ -3220,38 +3233,62 @@ class MainRetake(CaseRunBase, unittest.TestCase):
         self.manifest = json.loads(self.path.read_text(encoding="utf-8"))
         return code
 
-    def test_only_marked_items_are_shot(self):
-        self.sec("test_02")["result"] = "RETAKE"
+    def test_only_cases_with_marked_items_are_shot(self):
+        self.sec("test_01")["result"] = "RETAKE"
         self.assertEqual(self.main(), 0)
-        # テストケース B の頭。起動し直して一覧まで運び、撮る（1本）
-        self.assertEqual(self.runs(), ["test_02"])
-        self.assertIn("stopApp", self.body("test_02"))
-        self.assertEqual(self.sec("test_02")["result"], "PENDING")
-        self.assertEqual(self.sec("test_01")["result"], "OK")
+        # テストケース A の頭。起動し直して一覧まで運び、撮る（1本）
+        self.assertEqual(self.runs(), ["test_01"])
+        self.assertIn("stopApp", self.body("test_01"))
+        self.assertEqual(self.sec("test_01")["result"], "PENDING")
+        self.assertEqual(self.sec("test_02")["result"], "OK")
         self.assertNotIn("resume", self.manifest)
+        self.assertIn("判定し直す項目: test_01", self.printed)
 
     def test_nothing_marked_shoots_everything(self):
         self.assertEqual(self.main(), 0)
         self.assertEqual([n for n in self.runs() if "." not in n], ["test_01", "test_02", "test_03"])
         self.assertEqual(self.sec("test_01")["result"], "PENDING")
 
-    def test_stopped_retake_is_retaken_again_not_everything(self):
-        # 撮り直す項目で止まると、その項目は PENDING に戻って RETAKE の印が消える。
-        # resume の retake に残っているので、叩き直しても全部は撮らない
-        self.sec("test_03")["result"] = "RETAKE"
-        self.sec("test_03")["devices"]["iphone"]["inputs"]["text:list.search_field"] = ""
+    def test_values_of_the_case_are_decided_again(self):
+        # 前の回の値は、データが変わると当たらない。撮り直すテストケースの値は空にして止まって訊く
+        self.sec("test_02")["result"] = "RETAKE"
         self.assertEqual(self.main(), 1)
-        # 止まった手からは続けないので、そう案内する
-        self.assertIn("撮り直す項目のテストケースの頭からなぞり直す", self.printed)
-        self.assertNotIn("続きから走る", self.printed)
+        self.assertEqual(self.sec("test_03")["devices"]["iphone"]["inputs"]["text:list.search_field"], "")
+        self.assertEqual(self.manifest["resume"]["ask"]["item"], "test_03")
+        self.assertIn("続きから走る", self.printed)
+
+    def test_settled_item_is_marked_and_kept(self):
+        # 判定を付けて外した項目は、撮り直しを始めるときに印を付ける。流さず、判定もそのまま
+        self.sec("test_02")["devices"]["iphone"]["unexpected"] = {"kind": "failed", "reason": "x"}
+        self.sec("test_02")["result"] = "SKIP"
+        self.sec("test_03")["result"] = "RETAKE"
+        self.assertEqual(self.main(), 1)
+        self.assertEqual(self.sec("test_02")["devices"]["iphone"]["unexpected"],
+                         {"kind": "failed", "reason": "x", "settled": True})
+        self.assertEqual(self.sec("test_02")["result"], "SKIP")
+        self.assertEqual(self.runs(), [])
+        self.assertEqual(self.sec("test_03")["devices"]["iphone"]["unexpected"]["kind"], "skipped")
+        # 撮れなかった項目は判定より先に retaker に回るので、判定し直す項目には並べない
+        self.assertNotIn("判定し直す項目", self.printed)
+
+    def test_stopped_retake_goes_on_from_the_stopped_hand(self):
+        # 撮り直す項目で止まると、その項目は PENDING に戻って RETAKE の印が消える。
+        # resume の retake に残っているので、叩き直しても全部は撮らない。止まった手から続ける
+        self.sec("test_03")["result"] = "RETAKE"
+        self.assertEqual(self.main(), 1)
+        self.assertIn("続きから走る", self.printed)
         self.assertEqual(self.manifest["resume"]["retake"], ["test_03"])
+        self.assertEqual(self.manifest["resume"]["from"], "test_03")
         self.assertEqual(self.sec("test_03")["result"], "PENDING")
+        self.assertEqual(self.runs(), ["test_02"])
         self.calls.clear()
         self.sec("test_03")["devices"]["iphone"]["inputs"]["text:list.search_field"] = "猫"
         self.assertEqual(self.main(), 0)
-        self.assertNotIn("test_01", self.runs())
-        self.assertIn("test_03", self.runs())
+        # この回で決めた値は消さない。手前の項目（test_02）はもう撮ってある
+        self.assertEqual(self.runs(), ["test_03"])
+        self.assertIn("- inputText: '猫'", self.body("test_03"))
         self.assertNotIn("resume", self.manifest)
+        self.assertIn("判定し直す項目: test_02, test_03", self.printed)
 
 
 class ResumeRun(CaseRunBase, unittest.TestCase):

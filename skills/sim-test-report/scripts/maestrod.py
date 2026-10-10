@@ -287,8 +287,8 @@ def run_key(save_to):
     """ダンプの置き場（`.work/dumps/` の下）。実行ごとに分けて、上書きされないようにする。
 
     - `<出力先>/shots/<端末>` → `<出力先の名前>/<端末>`
-    - `.work/replay/<出力先の名前>/<端末>`（run_flows.py がなぞる項目を撮る先と、`do` の要素を
-      探すために画面を読む・送るときの置き場） → `<出力先の名前>/<端末>/replay`。撮った証跡の
+    - `.work/scratch/<出力先の名前>/<端末>`（run_flows.py が `do` の要素を
+      探すために画面を読む・送るときの置き場） → `<出力先の名前>/<端末>/scratch`。撮った証跡の
       ダンプと名前がぶつからないように下を分ける
     - 出力先が無い（探索の下見など） → `_probe/<日付>`
     """
@@ -296,8 +296,8 @@ def run_key(save_to):
         d = Path(save_to).expanduser().resolve()
         if d.parent.name == "shots":
             return "{}/{}".format(d.parent.parent.name or "misc", d.name)
-        if d.parent.parent.name == "replay":
-            return "{}/{}/replay".format(d.parent.name, d.name)
+        if d.parent.parent.name == "scratch":
+            return "{}/{}/scratch".format(d.parent.name, d.name)
         return d.name or "misc"
     return "_probe/" + time.strftime("%Y-%m-%d")
 
