@@ -525,11 +525,15 @@ class Seeker:
         return want.rows(self.dump, box)
 
     def seen(self, parent=None):
-        """画面の中に見えている ID（親の中なら、親の枠の中のもの）。送る前後で比べて端を知る。"""
+        """画面の中に見えている ID（親の中なら、親の枠の中のもの）。送る前後で比べて端を知る。
+
+        **ID の無い行は、表示テキストで見比べる。** `by: label` の要素（メニューやダイアログの
+        選択肢）は ID を持たないことが多い。ID だけで比べると、ID の無い行だけが送られる画面では
+        送っても変わらないように見え、1回で端と決めてしまう。"""
         box = self.boxed(parent)
-        return set((r["id"], r["cx"], r["cy"]) if parent is not None else r["id"]
-                   for r in dump_rows(self.dump) if r["on"] and r["id"]
-                   and (box is None or (box[0] <= r["cx"] <= box[2] and box[1] <= r["cy"] <= box[3])))
+        return set((r["id"], r["cx"], r["cy"]) if parent is not None else (r["id"] or "\t" + r["text"])
+                   for r in dump_rows(self.dump) if r["on"] and (r["id"] or r["text"])
+                   and (box is None or in_box(r, box)))
 
     def hunt(self, want, parent=None):
         """`want` が画面の中（`parent` の中）に見えるまで送る。見えれば None、無ければ理由の文。

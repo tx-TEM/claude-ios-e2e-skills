@@ -1619,6 +1619,7 @@ class ItemRunBase:
     """
 
     items = [{"from": "list", "do": ["see:list.footer"]}]
+    repo = FIXTURE
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
@@ -1648,7 +1649,7 @@ class ItemRunBase:
 
     def build(self):
         items = [dict({"title": "t", "expect": "x"}, **it) for it in self.items]
-        rows, _ = write_flows(None, cases=[{"title": "T", "items": items}])
+        rows, _ = write_flows(None, self.repo, cases=[{"title": "T", "items": items}])
         self.row = rows[-1]
         self.sec = {"name": self.row["name"], "flow": self.row["flow"],
                     "devices": {"iphone": {"inputs": dict(self.row["inputs"]), "picked": {}}},
@@ -1669,7 +1670,7 @@ class ItemRunBase:
         shots.mkdir(parents=True, exist_ok=True)
         dv = RF["DeviceRun"]("iphone", "AAAA", shots, self.tmp / "replay", self.flows,
                              self.out / "progress_iphone.log", "jp.example.App",
-                             screen_map.load_map(str(FIXTURE)), False, retake, ask)
+                             screen_map.load_map(str(self.repo)), False, retake, ask)
         self.dv = dv
         with contextlib.redirect_stdout(io.StringIO()) as o, contextlib.redirect_stderr(io.StringIO()):
             got = RF["run_item"](dv, self.sec, self.row, False, first)
@@ -1778,6 +1779,58 @@ class SeekRun(ItemRunBase, unittest.TestCase):
         self.assertEqual(got, ("failed", "list.footer が見つからない（{}回送っても端に着かない）"
                                          .format(RF["SEEK_SWIPES"])))
         self.assertEqual(len(self.swipes()), RF["SEEK_SWIPES"])
+
+
+class LabelRouteRun(ItemRunBase, unittest.TestCase):
+    """経路の途中で by: label の要素を押す手は、do と同じく1手にして、run_flows.py がダンプで探す。
+    経路のフローの scrollUntilVisible は文言を含む要素で探すので、同じ語を含むほかの文言が
+    見えた時点で止まり、押す要素が画面外に残る。"""
+
+    # ログインの案内を出してから詳細に戻る。戻る経路で、ラベルの「キャンセル」を押す
+    items = [{"from": "login_alert", "when": ["未ログイン"]}, {"from": "detail"}]
+
+    def setUp(self):
+        self.repo = Path(tempfile.mkdtemp()) / "app"
+        shutil.copytree(FIXTURE, self.repo)
+        alert = self.repo / "screen-map" / "screens" / "login_alert.yaml"
+        alert.write_text(alert.read_text(encoding="utf-8").replace(
+            "  - id: login_alert.cancel_button\n", "  - id: キャンセル\n    by: label\n"), encoding="utf-8")
+        super().setUp()
+
+    def tearDown(self):
+        super().tearDown()
+        shutil.rmtree(self.repo.parent)
+
+    def test_route_label_is_a_hand(self):
+        self.assertEqual([(u.kind, getattr(u.step, "key", None)) for u in self.row["units"]],
+                         [("hand", "経路 tap:キャンセル")])
+        self.assertEqual(self.row["inputs"], {})          # 値は決めない。撮る側にも訊かない
+
+    def test_other_text_with_the_word_does_not_stop_the_search(self):
+        # 「ログインをキャンセルしない」が見えていても、「キャンセル」そのものが画面外なら送って探す
+        other = dump_line(195, 300, "○", "", "ログインをキャンセルしない")
+        self.dumps = [DUMP_HEAD + other + dump_line(195, 1400, "×", "", "キャンセル"),
+                      DUMP_HEAD + other + dump_line(195, 700, "○", "", "キャンセル")]
+        self.assertEqual(self.run_item()[0], ("done", None))
+        self.assertEqual(self.swipes(), ["down"])
+        body = self.body(self.row["name"])
+        self.assertNotIn("scrollUntilVisible", body)
+        self.assertIn("tapOn:\n          text: '^キャンセル$'", body)
+        self.assertEqual(self.picked(), {})
+
+    def test_invisible_characters_fall_back_to_containing(self):
+        # 前後に不可視文字が付いて文言そのものの行が無ければ、文言を含む行で見つける（送らない）
+        self.dumps = [DUMP_HEAD + dump_line(195, 700, "○", "", "\u200eキャンセル\ufe0f")]
+        self.assertEqual(self.run_item()[0], ("done", None))
+        self.assertEqual(self.swipes(), [])
+
+    def test_rows_without_ids_are_compared_by_text(self):
+        # ID の無い行だけが送られる画面。ID で見比べると送っても変わらないので1回で端と決めてしまう
+        page = lambda *texts: DUMP_HEAD + "".join(dump_line(195, 200 + 100 * k, "○", "", t)
+                                                  for k, t in enumerate(texts))
+        self.dumps = [page("A", "B"), page("C", "D"), page("E", "キャンセル")]
+        self.assertEqual(self.run_item()[0], ("done", None))
+        self.assertEqual(self.swipes(), ["down", "down"])
 
 
 class AutoPickRun(ItemRunBase, unittest.TestCase):
@@ -2391,6 +2444,14 @@ class LabelAnchor(unittest.TestCase):
         self.assertIn("            - tapOn:\n                text: '^Appにトラッキングしないように要求$'\n", flow)
         self.assertIn("            - tapOn:\n                text: '.*Appにトラッキングしないように要求.*'\n", flow)
         self.assertLess(flow.index("runFlow"), flow.index("id: '^home$'"))
+
+    def test_route_label_has_no_scroll_in_the_route_flow(self):
+        # 経路の途中でラベルの要素を押す手は1手に分かれ、経路のフローで文言を含む要素までスクロールしない
+        rows, flows = write_flows([{"from": "login_alert", "title": "a", "expect": "a"}], self.repo)
+        self.assertEqual([(u.kind, getattr(u.step, "key", None)) for u in rows[0]["units"]],
+                         [("flow", None), ("hand", "経路 tap:レビューを書く")])
+        self.assertNotIn("text: '.*レビューを書く.*'\n    direction", "".join(flows.values()))
+        self.assertIn("tapOn:\n          text: '^レビューを書く$'", flows["test_01.yaml"])
 
     def test_label_tap_tries_the_whole_label_first(self):
         # 「キャンセル」を含むほかの文言があっても、文言そのものの要素を押す。見えているかは1回だけ
