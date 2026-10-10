@@ -505,6 +505,72 @@ class Manifest(unittest.TestCase):
         shutil.rmtree(Path(m["flows"]), ignore_errors=True)
         shutil.rmtree(work)
 
+    def build(self, cases, repo=FIXTURE):
+        work = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, work)
+        plan, out = work / "plan.json", work / "out"
+        plan.write_text(json.dumps({"app": "x", "repo": str(repo), "cases": cases}), encoding="utf-8")
+        printed = run_manifest([plan, out, "--device", "iphone=AAAA"])
+        m = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+        self.addCleanup(shutil.rmtree, Path(m["flows"]), True)
+        return m, printed
+
+    def test_preconditions_are_gathered(self):
+        # 撮る前に聞く前提を、文言ごとにどの項目のものかを添えて集める。同じ操作の分岐の when どうしは両立しない
+        m, printed = self.build([
+            {"title": "A", "items": [
+                {"from": "review_editor", "when": ["ログイン中"], "title": "a", "expect": "a"},
+                {"from": "detail", "title": "b", "expect": "b"}]},
+            {"title": "B", "items": [
+                {"from": "login_alert", "when": ["未ログイン"], "title": "c", "expect": "c"}]},
+            {"title": "C", "items": [
+                {"from": "review_editor", "when": ["ログイン中"], "title": "d", "expect": "d"}]}])
+        self.assertEqual(m["preconditions"], [
+            {"when": "ログイン中", "items": ["test_01", "test_04"], "rivals": ["未ログイン"]},
+            {"when": "未ログイン", "items": ["test_03"], "rivals": ["ログイン中"]}])
+        self.assertIn("撮る前に確かめる前提", printed)
+        self.assertIn("    ログイン中（test_01, test_04）  両立しない: 未ログイン\n", printed)
+
+    def test_precondition_written_as_a_string(self):
+        # plan の when は文字列1つでも書ける。1文字ずつに割らずに、1つの前提として集める
+        m, _ = self.build([{"title": "A", "items": [
+            {"from": "review_editor", "when": "ログイン中", "title": "a", "expect": "a"}]}])
+        self.assertEqual(m["preconditions"], [{"when": "ログイン中", "items": ["test_01"], "rivals": []}])
+        self.assertEqual(MI.find(m, "test_01")[1]["when"], ["ログイン中"])
+
+    def test_rival_only_when_both_are_in_the_plan(self):
+        # 両立しない前提がこの撮影に並んでいなければ、両立しないとして出さない
+        m, printed = self.build([{"title": "A", "items": [
+            {"from": "review_editor", "when": ["ログイン中"], "title": "a", "expect": "a"}]}])
+        self.assertEqual(m["preconditions"], [{"when": "ログイン中", "items": ["test_01"], "rivals": []}])
+        self.assertIn("    ログイン中（test_01）\n", printed)
+
+    def test_no_preconditions(self):
+        m, printed = self.build([{"title": "A", "items": [{"from": "list", "title": "a", "expect": "a"}]}])
+        self.assertEqual(m["preconditions"], [])
+        self.assertNotIn("撮る前に確かめる前提", printed)
+
+    def test_explore_items_have_preconditions_too(self):
+        # 探索で撮る項目も、その状態でないと撮れない。全部が探索でも、マップがあれば両立しない前提も出す
+        m, _ = self.build([{"title": "A", "explore": "画面 settings がマップに無い", "items": [
+            {"from": "settings", "when": ["ログイン中"], "title": "a", "expect": "a"},
+            {"from": "settings", "when": ["未ログイン"], "title": "b", "expect": "b"}]}])
+        self.assertEqual(m["preconditions"], [
+            {"when": "ログイン中", "items": ["test_01"], "rivals": ["未ログイン"]},
+            {"when": "未ログイン", "items": ["test_02"], "rivals": ["ログイン中"]}])
+
+    def empty_repo(self):
+        repo = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, repo)
+        return repo
+
+    def test_preconditions_without_a_map(self):
+        # マップが無い（全部が探索）なら、両立するかは分からないので rivals は空
+        m, _ = self.build([{"title": "A", "explore": "画面マップが無い", "items": [
+            {"from": "settings", "when": ["ログイン中"], "title": "a", "expect": "a"}]}],
+            repo=self.empty_repo())
+        self.assertEqual(m["preconditions"], [{"when": "ログイン中", "items": ["test_01"], "rivals": []}])
+
     def test_unexpected_is_kept_when_rebuilt(self):
         # retaker が plan を直して作り直しても、撮れなかった項目だけを撮り直せるように残す
         work = Path(tempfile.mkdtemp())

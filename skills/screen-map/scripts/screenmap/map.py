@@ -91,6 +91,21 @@ class ScreenMap:
                     heapq.heappush(heap, (cost, n, nxt))
         return None
 
+    def rivals(self):
+        """両立しない前提どうし。{`when` の文言: {両立しない文言, …}}。
+
+        **同じ操作の分岐の `when` どうしを両立しないとする。** 分岐はどれか1つしか起きない（screen.py の
+        branches）ので、片方の状態ならもう片方の状態ではない。要素の `when` どうしは、文言の意味を
+        読まないと両立するかが分からないので入れない（スクリプトは文言が一致するかだけを見る）。
+        """
+        out = {}
+        for s in self.screens.values():
+            for a in s.actions:
+                whens = [str(b["when"]) for b in a.branches or []]
+                for w in whens:
+                    out.setdefault(w, set()).update(x for x in whens if x != w)
+        return out
+
     def auto_hosts(self, sid):
         """sid を自動で出すことがある画面（被さる先）と、その after。[(画面, after)]。"""
         return sorted((h, after) for h, s in self.screens.items()

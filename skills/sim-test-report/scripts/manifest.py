@@ -186,6 +186,10 @@ sim-driver は同じテストケースの中で起動し直さない。**項目�
 — 親がテストケースなので、題の文字列で紐づけ直さない。名前で1項目を引く、全項目を順に
 並べるときは `manifest_items.py`（`walk()` / `find()`）を通す。
 
+`preconditions` は項目の前提（`when`）を文言ごとにまとめたもの（`when` / `items`: その前提の
+項目の名前 / `rivals`: この撮影に並んだ前提のうち両立しないもの）。レビューで、前提ごとに撮れるかを
+ユーザーに聞くのに使う（`when` はアプリをその状態にしないので）。
+
 テストケースの `launch` / `explore` は、レビューの「ここでアプリを起動し直す」や sim-driver の
 起動に、題はレポートの見出しに使う。`after` はテストケースの後始末で、
 画面マップの `leaves` / `reset` から flowgen が決めたもの（`relaunch`: 次の頭で起動し直す、
@@ -249,6 +253,7 @@ from pathlib import Path
 import manifest_items
 from device import simulators
 from flowgen import flow as flows_of   # plan からフローを作る
+from screenmap.map import load_map
 
 
 LABELS = {"iphone": "iPhone", "ipad": "iPad"}
@@ -321,7 +326,7 @@ def main():
             "title": it.get("title", ""),      # 確認項目。plan が正
             "from": it.get("from"),            # 操作を始める画面（plan）
             "do": it.get("do") or [],          # 確かめる操作（plan）。レビューで読み上げる
-            "when": it.get("when") or [],      # 項目の前提（plan）
+            "when": whens(it.get("when")),     # 項目の前提（plan）。文字列1つでもリストにする
             "screen": e.get("screen"),         # 撮った画面（経路の計算）。探索は撮るまで決まらない
             "expect": r["expect"],             # 証跡の中で何を確かめるか。plan が正
             "checked": e.get("checked"),       # None なら証跡だけが根拠
@@ -351,8 +356,10 @@ def main():
                   "after": afters.get(c["title"]),
                   "items": [item_of(r) for r in c["items"]]} for c in cases]
     out.parent.mkdir(parents=True, exist_ok=True)
+    needs = preconditions(case_list, rivals_of(plan["repo"]))
     manifest = dict(top, app=plan.get("app"), clear_state=bool(plan.get("clear_state")),
-                    repo=plan["repo"], devices=info, flows=str(flows), cases=case_list)
+                    repo=plan["repo"], devices=info, flows=str(flows), preconditions=needs,
+                    cases=case_list)
     out.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     items = [it for _, it in manifest_items.walk(manifest)]
     carried = []
@@ -390,10 +397,48 @@ def main():
         print("  引き継がなかった実行時の値（鍵が変わった。撮るときに止まって訊かれるので、--value で渡し直す）:")
         for c in dropped:
             print("    " + c)
+    if needs:
+        print("  撮る前に確かめる前提（シミュレーターがその状態かは、ユーザーにしか分からない）:")
+        for n in needs:
+            print("    {}（{}）{}".format(n["when"], ", ".join(n["items"]),
+                                     "  両立しない: " + " / ".join(n["rivals"]) if n["rivals"] else ""))
     nochk = sum(1 for s in items if s["flow"] and not s["checked"])
     if nochk:
         print(f"  {nochk}件はフローに自動確認が無い（証跡だけが根拠）")
     if blank:
         print(f"  {blank}件はフローが無い（探索で撮る。sim-driver に渡す）")
+
+def whens(when):
+    """plan の項目の `when` をリストにする。plan は文字列1つでも受け付ける（flow.py の read_items）。"""
+    if not when:
+        return []
+    return [when] if isinstance(when, str) else list(when)
+
+
+def rivals_of(repo):
+    """画面マップの両立しない前提どうし（ScreenMap.rivals）。マップが無ければ（全部が探索）空。"""
+    try:
+        return load_map(repo).rivals()
+    except SystemExit:
+        return {}
+
+
+def preconditions(case_list, rivals):
+    """項目の前提（`when`）を文言ごとにまとめる。[{"when", "items", "rivals"}]、出てきた順。
+
+    **撮る前にユーザーに聞くため。** `when` は経路と期待の枝を選ぶだけで、アプリをその状態に
+    しない。シミュレーターがその状態でないと、撮影で落ちるまで分からない。
+
+    `items` はその前提の項目の名前。`rivals` は、この撮影に並んだ前提のうち両立しないもの
+    （ScreenMap.rivals）。両立しない前提は1台のシミュレーターで同時に満たせないので、両方は同じ
+    撮影では撮れない。探索のテストケースの項目も入れる（探索でも状態は要る）。
+    """
+    found = {}
+    for _, it in manifest_items.walk({"cases": case_list}):
+        for w in it["when"]:
+            found.setdefault(str(w), []).append(it["name"])
+    return [{"when": w, "items": names, "rivals": [x for x in found if x in rivals.get(w, ())]}
+            for w, names in found.items()]
+
 
 main()
