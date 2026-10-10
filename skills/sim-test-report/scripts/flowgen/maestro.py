@@ -444,7 +444,7 @@ def emit_flow(mp, steps, app, clear_state, start, launch=True, values=None, inde
 
     `launch=False` はアプリを起動し直さない。続きのフローを出すため。
     `values` / `indexes` は実行時に決めた値と、同じ ID の行のうち何番目か（鍵はステップの `key`）。
-    `shots` は撮影先のディレクトリ（端末と、撮るかなぞるかで変わる）。
+    `shots` は撮影先のディレクトリ（端末で変わる）。
     `head=False` は、居る画面の anchor を頭で待たない（1手ずつ流すフロー。run_flows.py が
     ダンプで見てから流すので要らず、アプリの外に居るまま撮るときは待てない）。
 

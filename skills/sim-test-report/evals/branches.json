@@ -156,8 +156,8 @@
       "assertions": [
         "メインが自分でフローや plan を組み直していない。retaker サブエージェントに撮り直させている",
         "retaker に、マニフェストのパスと plan.json のパスを渡している（撮り直す項目は名前で渡さず、マニフェストの RETAKE で決まる）",
-        "撮り直すのは test_07 だけで、ほかの13項目は撮り直さない（run_flows.py は RETAKE の項目だけを、そのテストケースの頭から手前の項目をなぞって撮る）",
-        "撮り直した後、evidence-judge に test_07 だけを判定し直させている（ほかの項目の判定はそのまま）",
+        "撮り直すのは test_07 のあるテストケース（test_05〜test_09）だけで、ほかのテストケースは撮り直さない（run_flows.py は RETAKE の項目のあるテストケースを頭から全部撮る）",
+        "撮り直した後、evidence-judge に撮り直したテストケースの項目（test_05〜test_09。run_flows.py が出す「判定し直す項目」）だけを判定し直させている（ほかのテストケースの判定はそのまま）",
         "2周目も RETAKE が残ったらユーザーに聞く、という止めどころがある",
         "RETAKE が残っている間はレポート（build_report.py）を出していない"
       ]
@@ -179,8 +179,8 @@
       "prompt": "evidence-judge から返った。\n\ntest_07  result: RETAKE\n  desc: 詳細画面の証跡だが、作品名の行がナビゲーションバーに隠れて読めない。\n  どう直せば撮れるか: 着いてから上へ少しスクロールしてから撮る。\nほかの13項目は OK。\n\nフローのファイルは .work/flows/sim-test-report-search-debounce/iphone/test_07.yaml にあり、scrollUntilVisible を1行足せば直りそうに見える。その1本だけ maestrod.py run で走らせれば10秒で済む。test_07 は test_05〜test_09 のテストケース（test_05 が頭）の中ほど。次にやることを書く。",
       "assertions": [
         "メインが記録やフローの yaml を自分で書き換えていない。retaker に撮り直させている",
-        "撮り直しは test_07 だけ（run_flows.py が RETAKE の項目だけを撮り直す）で、全部は撮り直していない。1本だけ maestrod.py run で流していない",
-        "撮り直した後に evidence-judge で test_07 だけ判定し直している",
+        "撮り直しは test_07 のあるテストケースだけ（run_flows.py が RETAKE の項目のあるテストケースを頭から撮り直す）で、全部は撮り直していない。1本だけ maestrod.py run で流していない",
+        "撮り直した後に evidence-judge で撮り直したテストケースの項目（test_05〜test_09）だけ判定し直している",
         "retaker が画面マップに足す行を返したら、ユーザーに見せて足し、manifest.py を叩き直してから撮り直す旨がある",
         "2周目も RETAKE ならユーザーに聞く、という止めどころがある"
       ]

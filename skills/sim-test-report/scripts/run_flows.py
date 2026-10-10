@@ -14,7 +14,8 @@
 **何をするかはマニフェストで決まる**（引数では選ばない）。
 
   1. `resume` があれば、止まったところから続ける
-  2. 判定が `RETAKE` の項目か、撮れなかった項目（`unexpected`）があれば、それだけを撮り直す（下の「撮り直し」）
+  2. 判定が `RETAKE` の項目か、撮れなかった項目（`unexpected`）があれば、その項目のあるテストケースを
+     頭から撮り直す（下の「撮り直し」）
   3. どちらも無ければ、全部を最初から撮る
 
 **どのシミュレーターで撮るかはマニフェストの `devices` に、記録の置き場は `flows` に
@@ -57,7 +58,7 @@
 判定を `PENDING` に戻す（撮れずに終わっても、前の回の画像と OK がレポートに残らない）。
 再開と撮り直しのときは進捗ログに区切りの行を足して続ける。
 
-**未定で止まったら、叩き直すと続きから走る**（撮り直しは除く。下の「撮り直し」）。撮り終えた端末は飛ばし、止まった端末の
+**未定で止まったら、叩き直すと続きから走る**（撮り直しも同じ）。撮り終えた端末は飛ばし、止まった端末の
 止まった項目の止まった手から走る。状態はマニフェストの `resume` に書き、走り切ったら消す。`resume` には
 止まったテストケースを組んだ状態（`cursor`）も入れ、叩き直したときに同じ手順を組み直す。
 
@@ -68,7 +69,7 @@
 入ると次の到達判定が落ちる。ここが最後まで走り切ってから sim-driver に渡せば、そうならない。
 マニフェストの並びに探索のテストケースが混ざっていてもよい（実行しないだけ）。
 
-**撮り直し: 判定が `RETAKE` の項目と、撮れなかった項目だけを撮り直す。** 撮れなかった項目は、
+**撮り直し: 判定が `RETAKE` の項目と、撮れなかった項目のあるテストケースを、頭から全部撮り直す。** 撮れなかった項目は、
 どれかの端末に `unexpected` が付いた項目。**判定に回す前に撮り直す** — 撮れなかったのは撮る側の
 問題なので、retaker が直してから叩き直す。**拾うのは判定がまだ（`PENDING`）の項目だけ。**
 `unexpected` は探索で撮っても消えない記録なので、判定が付いたあと（探索で撮って OK / NG に
@@ -76,14 +77,26 @@
 逆に、撮れないと分かった項目（前提の状態が無い）も、判定がまだなら撮り直しに行く。外すには、
 叩く前に判定（`SKIP`）を付ける（reference/flow-failed.md）。
 撮り直す項目を名前で渡さない — 判定
-（evidence-judge）と撮り直し（ここ）の間で名前を写し直すと、写し間違える。テストケースの中の
-項目は前の項目に依存するので、その項目だけを走らせても前提の状態が無い。**そのテスト
-ケースの頭で起動し直して走らせ、手前の項目は撮らずになぞる。** テストケースどうしは依存
-しないので、前のテストケースはなぞらない。撮り直しの前にアプリに何が残っているかは
-分からない（前の回の最後のテストケースは後始末をしない）ので、居る画面からは繋がない。
-なぞった項目の証跡と判定には触らない（撮影先は作業用の置き場に逃がす）。撮り直した項目だけ
-判定を `PENDING` に戻す。手前の項目の実行時の値はマニフェストに残っているものを使う —
-そこが空なら走らせられないので止まる。
+（evidence-judge）と撮り直し（ここ）の間で名前を写し直すと、写し間違える。
+
+**テストケースの頭で起動し直し、全部の項目を撮る。** テストケースの中の項目は前後で当てにし合う
+ので、その項目だけを撮ると前提の状態が無い。手前の項目を撮らずに前の回の値でなぞって前提を作ると、
+データが変わるアプリ（API の中身が変わる、ランダムに並ぶ）では、前の回に選んだ行がもう無くて落ちるか、
+撮り直した項目だけが新しいデータを見て、手前と後ろの項目の証跡と判定は前の回のデータのまま残る。
+テストケースごと撮り直せば、前提と証跡が食い違わない。撮った項目は全部、判定を `PENDING` に戻す
+（呼ぶ側が判定し直す。最後に「判定し直す項目」を出す）。テストケースどうしは依存しないので、
+ほかのテストケースは撮らない。撮り直しの前にアプリに何が残っているかは分からない（前の回の
+最後のテストケースは後始末をしない）ので、居る画面からは繋がない。
+
+**撮り直すテストケースの実行時の値（`inputs`）は、始めるときに空にして決め直す**（止まって訊く。
+`begin_retake()`）。前の回の値はデータが変わると当たらず、当たっても前の回のデータに合わせて決めたもの。
+止まったら、ふつうに撮るときと同じく叩き直すと続きから走る。
+
+**撮れないと分かって判定を付けた項目（`SKIP` にした、探索で撮った）は、その端末では流さない。**
+その端末に `unexpected` が残っている項目で、始めるときに `settled` の印を付ける。証跡と判定にも
+触らず、後ろの項目はこの項目を当てにしているので、落ちたときと同じく飛ばす（`unexpected` の
+`skipped`）。ほかの端末では撮るので判定は `PENDING` に戻るが、印のある端末の記録は撮り直しに
+拾わない（`to_retake()`）。流すと、外した項目が撮り直しのたびに戻ってくる。
 
 **撮り直す項目は、走り始めるときに `resume` の `retake` に書き、走り切ったら消す。** 撮る前に
 判定を `PENDING` に戻すので、途中で止まると `RETAKE` の印が消える。印だけを見ていると、叩き直した
@@ -198,20 +211,41 @@ def save(manifest_path, manifest):
 
 
 def retake_runs(cases, names):
-    """撮り直しで走らせるテストケースと項目。[(テストケース, [(項目, "shot" / "replay")])]。
+    """撮り直しで走らせるテストケース。撮り直す項目のあるテストケースを、頭から終わりまで全部撮る。
 
-    撮り直す項目ごとに、**そのテストケースの頭（起動し直して）からその項目まで**を走らせる。
-    手前の項目は `replay`（なぞるだけで撮らない）。同じテストケースに撮り直す項目が2つあれば、
-    後ろのほうまで1回だけ走らせる。テストケースどうしは依存しないので、前のテストケースは
-    なぞらない。
+    テストケースの中の項目は前後で当てにし合うので、撮り直す項目だけを新しく撮ると、手前と後ろの
+    項目の証跡は前の回のデータを見たまま残る（データが変わるアプリでは食い違う）。テストケース
+    どうしは依存しないので、ほかのテストケースは撮らない。
     """
-    out = []
-    for c in cases:
-        hit = [k for k, it in enumerate(c["items"]) if it["name"] in names]
-        if hit:
-            out.append((c, [(it, "shot" if it["name"] in names else "replay")
-                            for it in c["items"][:max(hit) + 1]]))
-    return out
+    return [c for c in cases if any(it["name"] in names for it in c["items"])]
+
+
+def settled(sec, device):
+    """その端末で、撮れないと分かって判定を付けて外した項目か（撮り直しで流さない）。
+    撮り直しを始めるときに印を付ける（begin_retake()）。"""
+    return bool((sec["devices"][device].get("unexpected") or {}).get("settled"))
+
+
+def begin_retake(manifest, cases, names):
+    """撮り直しを始める前に、撮り直すテストケースの項目を整える。
+
+    - **判定を付けて外した項目（`SKIP` にした、探索で撮った）は、その端末の `unexpected` に印
+      （`settled`）を付ける。** その端末では流さない。ほかの端末で撮り直すと判定は `PENDING` に戻るが、
+      印があれば撮り直しに拾わない（to_retake()）。印が無いと、撮れないと分かった項目がまた撮り直しに来る
+    - **流す項目の実行時の値（`inputs`）を空にする。** 撮り直しでは決め直す（止まって訊く）。前の回の
+      値はデータが変わると当たらず、当たっても前の回のデータに合わせて決めたもの
+
+    叩き直して続きから走るときは呼ばない（この回で決めた値を消してしまう）。
+    """
+    secs = {it["name"]: it for _, it in manifest_items.walk(manifest)}
+    for c in retake_runs(cases, names):
+        for it in c["items"]:
+            sec = secs[it["name"]]
+            for d, dev in sec["devices"].items():
+                if dev.get("unexpected") and sec.get("result") not in ("PENDING", "RETAKE"):
+                    dev["unexpected"]["settled"] = True
+                if not settled(sec, d):
+                    dev["inputs"] = {k: "" for k in dev.get("inputs") or {}}
 
 
 def dump_rows(dump):
@@ -699,10 +733,10 @@ class Hand:
     """1手を、探して値を決めるところまで（run_item() から呼ぶ）。結果は `status` が None なら
     流してよく、("failed", 理由) / ("stopped", 何手目か) なら流さない。"""
 
-    def __init__(self, dv, sec, k, st, values, indexes, notes, record, replay):
+    def __init__(self, dv, sec, k, st, values, indexes, notes, record):
         self.dv, self.k, self.st = dv, k, st
         self.values, self.indexes, self.notes = values, indexes, notes
-        self.record, self.replay = record, replay
+        self.record = record
         self.dev = sec["devices"][dv.device]
         self.name = sec["name"]
 
@@ -711,15 +745,9 @@ class Hand:
         print(f"{self.name} {why}", file=sys.stderr)
         return ("failed", why)
 
-    def again(self):
-        """止まったあと叩き直すとどうなるか。撮り直しは止まった手からは続けず、テストケースの頭からなぞり直す。"""
-        if self.dv.retake:
-            return "撮り直す項目のテストケースの頭からなぞり直す"
-        return "続きから走る"
-
     def answer(self, what):
         """値の返し方。値は空白や記号を含むので、引用符で囲んで渡させる。"""
-        return (f"同じコマンドに --value '<{what}>' を付けて叩き直す（{self.again()}。"
+        return (f"同じコマンドに --value '<{what}>' を付けて叩き直す（続きから走る。"
                 "値にシングルクォートが入るなら '\\'' と書く）")
 
     def stop(self, log, message):
@@ -731,13 +759,8 @@ class Hand:
         return ("stopped", self.k)
 
     def missing(self, key, found=None):
-        """撮影する側が決める値が空。なぞる項目なら止まらずに終える（前に撮ったときに決めてあるはず）。
+        """撮影する側が決める値が空。止まって訊く。
         `found` は選ぶ候補（candidates()）。条件つきの選択なら渡す。"""
-        if self.replay:
-            # ここで決めさせると、撮り直しのたびに手前の項目の判断をやり直すことになる
-            sys.exit(f"{self.dv.device} {self.name} の値が未定（{key}）。撮り直しは手前の項目を"
-                     f"なぞるので、前に撮ったときの値（devices.{self.dv.device}.inputs）が要る。"
-                     "前の回の値が残っていない。最初から撮り直す")
         if found is not None:
             return self.stop(f"入力が未定（{key}）",
                              f"入力が未定（{key}）。\nいま画面に見えている行（候補）:\n{candidates_text(found)}\n"
@@ -756,7 +779,7 @@ class Hand:
         # この手で止まったら、条件つきの選択で止まったことになる（--next を受け付ける）。
         # 止まった理由（値が未定、ID の書き間違い）によらない
         self.dv.ask["key"] = None
-        self.dv.ask["pick"] = bool(caller and picks and not self.replay)
+        self.dv.ask["pick"] = bool(caller and picks)
         if caller and given and picks:
             pattern = st.target if isinstance(st, (Enter, See)) else st.action.target
             prefix = pattern_prefix(pattern)
@@ -811,13 +834,7 @@ class Hand:
         呼び出し元が `--next` を付け続ける限り終わらない。送った回数は手ごとに `dv.ask["paged"]` に持ち、
         止まるときにマニフェストの `resume` に書く（止まっている間だけの状態なので、項目の記録には置かない）。
         先頭まで戻したときに0に戻す。
-
-        **撮り直しでは、送った位置から続けられない。** 止まったあと叩き直すと、テストケースの頭から
-        なぞり直すので、画面は先頭に戻っている。先頭まで戻してから、それまでに送った回数ぶん送り直し、
-        そこから1画面進める。
         """
-        if self.replay:
-            return self.missing(self.st.key)           # なぞる項目では選ばない（前に撮った値が要る）
         key = self.st.key
         paged = self.dv.ask["paged"]
         chain = chain_of(self.st, self.values)
@@ -831,12 +848,7 @@ class Hand:
             where = f"{parent} の中の左右" if parent is not None else "上下"
             if paged.get(key, 0) >= SEEK_SWIPES:
                 return self.not_found(seeker, cond, f"{where}に{SEEK_SWIPES}画面送っても端に着かない")
-            why = None
-            if self.dv.retake:
-                why = seeker.rewind(parent)
-                for _ in range(paged.get(key, 0)):
-                    why = why or seeker.advance(parent)
-            why = why or seeker.advance(parent)
+            why = seeker.advance(parent)
             paged[key] = paged.get(key, 0) + 1
             if why == "端":
                 return self.not_found(seeker, cond, f"{where}の端まで見た")
@@ -863,7 +875,7 @@ class Hand:
         return ("not_found", {"condition": cond, "reason": how_far})
 
 
-def run_item(dv, sec, row, replay, first=0):
+def run_item(dv, sec, row, first=0):
     """1項目を、`first` 手目から順に流す。("done", None) / ("failed", 理由) / ("stopped", 何手目か)。
 
     `row` はその項目を組んだ行（flowgen の render_case()）。`units` を順に、経路はそのまま、
@@ -871,44 +883,39 @@ def run_item(dv, sec, row, replay, first=0):
     """
     device, udid, logline = dv.device, dv.udid, dv.logline
     name = sec["name"]
-    dest = dv.scratch if replay else dv.shots
     dev = sec["devices"][device]
     dev["picked"] = {} if first == 0 else dev["picked"]
     # 前の手で決めた値。再開のときは、止まる前に決めたもの（picked）と撮影する側が決めたもの
     values = dict(dev["picked"], **{k: v for k, v in (dev.get("inputs") or {}).items() if v})
     notes = {}   # 同じ名前の行があったときの、何件目を押したか
     record = Record(dv.app)
-    if first and not replay:
+    if first:
         record.load(dv.fdir / row["flow"])       # 止まる前に流した手を記録から落とさない
     units = row["units"]
 
     def done(status):
-        if not replay:
-            record.write(dv.fdir / row["flow"])
+        record.write(dv.fdir / row["flow"])
         return status
 
     for k in range(first, len(units)):
         u = units[k]
         indexes = {}
         if u.kind == "hand":
-            status = Hand(dv, sec, k, u.step, values, indexes, notes, record, replay).play()
+            status = Hand(dv, sec, k, u.step, values, indexes, notes, record).play()
             if status:
                 return done(status)
-        body = flows_of.render_unit(dv.mp, dv.app, dv.clear, u, values, indexes, str(dest.resolve()))
+        body = flows_of.render_unit(dv.mp, dv.app, dv.clear, u, values, indexes, str(dv.shots.resolve()))
         if body is None:
             continue                                      # 親を決めただけ。流すものが無い
         record.flow(body)
         last = k == len(units) - 1
         run_name = name if last else f"{name}.{k + 1}"
         # 落ちたら、その run をもう一度は走らせない。1回目の出力をそのまま見せる
-        if sh(["run", udid, body, run_name, str(dest)], quiet=False) != 0:
+        if sh(["run", udid, body, run_name, str(dv.shots)], quiet=False) != 0:
             where = "" if last else f"（{k + 1}手目）"
             logline(f"{name} 撮影できず フローが失敗{where}")
             print(f"{name} 失敗{where}", file=sys.stderr)
             return done(("failed", f"フローが失敗{where}"))
-    if replay:
-        logline(f"{name} なぞった（撮り直しの前提）")
-        return done(("done", None))
     sh(["inspect", udid, name, str(dv.shots)])   # 出力は捨てる
     picked = ", ".join(f"{k}={v}" + (f"（{notes[k]}）" if k in notes else "")
                        for k, v in dev["picked"].items())
@@ -929,9 +936,8 @@ def forget(shots, sec):
 class DeviceRun:
     """1台ぶんを撮るときの置き場。run_item() に渡す。"""
 
-    def __init__(self, device, udid, shots, scratch, fdir, log, app, mp, clear, retake, ask=None):
+    def __init__(self, device, udid, shots, scratch, fdir, log, app, mp, clear, ask=None):
         self.device, self.udid, self.app, self.mp, self.clear = device, udid, app, mp, clear
-        self.retake = retake                          # 撮り直し中か（止まったときの案内が変わる）
         # 止まったときの問答。next: --next で叩き直された（まだ使っていない）。paged: 条件つきの選択で
         # 手ごとに送った回数（止まったら resume.ask に書き、叩き直したら読む）。key: 止まった手の鍵。
         # pick: 止まった手が条件つきの選択か（--next を受け付けるか）
@@ -950,14 +956,15 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, retake=N
     入力が未定で止まったら、{"from": 項目の名前, "part": 何手目か, "cursor": そのテストケースを
     組んだ状態, "ask": 止まったときの問い（項目・端末・鍵、条件つきの選択か、送った回数）} を返す（呼ぶ側が
     再開位置に書く）。`resume` も同じ形で、同じ状態からそのテストケースを組み直し、その項目のその手から
-    走らせる。`retake` を渡すと、その項目だけ撮り直す（`retake_runs()`）。`ask` は条件つきの選択の問答
+    走らせる。`retake` を渡すと、その項目のあるテストケースだけを頭から撮り直す（`retake_runs()`）。
+    撮り直しで止まったときも、叩き直すと続きから走る。`ask` は条件つきの選択の問答
     （DeviceRun）で、`--next` と、止まる前に送った回数を渡す。
     """
     out = manifest_path.parent
     shots, log = out / "shots" / device, out / f"progress_{device}.log"
     shots.mkdir(parents=True, exist_ok=True)
-    # なぞる項目の撮影先。証跡を上書きしないように、作業用の置き場に逃がす
-    scratch = HERE.parent / ".work" / "replay" / out.resolve().name / device
+    # 探すために画面を読む・送るときの置き場。証跡のダンプとぶつからないように分ける
+    scratch = HERE.parent / ".work" / "scratch" / out.resolve().name / device
     scratch.mkdir(parents=True, exist_ok=True)
     # 記録は端末ごとに置く。落ちたあとの繋ぎ方で、端末ごとに中身が変わる
     fdir = flow_dir / device
@@ -967,25 +974,22 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, retake=N
     mp = load_map(plan["repo"])
     cases = flows_of.flow_cases(plan)
     secs = {it["name"]: it for _, it in manifest_items.walk(manifest)}
-    if retake:
-        runs = retake_runs(cases, retake)
-    else:
-        runs = [(c, [(it, "shot") for it in c["items"]]) for c in cases]
+    runs = retake_runs(cases, retake) if retake else cases
     resume_name, resume_part = (resume["from"], resume["part"]) if resume else (None, 0)
     if resume_name:
-        at = next((k for k, (_, its) in enumerate(runs) if any(it["name"] == resume_name for it, _ in its)), None)
+        at = next((k for k, c in enumerate(runs) if any(it["name"] == resume_name for it in c["items"])), None)
         if at is None:
-            names = [it["name"] for _, its in runs for it, _ in its]
+            names = [it["name"] for c in runs for it in c["items"]]
             sys.exit(f"再開先 {resume_name} が見つからない。ある名前: {', '.join(names)}")
         runs = runs[at:]
 
-    dv = DeviceRun(device, udid, shots, scratch, fdir, log, plan["app"], mp, plan["clear_state"], bool(retake), ask)
+    dv = DeviceRun(device, udid, shots, scratch, fdir, log, plan["app"], mp, plan["clear_state"], ask)
     logline = dv.logline
 
-    if retake:
-        logline("--- 撮り直し: " + ", ".join(retake))
-    elif resume_name:
-        logline(f"--- 再開: {resume_name} の {resume_part + 1}手目から")
+    if resume_name:
+        logline(f"--- 再開: {resume_name} の {resume_part + 1}手目から" + ("（撮り直し）" if retake else ""))
+    elif retake:
+        logline("--- 撮り直し: " + ", ".join(retake) + "（テストケースの頭から全部）")
     else:
         # 最初から撮るときは、進捗ログと、マニフェストに無い名前の証跡と、前の回の記録を消す
         log.write_text("", encoding="utf-8")
@@ -1043,57 +1047,65 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, retake=N
     print(f"--- {device}（{udid}）")
     cursor = flows_of.Cursor.from_json(resume["cursor"]) if resume else flows_of.Cursor.fresh(mp)
     done, lost, absent = 0, [], []
-    for ci, (case, items) in enumerate(runs):
-        if retake:
+    for ci, case in enumerate(runs):
+        items = case["items"]
+        if retake and not (resume and ci == 0):
             cursor = flows_of.Cursor.fresh(mp)        # 撮り直しは、テストケースの頭で起動し直す
         for attempt in (0, 1):
             made, rows, end, start = build(case, cursor)
             if rows is None:
                 # 手順0では起点から組めた（マップが manifest.py の後で変わった）。このテストケースは撮れない
                 msg = "; ".join(m for _, m in made.problems)
-                for it, mode in items:
+                for it in items:
+                    if settled(secs[it["name"]], device):
+                        continue
                     lost.append(f"{device} {it['name']}")
                     logline(f"{it['name']} 撮影できず フローが組めない（{msg}）")
-                    if mode == "shot":
-                        forget(shots, secs[it["name"]])
-                        unexpected(secs[it["name"]], "failed", f"フローが組めない（{msg}）")
+                    forget(shots, secs[it["name"]])
+                    unexpected(secs[it["name"]], "failed", f"フローが組めない（{msg}）")
                 cursor = flows_of.Cursor.fresh(mp)
                 break
             got, missed, failed_at, failed_why = 0, [], None, "落ちた"
             skipping = resume_name is not None       # 再開: 止まった項目の手前はもう撮ってある
-            for n, (it, mode) in enumerate(items):
+            for n, it in enumerate(items):
                 name = it["name"]
                 if skipping and name != resume_name:
                     continue
                 skipping = False
-                sec, replay = secs[name], mode == "replay"
+                sec = secs[name]
+                if retake and settled(sec, device):
+                    # 撮れないと分かって判定を付けた項目。この端末では流さず、証跡と判定にも触らない。
+                    # 後ろの項目はこの項目を当てにしているので、落ちたときと同じく飛ばす
+                    logline(f"{name} 撮影せず 撮れないと判定済み（撮り直しでは流さない）")
+                    if failed_at is None:
+                        failed_at, failed_why = name, "撮れないと判定済みだった"
+                    continue
                 continuing = name == resume_name and resume_part
-                if not replay and not continuing:
+                if not continuing:
                     # 撮れずに終わっても前の回の証跡と OK が残らないように、先に消す
                     forget(shots, sec)
-                if not replay:
-                    unexpected(sec, None)
+                unexpected(sec, None)
                 if failed_at is not None:
-                    if failed_why == "落ちた":
+                    if failed_why != "条件に合う要素が無かった":
                         missed.append(f"{device} {name}")
                     logline(f"{name} 撮影できず 同じテストケースの {failed_at} が{failed_why}ので飛ばした")
-                    if not replay and failed_why == "落ちた":
-                        unexpected(sec, "skipped", f"同じテストケースの {failed_at} が落ちた")
-                    elif not replay:
+                    if failed_why != "条件に合う要素が無かった":
+                        unexpected(sec, "skipped", f"同じテストケースの {failed_at} が{failed_why}")
+                    else:
                         # 前提の要素が無かった巻き添え。撮る側の失敗ではないので、撮り直しに拾わせない
                         sec["devices"][device]["not_found"] = {
                             "after": failed_at, "reason": f"同じテストケースの {failed_at} で条件に合う要素が無かった"}
                         absent.append(f"{device} {name}（{failed_at} の巻き添え）")
                     continue
-                status = run_item(dv, sec, rows[name], replay, resume_part if continuing else 0)
+                status = run_item(dv, sec, rows[name], resume_part if continuing else 0)
                 if status[0] == "stopped":
-                    rest = len(items) - n + sum(len(its) for _, its in runs[ci + 1:])
+                    rest = len(items) - n + sum(len(c["items"]) for c in runs[ci + 1:])
                     print(f"{device} のここから先の {rest}件はまだ撮っていない。")
                     # 止まったときの問い。叩き直すときの返事（--value / --next）を、どこに受けるか
                     ask = {"item": name, "device": device, "key": dv.ask["key"], "pick": dv.ask["pick"],
                            "paged": dv.ask["paged"]}
                     return {"from": name, "part": status[1], "cursor": start.to_json(), "ask": ask}, done + got, lost
-                if status[0] == "not_found" and not replay:
+                if status[0] == "not_found":
                     # 探しきって無かった。撮る側の失敗ではないので unexpected にしない（撮り直さない）。
                     # 後ろの項目はこの項目を当てにしているので、落ちたときと同じく飛ばす
                     failed_at, failed_why = name, "条件に合う要素が無かった"
@@ -1101,14 +1113,13 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, retake=N
                     absent.append(f"{device} {name}（条件「{status[1]['condition']}」。{status[1]['reason']}）")
                 elif status[0] == "failed":
                     failed_at = name
-                    missed.append(f"{device} {name}" + ("（なぞる途中で落ちた）" if replay else ""))
-                    if not replay:
-                        unexpected(sec, "failed", status[1])
-                elif not replay:
+                    missed.append(f"{device} {name}")
+                    unexpected(sec, "failed", status[1])
+                else:
                     got += 1
             resume_name, resume_part = None, 0
             done += got
-            if failed_at == items[0][0]["name"] and failed_why == "落ちた" and start.recovered and attempt == 0:
+            if failed_at == items[0]["name"] and failed_why == "落ちた" and start.recovered and attempt == 0:
                 # 前が落ちた地点から繋いだ頭の項目が落ちた。繋ぎ方（後始末の reset、落ちた画面からの
                 # 経路）が悪かったのかもしれないので、起動し直してこのテストケースをもう1回だけ走らせる
                 logline(f"{failed_at} 繋いだ頭で落ちた。起動し直してテストケース「{case['title']}」を走らせ直す")
@@ -1125,16 +1136,23 @@ def run_device(manifest, manifest_path, flow_dir, device, udid, resume, retake=N
     return None, done, lost
 
 
+def unshot(it):
+    """どれかの端末で撮れなかった記録があり、撮り直しに拾う項目か。判定を付けて外した端末の記録
+    （`settled` の印。begin_retake()）は数えない。"""
+    return any((d or {}).get("unexpected") and not d["unexpected"].get("settled")
+               for d in (it.get("devices") or {}).values())
+
+
 def to_retake(manifest):
     """撮り直す項目。(フローで撮り直す名前, 探索で撮る名前)。
 
     判定が `RETAKE` の項目と、どれかの端末で撮れなかった（`unexpected` の付いた）項目のうち
     判定がまだ（`PENDING`）のもの。判定が付いたもの（探索で撮った、`SKIP` にした）は拾わない。
+    判定が付いたあと、ほかの端末で撮り直して `PENDING` に戻ったもの（`unexpected` に `settled` の
+    印がある。begin_retake()）も、その端末の記録では拾わない。
     """
-    def lost(it):
-        return any((d or {}).get("unexpected") for d in (it.get("devices") or {}).values())
     marked = [it for _, it in manifest_items.walk(manifest)
-              if it.get("result") == "RETAKE" or (it.get("result") == "PENDING" and lost(it))]
+              if it.get("result") == "RETAKE" or (it.get("result") == "PENDING" and unshot(it))]
     return ([it["name"] for it in marked if it.get("flow")],
             [it["name"] for it in marked if not it.get("flow")])
 
@@ -1212,40 +1230,14 @@ def main():
         if not retake and explore:
             return
         retake = retake or None
-
-    if retake:
-        # 撮り直し。止まったら、同じコマンドでまたテストケースの頭から走らせる（止まった手からは続けない）
-        finished = list(state.get("done") or [])
-        manifest["resume"] = {"retake": retake, "done": finished}
-        save(manifest_path, manifest)
-        total, lost_all = 0, []
-        for d, u in pairs:
-            if d in finished:
-                print(f"--- {d} は撮り直し終えている。飛ばす")
-                continue
-            stopped, done, lost = run_device(manifest, manifest_path, flow_dir, d, u, None, retake, ask)
-            ask = None                                    # 撮り直しで止まるのは1台ずつ。次の端末には渡さない
-            total += done
-            lost_all += lost
-            if stopped:
-                manifest["resume"]["ask"] = stopped["ask"]
-                save(manifest_path, manifest)
-                print("返事（--value / --next）を付けて同じコマンドを叩き直す。撮り直す項目のテストケースの頭からなぞり直す。")
-                sys.exit(1)
-            finished.append(d)
-            manifest["resume"]["done"] = finished
+        if retake:
+            # 撮り直しを始める。止まって叩き直したときは、ここを通らない（この回で決めた値を消さない）
+            begin_retake(manifest, flows_of.flow_cases(flows_of.plan_of(manifest)), retake)
+            manifest["resume"] = {"retake": retake, "done": []}
             save(manifest_path, manifest)
-        manifest.pop("resume", None)
-        save(manifest_path, manifest)
-        print(f"\nこの実行で {total}件を撮り直した（{', '.join(retake)}）")
-        if lost_all:
-            print(f"\n撮れなかった {len(lost_all)}件:", file=sys.stderr)
-            for line in lost_all:
-                print("  " + line, file=sys.stderr)
-            sys.exit(1)
-        return
 
-    # 前の実行が未定で止まっていれば、撮り終えた端末は飛ばし、止まった端末の続きから走る
+    # 前の実行が未定で止まっていれば、撮り終えた端末は飛ばし、止まった端末の続きから走る。
+    # 撮り直しも同じ（止まった時点でアプリはその画面に居る）
     finished = list(state.get("done") or [])
     total, lost_all = 0, []
     for d, u in pairs:
@@ -1253,22 +1245,36 @@ def main():
             print(f"--- {d} は撮り終えている。飛ばす")
             continue
         resume = state if state.get("device") == d else None
-        stopped, done, lost = run_device(manifest, manifest_path, flow_dir, d, u, resume, None,
+        stopped, done, lost = run_device(manifest, manifest_path, flow_dir, d, u, resume, retake,
                                          ask if resume else None)
         total += done
         lost_all += lost
         if stopped:
-            manifest["resume"] = dict(stopped, done=finished, device=d)
+            manifest["resume"] = dict(stopped, done=finished, device=d, **({"retake": retake} if retake else {}))
             save(manifest_path, manifest)
             sys.exit(1)
         finished.append(d)
+        if retake:
+            # 撮り直しでは、撮る前に判定を PENDING に戻すので RETAKE の印が消える。端末ごとに残す
+            manifest["resume"] = {"retake": retake, "done": finished}
+            save(manifest_path, manifest)
     manifest.pop("resume", None)
     save(manifest_path, manifest)
 
-    skipped = [it.get("name") for _, it in manifest_items.walk(manifest) if not it.get("flow")]
-    print(f"\nこの実行で {total}件を撮った")
-    if skipped:
-        print(f"飛ばした（フローが無い。探索で撮る）: {', '.join(skipped)}")
+    if retake:
+        print(f"\nこの実行で {total}件を撮り直した（撮り直す項目: {', '.join(retake)}。そのテストケースの頭から全部）")
+        cases = retake_runs(flows_of.flow_cases(flows_of.plan_of(manifest)), retake)
+        secs = {it["name"]: it for _, it in manifest_items.walk(manifest)}
+        # まだ撮れなかった記録のある項目は、判定より先に retaker に回るので並べない（下の「撮れなかった」に出る）
+        again = [it["name"] for c in cases for it in c["items"]
+                 if secs[it["name"]]["result"] == "PENDING" and not unshot(secs[it["name"]])]
+        if again:
+            print(f"判定し直す項目: {', '.join(again)}")
+    else:
+        skipped = [it.get("name") for _, it in manifest_items.walk(manifest) if not it.get("flow")]
+        print(f"\nこの実行で {total}件を撮った")
+        if skipped:
+            print(f"飛ばした（フローが無い。探索で撮る）: {', '.join(skipped)}")
     if lost_all:
         print(f"\n撮れなかった {len(lost_all)}件:", file=sys.stderr)
         for line in lost_all:

@@ -116,7 +116,7 @@ python3 ~/.claude/skills/sim-test-report/scripts/run_flows.py \
   <出力先>/manifest.json
 ```
 
-LLM が値を決める操作で止まったら、値を書いて同じコマンドを叩けば続きを走る（手順2）。判定で撮り直し（`RETAKE`）が付いた項目があれば、同じコマンドでそれだけを撮り直す。詳しくは `run_flows.py` 冒頭の docstring を参照。
+LLM が値を決める操作で止まったら、値を書いて同じコマンドを叩けば続きを走る（手順2）。判定で撮り直し（`RETAKE`）が付いた項目があれば、同じコマンドでその項目のあるテストケースを頭から撮り直す。詳しくは `run_flows.py` 冒頭の docstring を参照。
 
 ### 4. 判定を書き込む（LLM / `evidence-judge`）
 
