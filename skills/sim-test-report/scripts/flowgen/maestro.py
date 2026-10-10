@@ -123,21 +123,40 @@ def add_reveals(steps, state=None):
     - その画面で押す・見る・`scroll` をしたら、スクロールされているかもしれない
     - 起動し直したときと、push / modal で開いた画面は上端から始まる
     - 戻る（back / dismiss）で戻った画面とタブの先は、前の位置のまま
+
+    **1手ずつ流すステップには `up` を書く。偽になるのは、modal で開いて（自動表示で出て）から、まだ
+    スクロールしていない画面だけ。** run_flows.py は、`up` が偽なら上へ送らない。上の端に着いたかは
+    送っても変わらないことでしか分からず、上端で下へスワイプすると、モーダルのシートはシートごと閉じる。
+    push で開いた画面は上端から始まるとみなしても閉じないので、1手ずつ流す手では今までどおり上下を探す
+    （開くと下端にいる画面や、前の位置を覚えている画面でも見つかる）。テストケースをまたいでは持ち越さない
+    （`state` に書かない）ので、前のテストケースで開いたシートの上から始まる手は、上へも探す（シートを
+    閉じうる、今までの動き）。
     """
     out, state = [], state if state is not None else ScrollState()
+    sheets = set()      # modal で開いて（自動表示で出て）から、まだスクロールしていない画面
     for st in steps:
+        if isinstance(st, (Enter, See, Act)) and st.key is not None:
+            st.up = st.screen not in sheets
         if isinstance(st, Restart):
             state.clear()
+            sheets.clear()
         elif isinstance(st, Await):
             state.forget(st.to)
+            sheets.add(st.to)
         elif isinstance(st, (Enter, See)):
             state.mark(st.screen)
+            sheets.discard(st.screen)
         elif isinstance(st, Act):
             if st.key is None and not isinstance(st.action, (Scroll, HideKeyboard)):
                 out.append(Reveal(st, state.is_scrolled(st.screen)))
             state.mark(st.screen)
+            sheets.discard(st.screen)
             if st.arrive and st.arrive.via in FRESH:
                 state.forget(st.to)
+                if st.arrive.via == "modal":
+                    sheets.add(st.to)
+                else:
+                    sheets.discard(st.to)
         out.append(st)
     return out
 
